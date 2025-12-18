@@ -7,6 +7,7 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QFormLayout>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
@@ -15,6 +16,7 @@
 #include <QtWidgets/QWidget>
 
 #include <cmath>
+#include <functional>
 #include <limits>
 
 namespace {
@@ -36,6 +38,53 @@ public:
         distanceInput_ = new QLineEdit(this);
         distanceInput_->setPlaceholderText(QStringLiteral("Например, 1.0"));
         distanceInput_->setValidator(validator);
+
+        auto *presetsLayout = new QHBoxLayout();
+
+        const auto applyPrimary = [this](const StellarParameters &parameters) {
+            setInputValue(radiusInput_, parameters.radiusInSolarRadii);
+            setInputValue(temperatureInput_, parameters.temperatureKelvin);
+            setInputValue(distanceInput_, parameters.distanceInAU);
+        };
+
+        const auto applySecondary = [this](const std::optional<StellarParameters> &parameters) {
+            if (!parameters) {
+                secondStarCheckBox_->setChecked(false);
+                secondaryRadiusInput_->clear();
+                secondaryTemperatureInput_->clear();
+                secondaryDistanceInput_->clear();
+                return;
+            }
+
+            secondStarCheckBox_->setChecked(true);
+            setInputValue(secondaryRadiusInput_, parameters->radiusInSolarRadii);
+            setInputValue(secondaryTemperatureInput_, parameters->temperatureKelvin);
+            setInputValue(secondaryDistanceInput_, parameters->distanceInAU);
+        };
+
+        const auto addPresetButton = [this, presetsLayout](const QString &text,
+                                                           const std::function<void()> &handler) {
+            auto *button = new QPushButton(text, this);
+            connect(button, &QPushButton::clicked, this, handler);
+            presetsLayout->addWidget(button);
+        };
+
+        addPresetButton(QStringLiteral("Солнце"), [applyPrimary, applySecondary]() {
+            applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
+            applySecondary(std::nullopt);
+        });
+
+        addPresetButton(QStringLiteral("Сладкое Небо"), [applyPrimary, applySecondary]() {
+            applyPrimary(StellarParameters{0.3761, 2576.0, 1.0});
+            applySecondary(StellarParameters{0.3741, 2349.0, 1.0});
+        });
+
+        addPresetButton(QStringLiteral("Пусто"), [this, applyPrimary, applySecondary]() {
+            radiusInput_->clear();
+            temperatureInput_->clear();
+            distanceInput_->clear();
+            applySecondary(std::nullopt);
+        });
 
         auto *primaryFormLayout = new QFormLayout();
         primaryFormLayout->addRow(QStringLiteral("Радиус звезды (в R☉):"), radiusInput_);
@@ -76,6 +125,7 @@ public:
         resultLabel_->setWordWrap(true);
 
         auto *layout = new QVBoxLayout(this);
+        layout->addLayout(presetsLayout);
         layout->addLayout(primaryFormLayout);
         layout->addWidget(secondStarCheckBox_);
         layout->addWidget(secondaryInputsWidget_);
@@ -163,6 +213,10 @@ private:
 
     QLabel *resultLabel_ = nullptr;
     int precision_ = kDefaultPrecision;
+
+    void setInputValue(QLineEdit *input, double value) {
+        input->setText(QString::number(value));
+    }
 };
 }  // namespace
 
