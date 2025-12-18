@@ -1,10 +1,16 @@
 #include "solar_calculator.h"
 
-#include <QtCore/QCoreApplication>
-#include <QtCore/QCommandLineOption>
-#include <QtCore/QCommandLineParser>
-#include <QtCore/QString>
+#include <QtWidgets/QApplication>
+#include <QtWidgets/QFormLayout>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QMessageBox>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QVBoxLayout>
+#include <QtWidgets/QWidget>
+#include <QtGui/QDoubleValidator>
 #include <cmath>
+#include <limits>
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
@@ -17,135 +23,98 @@ double SolarCalculator::solarConstant(const StellarParameters &parameters) {
     const double radiusMeters = parameters.radiusInSolarRadii * kSolarRadiusMeters;
     const double distanceMeters = parameters.distanceInAU * kAstronomicalUnitMeters;
 
+    // Полная светимость звезды по закону Стефана — Больцмана: L = 4πR²σT⁴.
     const double luminosity = 4.0 * kPi * radiusMeters * radiusMeters *
                               kStefanBoltzmannConstant *
                               std::pow(parameters.temperatureKelvin, 4.0);
 
+    // Плотность потока уменьшается пропорционально площади сферы с радиусом расстояния
+    // до планеты: F = L / (4πd²).
     return luminosity / (4.0 * kPi * distanceMeters * distanceMeters);
 }
 
-ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
-                                                  QTextStream &output,
-                                                  StellarParameters &parameters) {
-    QCommandLineParser parser;
-    parser.setApplicationDescription(
-        QStringLiteral("Вычисление солнечной постоянной по параметрам звезды."));
-    parser.addHelpOption();
+class SolarCalculatorWidget : public QWidget {
+public:
+    explicit SolarCalculatorWidget(QWidget *parent = nullptr) : QWidget(parent) {
+        setWindowTitle(QStringLiteral("Солнечная постоянная"));
 
-    QCommandLineOption radiusOption({QStringLiteral("r"), QStringLiteral("radius")},
-                                   QStringLiteral("Радиус звезды в солнечных радиусах."),
-                                   QStringLiteral("value"));
-    QCommandLineOption temperatureOption({QStringLiteral("t"), QStringLiteral("temperature")},
-                                         QStringLiteral("Температура поверхности в К."),
-                                         QStringLiteral("value"));
-    QCommandLineOption distanceOption({QStringLiteral("d"), QStringLiteral("distance")},
-                                      QStringLiteral("Расстояние до планеты в а.е."),
-                                      QStringLiteral("value"));
+        auto *validator = new QDoubleValidator(0.0001, std::numeric_limits<double>::max(), 6, this);
+        validator->setNotation(QDoubleValidator::StandardNotation);
 
-    parser.addOptions({radiusOption, temperatureOption, distanceOption});
-    parser.process(app);
+        radiusInput_ = new QLineEdit(this);
+        radiusInput_->setPlaceholderText(QStringLiteral("Например, 1.0"));
+        radiusInput_->setValidator(validator);
 
-    const bool anySet = parser.isSet(radiusOption) || parser.isSet(temperatureOption) ||
-                        parser.isSet(distanceOption);
-    if (!anySet) {
-        return ArgumentsParseResult::None;
+        temperatureInput_ = new QLineEdit(this);
+        temperatureInput_->setPlaceholderText(QStringLiteral("Например, 5772"));
+        temperatureInput_->setValidator(validator);
+
+        distanceInput_ = new QLineEdit(this);
+        distanceInput_->setPlaceholderText(QStringLiteral("Например, 1.0"));
+        distanceInput_->setValidator(validator);
+
+        auto *formLayout = new QFormLayout();
+        formLayout->addRow(QStringLiteral("Радиус звезды, R☉:"), radiusInput_);
+        formLayout->addRow(QStringLiteral("Температура, K:"), temperatureInput_);
+        formLayout->addRow(QStringLiteral("Расстояние, а.е.:"), distanceInput_);
+
+        auto *calculateButton = new QPushButton(QStringLiteral("Рассчитать"), this);
+        connect(calculateButton, &QPushButton::clicked, this, &SolarCalculatorWidget::onCalculateRequested);
+
+        resultLabel_ = new QLabel(QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."), this);
+        resultLabel_->setWordWrap(true);
+
+        auto *layout = new QVBoxLayout(this);
+        layout->addLayout(formLayout);
+        layout->addWidget(calculateButton);
+        layout->addWidget(resultLabel_);
+
+        setLayout(layout);
+        resize(380, 220);
     }
 
-    const auto parsePositive = [&](const QCommandLineOption &option, double &target,
-                                   const QString &name) -> bool {
-        const QString valueString = parser.value(option);
+private:
+    void onCalculateRequested() {
         bool ok = false;
-        const double parsed = valueString.toDouble(&ok);
-        if (!ok || !std::isfinite(parsed) || parsed <= 0.0) {
-            output << "Значение для " << name
-                   << " должно быть положительным числом." << Qt::endl;
-            return false;
+        const double radius = radiusInput_->text().toDouble(&ok);
+        if (!ok || radius <= 0.0) {
+            showInputError(QStringLiteral("Укажите положительный радиус звезды."));
+            return;
         }
-        target = parsed;
-        return true;
-    };
 
-    if (!parser.isSet(radiusOption) || !parser.isSet(temperatureOption) ||
-        !parser.isSet(distanceOption)) {
-        output << "Для неинтерактивного режима укажите все параметры: --radius,"
-               << " --temperature и --distance." << Qt::endl;
-        return ArgumentsParseResult::Failure;
-    }
-
-    double radius = 0.0;
-    double temperature = 0.0;
-    double distance = 0.0;
-
-    if (!parsePositive(radiusOption, radius, QStringLiteral("радиуса звезды")) ||
-        !parsePositive(temperatureOption, temperature, QStringLiteral("температуры")) ||
-        !parsePositive(distanceOption, distance, QStringLiteral("расстояния"))) {
-        return ArgumentsParseResult::Failure;
-    }
-
-    parameters = StellarParameters{radius, temperature, distance};
-    return ArgumentsParseResult::Success;
-}
-
-void promptAndComputeSolarConstant(QTextStream &input, QTextStream &output) {
-    const auto readValue = [&](const QString &prompt, double &value) -> bool {
-        output << prompt << Qt::endl;
-        output.flush();
-        input >> value;
-
-        if (input.status() != QTextStream::Ok || !std::isfinite(value) || value <= 0.0) {
-            output << "Некорректный ввод: требуется положительное число." << Qt::endl;
-            output.flush();
-            return false;
+        const double temperature = temperatureInput_->text().toDouble(&ok);
+        if (!ok || temperature <= 0.0) {
+            showInputError(QStringLiteral("Укажите положительную температуру."));
+            return;
         }
-        return true;
-    };
 
-    double radius = 0.0;
-    if (!readValue("Введите радиус звезды в солнечных радиусах:", radius)) {
-        return;
+        const double distance = distanceInput_->text().toDouble(&ok);
+        if (!ok || distance <= 0.0) {
+            showInputError(QStringLiteral("Укажите положительное расстояние."));
+            return;
+        }
+
+        const StellarParameters parameters{radius, temperature, distance};
+        const double flux = SolarCalculator::solarConstant(parameters);
+
+        resultLabel_->setText(
+            QStringLiteral("Солнечная постоянная у планеты: %1 Вт/м²").arg(flux, 0, 'g', 12));
     }
 
-    double temperature = 0.0;
-    if (!readValue("Введите температуру поверхности в кельвинах:", temperature)) {
-        return;
+    void showInputError(const QString &message) {
+        QMessageBox::warning(this, QStringLiteral("Некорректный ввод"), message);
     }
 
-    double distance = 0.0;
-    if (!readValue("Введите расстояние до планеты в астрономических единицах:", distance)) {
-        return;
-    }
-
-    const StellarParameters parameters{radius, temperature, distance};
-    const double flux = SolarCalculator::solarConstant(parameters);
-
-    output << "Солнечная постоянная у планеты: " << flux << " Вт/м^2" << Qt::endl;
-    output.flush();
-}
+    QLineEdit *radiusInput_ = nullptr;
+    QLineEdit *temperatureInput_ = nullptr;
+    QLineEdit *distanceInput_ = nullptr;
+    QLabel *resultLabel_ = nullptr;
+};
 
 int main(int argc, char *argv[]) {
-    QCoreApplication app(argc, argv);
-    QTextStream input(stdin);
-    QTextStream output(stdout);
-
-    StellarParameters parameters{};
-    const ArgumentsParseResult argsResult =
-        parseParametersFromArguments(app, output, parameters);
-
-    switch (argsResult) {
-    case ArgumentsParseResult::Success: {
-        const double flux = SolarCalculator::solarConstant(parameters);
-        output << "Солнечная постоянная у планеты: " << flux << " Вт/м^2"
-               << Qt::endl;
-        output.flush();
-        return 0;
-    }
-    case ArgumentsParseResult::Failure:
-        return 1;
-    case ArgumentsParseResult::None:
-        break;
-    }
-
-    promptAndComputeSolarConstant(input, output);
-    return 0;
+    QApplication app(argc, argv);
+    SolarCalculatorWidget widget;
+    widget.show();
+    return app.exec();
 }
 
