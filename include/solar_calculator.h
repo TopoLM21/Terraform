@@ -1,9 +1,6 @@
 #pragma once
 
-#include <QtCore/QTextStream>
-#include <QtCore/QCoreApplication>
-
-constexpr int kDefaultPrecision = 6;
+#include <optional>
 
 struct StellarParameters {
     double radiusInSolarRadii;
@@ -11,20 +8,13 @@ struct StellarParameters {
     double distanceInAU;
 };
 
+struct BinarySystemParameters {
+    StellarParameters primary;
+    std::optional<StellarParameters> secondary;
+};
+
 class SolarCalculator {
 public:
     static double solarConstant(const StellarParameters &parameters);
+    static double solarConstant(const BinarySystemParameters &parameters);
 };
-
-enum class ArgumentsParseResult {
-    None,
-    Success,
-    Failure,
-};
-
-ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
-                                                  QTextStream &output,
-                                                  StellarParameters &parameters,
-                                                  int &precision);
-void promptAndComputeSolarConstant(QTextStream &input, QTextStream &output,
-                                   int precision);
