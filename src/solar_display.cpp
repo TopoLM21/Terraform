@@ -89,7 +89,7 @@ public:
         auto *primaryFormLayout = new QFormLayout();
         primaryFormLayout->addRow(QStringLiteral("Радиус звезды (в R☉):"), radiusInput_);
         primaryFormLayout->addRow(QStringLiteral("Температура поверхности (K):"), temperatureInput_);
-        primaryFormLayout->addRow(QStringLiteral("Расстояние до планеты (а.е.):"), distanceInput_);
+        primaryFormLayout->addRow(QStringLiteral("Расстояние от барицентра до планеты (а.е.):"), distanceInput_);
 
         secondStarCheckBox_ = new QCheckBox(QStringLiteral("Добавить вторую звезду"), this);
 
@@ -108,14 +108,19 @@ public:
         auto *secondaryFormLayout = new QFormLayout();
         secondaryFormLayout->addRow(QStringLiteral("Радиус второй звезды (в R☉):"), secondaryRadiusInput_);
         secondaryFormLayout->addRow(QStringLiteral("Температура второй звезды (K):"), secondaryTemperatureInput_);
-        secondaryFormLayout->addRow(QStringLiteral("Расстояние до планеты от второй звезды (а.е.):"),
-                                    secondaryDistanceInput_);
+        secondaryFormLayout->addRow(
+            QStringLiteral("Расстояние от барицентра до планеты для второй звезды (а.е.):"),
+            secondaryDistanceInput_);
 
         secondaryInputsWidget_ = new QWidget(this);
         secondaryInputsWidget_->setLayout(secondaryFormLayout);
         secondaryInputsWidget_->setEnabled(false);
+        secondaryInputsWidget_->setVisible(false);
 
-        connect(secondStarCheckBox_, &QCheckBox::toggled, secondaryInputsWidget_, &QWidget::setEnabled);
+        connect(secondStarCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+            secondaryInputsWidget_->setEnabled(checked);
+            secondaryInputsWidget_->setVisible(checked);
+        });
 
         auto *calculateButton = new QPushButton(QStringLiteral("Рассчитать"), this);
         connect(calculateButton, &QPushButton::clicked, this, [this]() { onCalculateRequested(); });
@@ -189,7 +194,8 @@ private:
 
         const double distance = distanceInput->text().toDouble(&ok);
         if (!ok || distance <= 0.0) {
-            showInputError(QStringLiteral("Укажите положительное расстояние до планеты для %1.").arg(label));
+            showInputError(
+                QStringLiteral("Укажите положительное расстояние от барицентра до планеты для %1.").arg(label));
             return false;
         }
 
@@ -236,7 +242,7 @@ ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
                                          QStringLiteral("Температура поверхности в К."),
                                          QStringLiteral("value"));
     QCommandLineOption distanceOption({QStringLiteral("d"), QStringLiteral("distance")},
-                                      QStringLiteral("Расстояние до планеты в а.е."),
+                                      QStringLiteral("Расстояние от барицентра до планеты в а.е."),
                                       QStringLiteral("value"));
     QCommandLineOption radius2Option({QStringLiteral("r2"), QStringLiteral("radius2")},
                                      QStringLiteral("Радиус второй звезды в солнечных радиусах."),
@@ -245,7 +251,8 @@ ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
                                           QStringLiteral("Температура второй звезды в К."),
                                           QStringLiteral("value"));
     QCommandLineOption distance2Option({QStringLiteral("d2"), QStringLiteral("distance2")},
-                                       QStringLiteral("Расстояние до планеты от второй звезды в а.е."),
+                                       QStringLiteral(
+                                           "Расстояние от барицентра до планеты для второй звезды в а.е."),
                                        QStringLiteral("value"));
     QCommandLineOption precisionOption({QStringLiteral("p"), QStringLiteral("precision")},
                                        QStringLiteral("Количество значащих цифр в выводе."),
@@ -348,11 +355,11 @@ void promptAndComputeSolarConstant(QTextStream &input, QTextStream &output, int 
         return;
     }
 
-    output << "Введите расстояние до планеты (в а.е.):" << Qt::endl;
+    output << "Введите расстояние от барицентра до планеты (в а.е.):" << Qt::endl;
     output.flush();
     input >> parameters.primary.distanceInAU;
     if (input.status() != QTextStream::Ok || parameters.primary.distanceInAU <= 0.0) {
-        output << "Расстояние должно быть положительным числом." << Qt::endl;
+        output << "Расстояние от барицентра должно быть положительным числом." << Qt::endl;
         return;
     }
 
@@ -384,11 +391,11 @@ void promptAndComputeSolarConstant(QTextStream &input, QTextStream &output, int 
             return;
         }
 
-        output << "Введите расстояние до планеты от второй звезды (в а.е.):" << Qt::endl;
+        output << "Введите расстояние от барицентра до планеты для второй звезды (в а.е.):" << Qt::endl;
         output.flush();
         input >> parameters.secondary->distanceInAU;
         if (input.status() != QTextStream::Ok || parameters.secondary->distanceInAU <= 0.0) {
-            output << "Расстояние от второй звезды должно быть положительным числом." << Qt::endl;
+            output << "Расстояние от барицентра для второй звезды должно быть положительным числом." << Qt::endl;
             return;
         }
     }
