@@ -8,6 +8,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 add_executable(solar_constant
     src/solar_calculator.cpp
+    src/solar_display.cpp
 )
 
 target_include_directories(solar_constant PRIVATE include)
@@ -20,4 +21,3 @@ else()
 endif()
 
 install(TARGETS solar_constant)
-
