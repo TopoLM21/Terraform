@@ -25,8 +25,9 @@ double SolarCalculator::solarConstant(const StellarParameters &parameters) {
 }
 
 ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
-                                                  QTextStream &output,
-                                                  StellarParameters &parameters) {
+                                                 QTextStream &output,
+                                                 StellarParameters &parameters,
+                                                 int &precision) {
     QCommandLineParser parser;
     parser.setApplicationDescription(
         QStringLiteral("Вычисление солнечной постоянной по параметрам звезды."));
@@ -39,17 +40,15 @@ ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
                                          QStringLiteral("Температура поверхности в К."),
                                          QStringLiteral("value"));
     QCommandLineOption distanceOption({QStringLiteral("d"), QStringLiteral("distance")},
-                                      QStringLiteral("Расстояние до планеты в а.е."),
-                                      QStringLiteral("value"));
+                                     QStringLiteral("Расстояние до планеты в а.е."),
+                                     QStringLiteral("value"));
+    QCommandLineOption precisionOption({QStringLiteral("p"), QStringLiteral("precision")},
+                                       QStringLiteral("Количество значащих цифр в выводе."),
+                                       QStringLiteral("digits"),
+                                       QString::number(kDefaultPrecision));
 
-    parser.addOptions({radiusOption, temperatureOption, distanceOption});
+    parser.addOptions({radiusOption, temperatureOption, distanceOption, precisionOption});
     parser.process(app);
-
-    const bool anySet = parser.isSet(radiusOption) || parser.isSet(temperatureOption) ||
-                        parser.isSet(distanceOption);
-    if (!anySet) {
-        return ArgumentsParseResult::None;
-    }
 
     const auto parsePositive = [&](const QCommandLineOption &option, double &target,
                                    const QString &name) -> bool {
@@ -64,6 +63,25 @@ ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
         target = parsed;
         return true;
     };
+
+    const bool parametersProvided = parser.isSet(radiusOption) ||
+                                    parser.isSet(temperatureOption) ||
+                                    parser.isSet(distanceOption);
+    const bool precisionProvided = parser.isSet(precisionOption);
+
+    if (precisionProvided) {
+        bool ok = false;
+        const int parsedPrecision = parser.value(precisionOption).toInt(&ok);
+        if (!ok || parsedPrecision <= 0 || parsedPrecision > 15) {
+            output << "Точность вывода должна быть целым числом от 1 до 15." << Qt::endl;
+            return ArgumentsParseResult::Failure;
+        }
+        precision = parsedPrecision;
+    }
+
+    if (!parametersProvided) {
+        return ArgumentsParseResult::None;
+    }
 
     if (!parser.isSet(radiusOption) || !parser.isSet(temperatureOption) ||
         !parser.isSet(distanceOption)) {
@@ -86,7 +104,11 @@ ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
     return ArgumentsParseResult::Success;
 }
 
-void promptAndComputeSolarConstant(QTextStream &input, QTextStream &output) {
+void promptAndComputeSolarConstant(QTextStream &input, QTextStream &output,
+                                   const int precision) {
+    output.setRealNumberPrecision(precision);
+    output.setRealNumberNotation(QTextStream::SmartNotation);
+
     const auto readValue = [&](const QString &prompt, double &value) -> bool {
         output << prompt << Qt::endl;
         output.flush();
@@ -128,11 +150,14 @@ int main(int argc, char *argv[]) {
     QTextStream output(stdout);
 
     StellarParameters parameters{};
+    int precision = kDefaultPrecision;
     const ArgumentsParseResult argsResult =
-        parseParametersFromArguments(app, output, parameters);
+        parseParametersFromArguments(app, output, parameters, precision);
 
     switch (argsResult) {
     case ArgumentsParseResult::Success: {
+        output.setRealNumberPrecision(precision);
+        output.setRealNumberNotation(QTextStream::SmartNotation);
         const double flux = SolarCalculator::solarConstant(parameters);
         output << "Солнечная постоянная у планеты: " << flux << " Вт/м^2"
                << Qt::endl;
@@ -145,7 +170,6 @@ int main(int argc, char *argv[]) {
         break;
     }
 
-    promptAndComputeSolarConstant(input, output);
+    promptAndComputeSolarConstant(input, output, precision);
     return 0;
 }
-
