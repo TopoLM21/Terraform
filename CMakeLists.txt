@@ -6,15 +6,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
-option(USE_BUNDLED_QWT "Download and build Qwt during configuration" ON)
+option(USE_BUNDLED_QWT "Build Qwt from the bundled 3rdparty sources" ON)
 
 if (USE_BUNDLED_QWT)
     include(ExternalProject)
 
-    set(QWT_VERSION 6.2.0)
-    set(QWT_URL "https://downloads.sourceforge.net/project/qwt/qwt/${QWT_VERSION}/qwt-${QWT_VERSION}.tar.bz2")
     set(QWT_INSTALL_DIR "${CMAKE_BINARY_DIR}/qwt-install")
-    set(QWT_SOURCE_DIR "${CMAKE_BINARY_DIR}/qwt-src")
+    set(QWT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/qwt")
+
+    if (NOT EXISTS "${QWT_SOURCE_DIR}/qwt.pro")
+        message(FATAL_ERROR "Bundled Qwt source not found at ${QWT_SOURCE_DIR}. Ensure 3rdparty/qwt contains Qwt sources.")
+    endif()
 
     if (TARGET Qt6::qmake)
         get_target_property(QT_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
@@ -34,7 +36,6 @@ if (USE_BUNDLED_QWT)
     )
 
     ExternalProject_Add(qwt
-        URL "${QWT_URL}"
         SOURCE_DIR "${QWT_SOURCE_DIR}"
         PATCH_COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/qwtconfig.pri" <SOURCE_DIR>/qwtconfig.pri
         CONFIGURE_COMMAND "${QT_QMAKE_EXECUTABLE}" <SOURCE_DIR>/qwt.pro
