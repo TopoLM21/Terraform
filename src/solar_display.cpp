@@ -65,7 +65,7 @@ public:
             presetsLayout->addWidget(button);
         };
 
-        addPresetButton(QStringLiteral("Солнце"), [applyPrimary, applySecondary]() {
+        addPresetButton(QStringLiteral("Солнце"), [this, applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
             applySecondary(std::nullopt);
             const QVector<PlanetPreset> planets = {
@@ -79,7 +79,7 @@ public:
             setPlanetPresets(planets);
         });
 
-        addPresetButton(QStringLiteral("Сладкое Небо"), [applyPrimary, applySecondary]() {
+        addPresetButton(QStringLiteral("Сладкое Небо"), [this, applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{0.3761, 2576.0, 1.0});
             applySecondary(StellarParameters{0.3741, 2349.0, 1.0});
             const QVector<PlanetPreset> planets = {
