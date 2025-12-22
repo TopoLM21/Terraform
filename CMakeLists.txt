@@ -18,17 +18,20 @@ if (USE_BUNDLED_QWT)
         message(FATAL_ERROR "Bundled Qwt source not found at ${QWT_SOURCE_DIR}. Ensure 3rdparty/qwt contains Qwt sources.")
     endif()
 
-    if (TARGET Qt6::qmake)
-        get_target_property(QT_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
-    else()
-        find_program(QT_QMAKE_EXECUTABLE NAMES qmake6 qmake)
-    endif()
+    find_program(QT_QMAKE_EXECUTABLE NAMES qmake6)
 
     if (NOT QT_QMAKE_EXECUTABLE)
-        message(FATAL_ERROR "Qt qmake executable not found. Install Qt development tools.")
+        message(FATAL_ERROR "Qt qmake6 executable not found. Install Qt development tools.")
+    endif()
+
+    find_program(GNU_MAKE_EXECUTABLE NAMES gmake make)
+
+    if (NOT GNU_MAKE_EXECUTABLE)
+        message(FATAL_ERROR "GNU make executable not found. Install make/gmake to build Qwt.")
     endif()
 
     set(QWT_INSTALL_PREFIX "${QWT_INSTALL_DIR}")
+    set(QWT_BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/qwt-build")
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/qwtconfig.pri.in"
         "${CMAKE_BINARY_DIR}/qwtconfig.pri"
@@ -37,12 +40,17 @@ if (USE_BUNDLED_QWT)
 
     ExternalProject_Add(qwt
         SOURCE_DIR "${QWT_SOURCE_DIR}"
+        BINARY_DIR "${QWT_BINARY_DIR}"
         PATCH_COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/qwtconfig.pri" <SOURCE_DIR>/qwtconfig.pri
-        CONFIGURE_COMMAND "${QT_QMAKE_EXECUTABLE}" <SOURCE_DIR>/qwt.pro
-        BUILD_COMMAND ${CMAKE_MAKE_PROGRAM}
-        INSTALL_COMMAND ${CMAKE_MAKE_PROGRAM} install
-        BUILD_IN_SOURCE 1
+        CONFIGURE_COMMAND "${QT_QMAKE_EXECUTABLE}" -o <BINARY_DIR>/Makefile <SOURCE_DIR>/qwt.pro
+        BUILD_COMMAND ${GNU_MAKE_EXECUTABLE}
+        INSTALL_COMMAND ${GNU_MAKE_EXECUTABLE} install
         UPDATE_COMMAND ""
+    )
+    ExternalProject_Add_Step(qwt create_moc_dir
+        COMMAND ${CMAKE_COMMAND} -E make_directory <BINARY_DIR>/src/moc
+        DEPENDEES configure
+        DEPENDERS build
     )
 
     add_library(Qwt::Qwt STATIC IMPORTED GLOBAL)
