@@ -36,13 +36,17 @@ if (USE_BUNDLED_QWT)
         message(FATAL_ERROR "GNU make executable not found. Install make/gmake to build Qwt.")
     endif()
 
+    set(QWT_PREFIX_DIR "${CMAKE_BINARY_DIR}/_deps/qwt-prefix")
+    set(QWT_STAMP_DIR "${QWT_PREFIX_DIR}/stamp")
     set(QWT_BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/qwt-build")
 
     if (QWT_FORCE_REBUILD)
-        file(REMOVE_RECURSE "${QWT_BINARY_DIR}" "${QWT_INSTALL_DIR}")
+        file(REMOVE_RECURSE "${QWT_BINARY_DIR}" "${QWT_INSTALL_DIR}" "${QWT_PREFIX_DIR}")
     endif()
 
     ExternalProject_Add(qwt
+        PREFIX "${QWT_PREFIX_DIR}"
+        STAMP_DIR "${QWT_STAMP_DIR}"
         SOURCE_DIR "${QWT_SOURCE_DIR}"
         BINARY_DIR "${QWT_BINARY_DIR}"
         PATCH_COMMAND ${CMAKE_COMMAND}
