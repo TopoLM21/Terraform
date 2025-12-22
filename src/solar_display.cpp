@@ -7,6 +7,7 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QFormLayout>
+#include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
@@ -35,16 +36,12 @@ public:
         temperatureInput_->setPlaceholderText(QStringLiteral("Например, 5772"));
         temperatureInput_->setValidator(validator);
 
-        distanceInput_ = new QLineEdit(this);
-        distanceInput_->setPlaceholderText(QStringLiteral("Например, 1.0"));
-        distanceInput_->setValidator(validator);
-
         auto *presetsLayout = new QHBoxLayout();
 
         const auto applyPrimary = [this](const StellarParameters &parameters) {
             setInputValue(radiusInput_, parameters.radiusInSolarRadii);
             setInputValue(temperatureInput_, parameters.temperatureKelvin);
-            setInputValue(distanceInput_, parameters.distanceInAU);
+            setInputValue(semiMajorAxisInput_, parameters.distanceInAU);
         };
 
         const auto applySecondary = [this](const std::optional<StellarParameters> &parameters) {
@@ -52,14 +49,12 @@ public:
                 secondStarCheckBox_->setChecked(false);
                 secondaryRadiusInput_->clear();
                 secondaryTemperatureInput_->clear();
-                secondaryDistanceInput_->clear();
                 return;
             }
 
             secondStarCheckBox_->setChecked(true);
             setInputValue(secondaryRadiusInput_, parameters->radiusInSolarRadii);
             setInputValue(secondaryTemperatureInput_, parameters->temperatureKelvin);
-            setInputValue(secondaryDistanceInput_, parameters->distanceInAU);
         };
 
         const auto addPresetButton = [this, presetsLayout](const QString &text,
@@ -82,14 +77,15 @@ public:
         addPresetButton(QStringLiteral("Пусто"), [this, applyPrimary, applySecondary]() {
             radiusInput_->clear();
             temperatureInput_->clear();
-            distanceInput_->clear();
+            semiMajorAxisInput_->clear();
             applySecondary(std::nullopt);
         });
 
         auto *primaryFormLayout = new QFormLayout();
         primaryFormLayout->addRow(QStringLiteral("Радиус звезды (в R☉):"), radiusInput_);
         primaryFormLayout->addRow(QStringLiteral("Температура поверхности (K):"), temperatureInput_);
-        primaryFormLayout->addRow(QStringLiteral("Расстояние от барицентра до планеты (а.е.):"), distanceInput_);
+        primaryGroupBox_ = new QGroupBox(QStringLiteral("Звезда 1"), this);
+        primaryGroupBox_->setLayout(primaryFormLayout);
 
         secondStarCheckBox_ = new QCheckBox(QStringLiteral("Добавить вторую звезду"), this);
 
@@ -101,25 +97,18 @@ public:
         secondaryTemperatureInput_->setPlaceholderText(QStringLiteral("Например, 5200"));
         secondaryTemperatureInput_->setValidator(validator);
 
-        secondaryDistanceInput_ = new QLineEdit(this);
-        secondaryDistanceInput_->setPlaceholderText(QStringLiteral("Например, 1.3"));
-        secondaryDistanceInput_->setValidator(validator);
-
         auto *secondaryFormLayout = new QFormLayout();
         secondaryFormLayout->addRow(QStringLiteral("Радиус второй звезды (в R☉):"), secondaryRadiusInput_);
         secondaryFormLayout->addRow(QStringLiteral("Температура второй звезды (K):"), secondaryTemperatureInput_);
-        secondaryFormLayout->addRow(
-            QStringLiteral("Расстояние от барицентра до планеты для второй звезды (а.е.):"),
-            secondaryDistanceInput_);
 
-        secondaryInputsWidget_ = new QWidget(this);
-        secondaryInputsWidget_->setLayout(secondaryFormLayout);
-        secondaryInputsWidget_->setEnabled(false);
-        secondaryInputsWidget_->setVisible(false);
+        secondaryGroupBox_ = new QGroupBox(QStringLiteral("Звезда 2"), this);
+        secondaryGroupBox_->setLayout(secondaryFormLayout);
+        secondaryGroupBox_->setEnabled(false);
+        secondaryGroupBox_->setVisible(false);
 
         connect(secondStarCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
-            secondaryInputsWidget_->setEnabled(checked);
-            secondaryInputsWidget_->setVisible(checked);
+            secondaryGroupBox_->setEnabled(checked);
+            secondaryGroupBox_->setVisible(checked);
         });
 
         auto *calculateButton = new QPushButton(QStringLiteral("Рассчитать"), this);
@@ -129,13 +118,29 @@ public:
             QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."), this);
         resultLabel_->setWordWrap(true);
 
+        semiMajorAxisInput_ = new QLineEdit(this);
+        semiMajorAxisInput_->setPlaceholderText(QStringLiteral("Например, 1.0"));
+        semiMajorAxisInput_->setValidator(validator);
+
+        auto *planetFormLayout = new QFormLayout();
+        planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), semiMajorAxisInput_);
+        planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
+        auto *planetGroupBox = new QGroupBox(QStringLiteral("Параметры планеты"), this);
+        planetGroupBox->setLayout(planetFormLayout);
+
+        auto *starsPanelLayout = new QVBoxLayout();
+        starsPanelLayout->addWidget(primaryGroupBox_);
+        starsPanelLayout->addWidget(secondStarCheckBox_);
+        starsPanelLayout->addWidget(secondaryGroupBox_);
+        auto *starsPanel = new QGroupBox(QStringLiteral("Панель звезд"), this);
+        starsPanel->setLayout(starsPanelLayout);
+
         auto *layout = new QVBoxLayout(this);
         layout->addLayout(presetsLayout);
-        layout->addLayout(primaryFormLayout);
-        layout->addWidget(secondStarCheckBox_);
-        layout->addWidget(secondaryInputsWidget_);
+        layout->addWidget(starsPanel);
+        layout->addWidget(planetGroupBox);
         layout->addWidget(calculateButton);
-        layout->addWidget(resultLabel_);
+        layout->addStretch();
 
         setLayout(layout);
         resize(480, 360);
@@ -145,18 +150,28 @@ private:
     void onCalculateRequested() {
         BinarySystemParameters parameters{};
 
-        if (!readStellarParameters(radiusInput_, temperatureInput_, distanceInput_,
+        if (!readStellarParameters(radiusInput_, temperatureInput_,
                                    QStringLiteral("первой звезды"), parameters.primary)) {
             return;
         }
 
         if (secondStarCheckBox_->isChecked()) {
             StellarParameters secondary{};
-            if (!readStellarParameters(secondaryRadiusInput_, secondaryTemperatureInput_, secondaryDistanceInput_,
+            if (!readStellarParameters(secondaryRadiusInput_, secondaryTemperatureInput_,
                                        QStringLiteral("второй звезды"), secondary)) {
                 return;
             }
             parameters.secondary = secondary;
+        }
+
+        double semiMajorAxis = 0.0;
+        if (!readSemiMajorAxis(semiMajorAxis)) {
+            return;
+        }
+
+        parameters.primary.distanceInAU = semiMajorAxis;
+        if (parameters.secondary) {
+            parameters.secondary->distanceInAU = semiMajorAxis;
         }
 
         const double primaryFlux = SolarCalculator::solarConstant(parameters.primary);
@@ -177,7 +192,7 @@ private:
                 .arg(details));
     }
 
-    bool readStellarParameters(QLineEdit *radiusInput, QLineEdit *temperatureInput, QLineEdit *distanceInput,
+    bool readStellarParameters(QLineEdit *radiusInput, QLineEdit *temperatureInput,
                                const QString &label, StellarParameters &parameters) {
         bool ok = false;
         const double radius = radiusInput->text().toDouble(&ok);
@@ -192,14 +207,18 @@ private:
             return false;
         }
 
-        const double distance = distanceInput->text().toDouble(&ok);
-        if (!ok || distance <= 0.0) {
-            showInputError(
-                QStringLiteral("Укажите положительное расстояние от барицентра до планеты для %1.").arg(label));
+        parameters.radiusInSolarRadii = radius;
+        parameters.temperatureKelvin = temperature;
+        return true;
+    }
+
+    bool readSemiMajorAxis(double &semiMajorAxis) {
+        bool ok = false;
+        semiMajorAxis = semiMajorAxisInput_->text().toDouble(&ok);
+        if (!ok || semiMajorAxis <= 0.0) {
+            showInputError(QStringLiteral("Укажите положительную большую полуось орбиты планеты."));
             return false;
         }
-
-        parameters = StellarParameters{radius, temperature, distance};
         return true;
     }
 
@@ -209,13 +228,14 @@ private:
 
     QLineEdit *radiusInput_ = nullptr;
     QLineEdit *temperatureInput_ = nullptr;
-    QLineEdit *distanceInput_ = nullptr;
 
     QCheckBox *secondStarCheckBox_ = nullptr;
-    QWidget *secondaryInputsWidget_ = nullptr;
     QLineEdit *secondaryRadiusInput_ = nullptr;
     QLineEdit *secondaryTemperatureInput_ = nullptr;
-    QLineEdit *secondaryDistanceInput_ = nullptr;
+
+    QGroupBox *primaryGroupBox_ = nullptr;
+    QGroupBox *secondaryGroupBox_ = nullptr;
+    QLineEdit *semiMajorAxisInput_ = nullptr;
 
     QLabel *resultLabel_ = nullptr;
     int precision_ = kDefaultPrecision;
