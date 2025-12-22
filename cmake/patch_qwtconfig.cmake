@@ -25,4 +25,8 @@ if (qwtconfig_updated STREQUAL qwtconfig_contents)
     set(qwtconfig_updated "${qwtconfig_contents}\nQWT_INSTALL_PREFIX = ${QWT_INSTALL_PREFIX}\n")
 endif()
 
+if (NOT qwtconfig_updated MATCHES "QwtSvg")
+    set(qwtconfig_updated "${qwtconfig_updated}\nQWT_CONFIG += QwtSvg\n")
+endif()
+
 file(WRITE "${qwtconfig_path}" "${qwtconfig_updated}")

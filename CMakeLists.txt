@@ -4,9 +4,10 @@ project(SolarConstantCalculator LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg)
 
 option(USE_BUNDLED_QWT "Build Qwt from the bundled 3rdparty sources" ON)
+option(QWT_FORCE_REBUILD "Force a clean rebuild of bundled Qwt" ON)
 
 if (USE_BUNDLED_QWT)
     include(ExternalProject)
@@ -36,6 +37,10 @@ if (USE_BUNDLED_QWT)
     endif()
 
     set(QWT_BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/qwt-build")
+
+    if (QWT_FORCE_REBUILD)
+        file(REMOVE_RECURSE "${QWT_BINARY_DIR}" "${QWT_INSTALL_DIR}")
+    endif()
 
     ExternalProject_Add(qwt
         SOURCE_DIR "${QWT_SOURCE_DIR}"
@@ -74,7 +79,7 @@ add_executable(solar_constant
 )
 
 target_include_directories(solar_constant PRIVATE include)
-target_link_libraries(solar_constant PRIVATE Qt6::Widgets Qwt::Qwt)
+target_link_libraries(solar_constant PRIVATE Qt6::Widgets Qt6::Svg Qwt::Qwt)
 
 if (USE_BUNDLED_QWT)
     add_dependencies(solar_constant qwt)
