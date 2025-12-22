@@ -398,6 +398,7 @@ private:
         axisInput->setPlaceholderText(QStringLiteral("Например, 1.0"));
         auto *validator = new QDoubleValidator(0.0, std::numeric_limits<double>::max(), 10, &dialog);
         validator->setNotation(QDoubleValidator::StandardNotation);
+        validator->setLocale(QLocale::C);
         axisInput->setValidator(validator);
 
         auto *formLayout = new QFormLayout(&dialog);
