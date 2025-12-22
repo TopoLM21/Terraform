@@ -3,6 +3,7 @@
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
+#include <QtCore/QLocale>
 #include <QtGui/QDoubleValidator>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
@@ -10,6 +11,7 @@
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QComboBox>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
@@ -41,7 +43,6 @@ public:
         const auto applyPrimary = [this](const StellarParameters &parameters) {
             setInputValue(radiusInput_, parameters.radiusInSolarRadii);
             setInputValue(temperatureInput_, parameters.temperatureKelvin);
-            setInputValue(semiMajorAxisInput_, parameters.distanceInAU);
         };
 
         const auto applySecondary = [this](const std::optional<StellarParameters> &parameters) {
@@ -67,17 +68,32 @@ public:
         addPresetButton(QStringLiteral("Солнце"), [applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
             applySecondary(std::nullopt);
+            const QVector<PlanetPreset> planets = {
+                {QStringLiteral("Меркурий"), 0.39},
+                {QStringLiteral("Венера"), 0.72},
+                {QStringLiteral("Земля"), 1.00},
+                {QStringLiteral("Луна"), 1.00},
+                {QStringLiteral("Марс"), 1.52},
+                {QStringLiteral("Церрера"), 2.77},
+            };
+            setPlanetPresets(planets);
         });
 
         addPresetButton(QStringLiteral("Сладкое Небо"), [applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{0.3761, 2576.0, 1.0});
             applySecondary(StellarParameters{0.3741, 2349.0, 1.0});
+            const QVector<PlanetPreset> planets = {
+                {QStringLiteral("Планета 1"), 0.30},
+                {QStringLiteral("Планета 2"), 0.40},
+                {QStringLiteral("Планета 3"), 0.51},
+            };
+            setPlanetPresets(planets);
         });
 
         addPresetButton(QStringLiteral("Пусто"), [this, applyPrimary, applySecondary]() {
             radiusInput_->clear();
             temperatureInput_->clear();
-            semiMajorAxisInput_->clear();
+            clearPlanetPresets();
             applySecondary(std::nullopt);
         });
 
@@ -118,14 +134,14 @@ public:
             QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."), this);
         resultLabel_->setWordWrap(true);
 
-        semiMajorAxisInput_ = new QLineEdit(this);
-        semiMajorAxisInput_->setPlaceholderText(QStringLiteral("Например, 1.0"));
-        semiMajorAxisInput_->setValidator(validator);
+        planetComboBox_ = new QComboBox(this);
+        planetSemiMajorAxisLabel_ = new QLabel(QStringLiteral("—"), this);
 
         auto *planetFormLayout = new QFormLayout();
-        planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), semiMajorAxisInput_);
+        planetFormLayout->addRow(QStringLiteral("Планета:"), planetComboBox_);
+        planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
         planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
-        auto *planetGroupBox = new QGroupBox(QStringLiteral("Параметры планеты"), this);
+        auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
         planetGroupBox->setLayout(planetFormLayout);
 
         auto *starsPanelLayout = new QVBoxLayout();
@@ -144,9 +160,21 @@ public:
 
         setLayout(layout);
         resize(480, 360);
+
+        connect(planetComboBox_, &QComboBox::currentIndexChanged, this, [this]() {
+            updatePlanetSemiMajorAxisLabel();
+            if (hasPrimaryInputs() && (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
+                onCalculateRequested();
+            }
+        });
     }
 
 private:
+    struct PlanetPreset {
+        QString name;
+        double semiMajorAxis;
+    };
+
     void onCalculateRequested() {
         BinarySystemParameters parameters{};
 
@@ -213,9 +241,13 @@ private:
     }
 
     bool readSemiMajorAxis(double &semiMajorAxis) {
-        bool ok = false;
-        semiMajorAxis = semiMajorAxisInput_->text().toDouble(&ok);
-        if (!ok || semiMajorAxis <= 0.0) {
+        const QVariant value = planetComboBox_->currentData();
+        if (!value.isValid()) {
+            showInputError(QStringLiteral("Выберите планету из списка."));
+            return false;
+        }
+        semiMajorAxis = value.toDouble();
+        if (semiMajorAxis <= 0.0) {
             showInputError(QStringLiteral("Укажите положительную большую полуось орбиты планеты."));
             return false;
         }
@@ -235,13 +267,55 @@ private:
 
     QGroupBox *primaryGroupBox_ = nullptr;
     QGroupBox *secondaryGroupBox_ = nullptr;
-    QLineEdit *semiMajorAxisInput_ = nullptr;
+    QComboBox *planetComboBox_ = nullptr;
+    QLabel *planetSemiMajorAxisLabel_ = nullptr;
 
     QLabel *resultLabel_ = nullptr;
     int precision_ = kDefaultPrecision;
 
     void setInputValue(QLineEdit *input, double value) {
         input->setText(QString::number(value));
+    }
+
+    void setPlanetPresets(const QVector<PlanetPreset> &planets) {
+        planetComboBox_->clear();
+        for (const auto &planet : planets) {
+            planetComboBox_->addItem(formatPlanetName(planet), planet.semiMajorAxis);
+        }
+        updatePlanetSemiMajorAxisLabel();
+    }
+
+    void clearPlanetPresets() {
+        planetComboBox_->clear();
+        planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
+    }
+
+    QString formatPlanetName(const PlanetPreset &planet) const {
+        return QStringLiteral("%1 (%2 а.е.)")
+            .arg(planet.name, formatSemiMajorAxis(planet.semiMajorAxis));
+    }
+
+    QString formatSemiMajorAxis(double value) const {
+        return QLocale().toString(value, 'f', 2);
+    }
+
+    void updatePlanetSemiMajorAxisLabel() {
+        const QVariant value = planetComboBox_->currentData();
+        if (!value.isValid()) {
+            planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        planetSemiMajorAxisLabel_->setText(formatSemiMajorAxis(value.toDouble()));
+    }
+
+    bool hasPrimaryInputs() const {
+        return !radiusInput_->text().trimmed().isEmpty() &&
+               !temperatureInput_->text().trimmed().isEmpty();
+    }
+
+    bool hasSecondaryInputs() const {
+        return !secondaryRadiusInput_->text().trimmed().isEmpty() &&
+               !secondaryTemperatureInput_->text().trimmed().isEmpty();
     }
 };
 }  // namespace
