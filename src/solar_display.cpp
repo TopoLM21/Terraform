@@ -1,5 +1,8 @@
+#include "planet_presets.h"
 #include "solar_calculator.h"
 #include "solar_display.h"
+#include "surface_temperature_calculator.h"
+#include "surface_temperature_plot.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -27,6 +30,11 @@
 #include <limits>
 
 namespace {
+constexpr int kRoleSemiMajorAxis = Qt::UserRole;
+constexpr int kRoleIsCustom = Qt::UserRole + 1;
+constexpr int kRolePlanetName = Qt::UserRole + 2;
+constexpr int kRoleMaterialId = Qt::UserRole + 3;
+
 class SolarCalculatorWidget : public QWidget {
 public:
     explicit SolarCalculatorWidget(int precision, QWidget *parent = nullptr)
@@ -72,26 +80,13 @@ public:
         addPresetButton(QStringLiteral("Солнце"), [this, applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
             applySecondary(std::nullopt);
-            const QVector<PlanetPreset> planets = {
-                {QStringLiteral("Меркурий"), 0.39},
-                {QStringLiteral("Венера"), 0.72},
-                {QStringLiteral("Земля"), 1.00},
-                {QStringLiteral("Луна"), 1.00},
-                {QStringLiteral("Марс"), 1.52},
-                {QStringLiteral("Церрера"), 2.77},
-            };
-            setPlanetPresets(planets);
+            setPlanetPresets(solarSystemPresets());
         });
 
         addPresetButton(QStringLiteral("Сладкое Небо"), [this, applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{0.3761, 2576.0, 1.0});
             applySecondary(StellarParameters{0.3741, 2349.0, 1.0});
-            const QVector<PlanetPreset> planets = {
-                {QStringLiteral("Планета 1"), 0.30},
-                {QStringLiteral("Планета 2"), 0.40},
-                {QStringLiteral("Планета 3"), 0.51},
-            };
-            setPlanetPresets(planets);
+            setPlanetPresets(sweetSkyPresets());
         });
 
         addPresetButton(QStringLiteral("Пусто"), [this, applyPrimary, applySecondary]() {
@@ -140,6 +135,8 @@ public:
 
         planetComboBox_ = new QComboBox(this);
         planetSemiMajorAxisLabel_ = new QLabel(QStringLiteral("—"), this);
+        materialComboBox_ = new QComboBox(this);
+        populateMaterials();
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
         deletePlanetButton_ = new QPushButton(this);
         deletePlanetButton_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
@@ -153,6 +150,7 @@ public:
         auto *planetFormLayout = new QFormLayout();
         planetFormLayout->addRow(QStringLiteral("Планета:"), planetSelectorLayout);
         planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
+        planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
         planetFormLayout->addRow(QString(), addPlanetButton_);
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
@@ -165,10 +163,17 @@ public:
         auto *starsPanel = new QGroupBox(QStringLiteral("Панель звезд"), this);
         starsPanel->setLayout(starsPanelLayout);
 
+        temperaturePlot_ = new SurfaceTemperaturePlot(this);
+        auto *plotGroupBox = new QGroupBox(QStringLiteral("Температурный профиль"), this);
+        auto *plotLayout = new QVBoxLayout(plotGroupBox);
+        plotLayout->addWidget(temperaturePlot_);
+        plotGroupBox->setLayout(plotLayout);
+
         auto *layout = new QVBoxLayout(this);
         layout->addLayout(presetsLayout);
         layout->addWidget(starsPanel);
         layout->addWidget(planetGroupBox);
+        layout->addWidget(plotGroupBox);
         layout->addWidget(calculateButton);
         layout->addStretch();
 
@@ -177,10 +182,13 @@ public:
 
         connect(planetComboBox_, &QComboBox::currentIndexChanged, this, [this]() {
             updatePlanetSemiMajorAxisLabel();
+            syncMaterialWithPlanet();
+            updatePlanetActions();
             if (hasPrimaryInputs() && (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
                 onCalculateRequested();
+            } else {
+                updateTemperaturePlot();
             }
-            updatePlanetActions();
         });
 
         connect(addPlanetButton_, &QPushButton::clicked, this, [this]() { onAddPlanetRequested(); });
@@ -190,7 +198,7 @@ public:
                 return;
             }
 
-            const QString planetName = planetComboBox_->itemData(index, Qt::UserRole + 2).toString();
+            const QString planetName = planetComboBox_->itemData(index, kRolePlanetName).toString();
             const auto result = QMessageBox::question(
                 this,
                 QStringLiteral("Удаление планеты"),
@@ -201,15 +209,16 @@ public:
             planetComboBox_->removeItem(index);
             updatePlanetSemiMajorAxisLabel();
             updatePlanetActions();
+            updateTemperaturePlot();
+        });
+
+        connect(materialComboBox_, &QComboBox::currentIndexChanged, this, [this]() {
+            syncPlanetMaterialWithSelection();
+            updateTemperaturePlot();
         });
     }
 
 private:
-    struct PlanetPreset {
-        QString name;
-        double semiMajorAxis;
-    };
-
     void onCalculateRequested() {
         BinarySystemParameters parameters{};
 
@@ -253,6 +262,10 @@ private:
             QStringLiteral("Солнечная постоянная у планеты: %1 Вт/м²%2")
                 .arg(totalFlux, 0, 'g', precision_)
                 .arg(details));
+
+        lastSolarConstant_ = totalFlux;
+        hasSolarConstant_ = true;
+        updateTemperaturePlot();
     }
 
     bool readStellarParameters(QLineEdit *radiusInput, QLineEdit *temperatureInput,
@@ -276,7 +289,7 @@ private:
     }
 
     bool readSemiMajorAxis(double &semiMajorAxis) {
-        const QVariant value = planetComboBox_->currentData(Qt::UserRole);
+        const QVariant value = planetComboBox_->currentData(kRoleSemiMajorAxis);
         if (!value.isValid()) {
             showInputError(QStringLiteral("Выберите планету из списка."));
             return false;
@@ -304,12 +317,16 @@ private:
     QGroupBox *secondaryGroupBox_ = nullptr;
     QComboBox *planetComboBox_ = nullptr;
     QLabel *planetSemiMajorAxisLabel_ = nullptr;
+    QComboBox *materialComboBox_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
 
     QLabel *resultLabel_ = nullptr;
+    SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
     int precision_ = kDefaultPrecision;
     QSet<QString> presetPlanetNames_;
+    double lastSolarConstant_ = 0.0;
+    bool hasSolarConstant_ = false;
 
     void setInputValue(QLineEdit *input, double value) {
         input->setText(QString::number(value));
@@ -323,6 +340,7 @@ private:
             addPlanetItem(planet, false);
         }
         updatePlanetSemiMajorAxisLabel();
+        syncMaterialWithPlanet();
         updatePlanetActions();
     }
 
@@ -331,6 +349,7 @@ private:
         presetPlanetNames_.clear();
         planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
         updatePlanetActions();
+        updateTemperaturePlot();
     }
 
     QString formatPlanetName(const PlanetPreset &planet) const {
@@ -343,7 +362,7 @@ private:
     }
 
     void updatePlanetSemiMajorAxisLabel() {
-        const QVariant value = planetComboBox_->currentData(Qt::UserRole);
+        const QVariant value = planetComboBox_->currentData(kRoleSemiMajorAxis);
         if (!value.isValid()) {
             planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
             return;
@@ -364,18 +383,19 @@ private:
     void addPlanetItem(const PlanetPreset &planet, bool isCustom) {
         planetComboBox_->addItem(formatPlanetName(planet), planet.semiMajorAxis);
         const int index = planetComboBox_->count() - 1;
-        planetComboBox_->setItemData(index, planet.semiMajorAxis, Qt::UserRole);
-        planetComboBox_->setItemData(index, isCustom, Qt::UserRole + 1);
-        planetComboBox_->setItemData(index, planet.name, Qt::UserRole + 2);
+        planetComboBox_->setItemData(index, planet.semiMajorAxis, kRoleSemiMajorAxis);
+        planetComboBox_->setItemData(index, isCustom, kRoleIsCustom);
+        planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
+        planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
     }
 
     bool isCustomPlanetIndex(int index) const {
-        return planetComboBox_->itemData(index, Qt::UserRole + 1).toBool();
+        return planetComboBox_->itemData(index, kRoleIsCustom).toBool();
     }
 
     int findPlanetIndexByName(const QString &name) const {
         for (int i = 0; i < planetComboBox_->count(); ++i) {
-            if (planetComboBox_->itemData(i, Qt::UserRole + 2).toString() == name) {
+            if (planetComboBox_->itemData(i, kRolePlanetName).toString() == name) {
                 return i;
             }
         }
@@ -405,11 +425,18 @@ private:
         formLayout->addRow(QStringLiteral("Имя:"), nameInput);
         formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
 
+        auto *materialInput = new QComboBox(&dialog);
+        for (const auto &material : surfaceMaterials()) {
+            materialInput->addItem(material.name, material.id);
+        }
+        formLayout->addRow(QStringLiteral("Материал поверхности:"), materialInput);
+
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         formLayout->addWidget(buttons);
 
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, nameInput, axisInput, this]() {
+        connect(buttons, &QDialogButtonBox::accepted, &dialog,
+                [&dialog, nameInput, axisInput, materialInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -429,16 +456,18 @@ private:
             }
 
             const int existingIndex = findPlanetIndexByName(name);
-            PlanetPreset preset{name, axis};
+            const QString materialId = materialInput->currentData().toString();
+            PlanetPreset preset{name, axis, materialId};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
                     return;
                 }
                 planetComboBox_->setItemText(existingIndex, formatPlanetName(preset));
-                planetComboBox_->setItemData(existingIndex, axis, Qt::UserRole);
-                planetComboBox_->setItemData(existingIndex, true, Qt::UserRole + 1);
-                planetComboBox_->setItemData(existingIndex, name, Qt::UserRole + 2);
+                planetComboBox_->setItemData(existingIndex, axis, kRoleSemiMajorAxis);
+                planetComboBox_->setItemData(existingIndex, true, kRoleIsCustom);
+                planetComboBox_->setItemData(existingIndex, name, kRolePlanetName);
+                planetComboBox_->setItemData(existingIndex, materialId, kRoleMaterialId);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
@@ -446,11 +475,70 @@ private:
             }
 
             updatePlanetSemiMajorAxisLabel();
+            syncMaterialWithPlanet();
             updatePlanetActions();
             dialog.accept();
         });
 
         dialog.exec();
+    }
+
+    void populateMaterials() {
+        for (const auto &material : surfaceMaterials()) {
+            materialComboBox_->addItem(material.name, material.id);
+        }
+    }
+
+    std::optional<SurfaceMaterial> currentMaterial() const {
+        const QString id = materialComboBox_->currentData().toString();
+        for (const auto &material : surfaceMaterials()) {
+            if (material.id == id) {
+                return material;
+            }
+        }
+        return std::nullopt;
+    }
+
+    void syncMaterialWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+
+        const QString materialId = planetComboBox_->itemData(index, kRoleMaterialId).toString();
+        const int materialIndex = materialComboBox_->findData(materialId);
+        if (materialIndex >= 0) {
+            materialComboBox_->setCurrentIndex(materialIndex);
+        }
+    }
+
+    void syncPlanetMaterialWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+        planetComboBox_->setItemData(index, materialComboBox_->currentData(), kRoleMaterialId);
+    }
+
+    void updateTemperaturePlot() {
+        if (!hasSolarConstant_) {
+            temperaturePlot_->clearSeries();
+            return;
+        }
+
+        if (planetComboBox_->currentIndex() < 0) {
+            temperaturePlot_->clearSeries();
+            return;
+        }
+
+        const auto material = currentMaterial();
+        if (!material) {
+            temperaturePlot_->clearSeries();
+            return;
+        }
+
+        SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material);
+        temperaturePlot_->setTemperatureSeries(calculator.temperaturesByLatitude());
     }
 };
 }  // namespace
