@@ -15,14 +15,14 @@ endif()
 file(READ "${qwtconfig_path}" qwtconfig_contents)
 
 string(REGEX REPLACE
-    "^[ \t]*QWT_INSTALL_PREFIX[ \t]*=.*$"
-    "QWT_INSTALL_PREFIX = ${QWT_INSTALL_PREFIX}"
+    "(\\n|^)[ \\t]*QWT_INSTALL_PREFIX[ \\t]*=[^\\n]*"
+    "\\1QWT_INSTALL_PREFIX = ${QWT_INSTALL_PREFIX}"
     qwtconfig_updated
     "${qwtconfig_contents}"
 )
 
 if (qwtconfig_updated STREQUAL qwtconfig_contents)
-    message(FATAL_ERROR "QWT_INSTALL_PREFIX entry was not found in ${qwtconfig_path}.")
+    set(qwtconfig_updated "${qwtconfig_contents}\nQWT_INSTALL_PREFIX = ${QWT_INSTALL_PREFIX}\n")
 endif()
 
 file(WRITE "${qwtconfig_path}" "${qwtconfig_updated}")
