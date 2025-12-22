@@ -13,6 +13,11 @@ if (USE_BUNDLED_QWT)
 
     set(QWT_INSTALL_DIR "${CMAKE_BINARY_DIR}/qwt-install")
     set(QWT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/qwt")
+    file(MAKE_DIRECTORY
+        "${QWT_INSTALL_DIR}/include"
+        "${QWT_INSTALL_DIR}/include/qwt"
+        "${QWT_INSTALL_DIR}/lib"
+    )
 
     if (NOT EXISTS "${QWT_SOURCE_DIR}/qwt.pro")
         message(FATAL_ERROR "Bundled Qwt source not found at ${QWT_SOURCE_DIR}. Ensure 3rdparty/qwt contains Qwt sources.")
@@ -30,18 +35,15 @@ if (USE_BUNDLED_QWT)
         message(FATAL_ERROR "GNU make executable not found. Install make/gmake to build Qwt.")
     endif()
 
-    set(QWT_INSTALL_PREFIX "${QWT_INSTALL_DIR}")
     set(QWT_BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/qwt-build")
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/qwtconfig.pri.in"
-        "${CMAKE_BINARY_DIR}/qwtconfig.pri"
-        @ONLY
-    )
 
     ExternalProject_Add(qwt
         SOURCE_DIR "${QWT_SOURCE_DIR}"
         BINARY_DIR "${QWT_BINARY_DIR}"
-        PATCH_COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/qwtconfig.pri" <SOURCE_DIR>/qwtconfig.pri
+        PATCH_COMMAND ${CMAKE_COMMAND}
+            -DQWT_SOURCE_DIR=<SOURCE_DIR>
+            -DQWT_INSTALL_PREFIX="${QWT_INSTALL_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_qwtconfig.cmake"
         CONFIGURE_COMMAND "${QT_QMAKE_EXECUTABLE}" -o <BINARY_DIR>/Makefile <SOURCE_DIR>/qwt.pro
         BUILD_COMMAND ${GNU_MAKE_EXECUTABLE}
         INSTALL_COMMAND ${GNU_MAKE_EXECUTABLE} install
@@ -56,7 +58,7 @@ if (USE_BUNDLED_QWT)
     add_library(Qwt::Qwt STATIC IMPORTED GLOBAL)
     set_target_properties(Qwt::Qwt PROPERTIES
         IMPORTED_LOCATION "${QWT_INSTALL_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}qwt${CMAKE_STATIC_LIBRARY_SUFFIX}"
-        INTERFACE_INCLUDE_DIRECTORIES "${QWT_INSTALL_DIR}/include"
+        INTERFACE_INCLUDE_DIRECTORIES "${QWT_INSTALL_DIR}/include;${QWT_INSTALL_DIR}/include/qwt"
     )
     add_dependencies(Qwt::Qwt qwt)
 else()
