@@ -4,9 +4,12 @@
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QLocale>
+#include <QtCore/QSet>
 #include <QtGui/QDoubleValidator>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
+#include <QtWidgets/QDialog>
+#include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
@@ -15,6 +18,7 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QStyle>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
 
@@ -136,11 +140,21 @@ public:
 
         planetComboBox_ = new QComboBox(this);
         planetSemiMajorAxisLabel_ = new QLabel(QStringLiteral("—"), this);
+        addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
+        deletePlanetButton_ = new QPushButton(this);
+        deletePlanetButton_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
+        deletePlanetButton_->setToolTip(QStringLiteral("Удалить планету"));
+        deletePlanetButton_->setVisible(false);
+
+        auto *planetSelectorLayout = new QHBoxLayout();
+        planetSelectorLayout->addWidget(planetComboBox_);
+        planetSelectorLayout->addWidget(deletePlanetButton_);
 
         auto *planetFormLayout = new QFormLayout();
-        planetFormLayout->addRow(QStringLiteral("Планета:"), planetComboBox_);
+        planetFormLayout->addRow(QStringLiteral("Планета:"), planetSelectorLayout);
         planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
         planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
+        planetFormLayout->addRow(QString(), addPlanetButton_);
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
         planetGroupBox->setLayout(planetFormLayout);
 
@@ -166,6 +180,27 @@ public:
             if (hasPrimaryInputs() && (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
                 onCalculateRequested();
             }
+            updatePlanetActions();
+        });
+
+        connect(addPlanetButton_, &QPushButton::clicked, this, [this]() { onAddPlanetRequested(); });
+        connect(deletePlanetButton_, &QPushButton::clicked, this, [this]() {
+            const int index = planetComboBox_->currentIndex();
+            if (index < 0 || !isCustomPlanetIndex(index)) {
+                return;
+            }
+
+            const QString planetName = planetComboBox_->itemData(index, Qt::UserRole + 2).toString();
+            const auto result = QMessageBox::question(
+                this,
+                QStringLiteral("Удаление планеты"),
+                QStringLiteral("Удалить планету \"%1\"?").arg(planetName));
+            if (result != QMessageBox::Yes) {
+                return;
+            }
+            planetComboBox_->removeItem(index);
+            updatePlanetSemiMajorAxisLabel();
+            updatePlanetActions();
         });
     }
 
@@ -241,7 +276,7 @@ private:
     }
 
     bool readSemiMajorAxis(double &semiMajorAxis) {
-        const QVariant value = planetComboBox_->currentData();
+        const QVariant value = planetComboBox_->currentData(Qt::UserRole);
         if (!value.isValid()) {
             showInputError(QStringLiteral("Выберите планету из списка."));
             return false;
@@ -269,9 +304,12 @@ private:
     QGroupBox *secondaryGroupBox_ = nullptr;
     QComboBox *planetComboBox_ = nullptr;
     QLabel *planetSemiMajorAxisLabel_ = nullptr;
+    QPushButton *addPlanetButton_ = nullptr;
+    QPushButton *deletePlanetButton_ = nullptr;
 
     QLabel *resultLabel_ = nullptr;
     int precision_ = kDefaultPrecision;
+    QSet<QString> presetPlanetNames_;
 
     void setInputValue(QLineEdit *input, double value) {
         input->setText(QString::number(value));
@@ -279,15 +317,20 @@ private:
 
     void setPlanetPresets(const QVector<PlanetPreset> &planets) {
         planetComboBox_->clear();
+        presetPlanetNames_.clear();
         for (const auto &planet : planets) {
-            planetComboBox_->addItem(formatPlanetName(planet), planet.semiMajorAxis);
+            presetPlanetNames_.insert(planet.name);
+            addPlanetItem(planet, false);
         }
         updatePlanetSemiMajorAxisLabel();
+        updatePlanetActions();
     }
 
     void clearPlanetPresets() {
         planetComboBox_->clear();
+        presetPlanetNames_.clear();
         planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
+        updatePlanetActions();
     }
 
     QString formatPlanetName(const PlanetPreset &planet) const {
@@ -300,7 +343,7 @@ private:
     }
 
     void updatePlanetSemiMajorAxisLabel() {
-        const QVariant value = planetComboBox_->currentData();
+        const QVariant value = planetComboBox_->currentData(Qt::UserRole);
         if (!value.isValid()) {
             planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
             return;
@@ -316,6 +359,97 @@ private:
     bool hasSecondaryInputs() const {
         return !secondaryRadiusInput_->text().trimmed().isEmpty() &&
                !secondaryTemperatureInput_->text().trimmed().isEmpty();
+    }
+
+    void addPlanetItem(const PlanetPreset &planet, bool isCustom) {
+        planetComboBox_->addItem(formatPlanetName(planet), planet.semiMajorAxis);
+        const int index = planetComboBox_->count() - 1;
+        planetComboBox_->setItemData(index, planet.semiMajorAxis, Qt::UserRole);
+        planetComboBox_->setItemData(index, isCustom, Qt::UserRole + 1);
+        planetComboBox_->setItemData(index, planet.name, Qt::UserRole + 2);
+    }
+
+    bool isCustomPlanetIndex(int index) const {
+        return planetComboBox_->itemData(index, Qt::UserRole + 1).toBool();
+    }
+
+    int findPlanetIndexByName(const QString &name) const {
+        for (int i = 0; i < planetComboBox_->count(); ++i) {
+            if (planetComboBox_->itemData(i, Qt::UserRole + 2).toString() == name) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    void updatePlanetActions() {
+        const int index = planetComboBox_->currentIndex();
+        deletePlanetButton_->setVisible(index >= 0 && isCustomPlanetIndex(index));
+    }
+
+    void onAddPlanetRequested() {
+        QDialog dialog(this);
+        dialog.setWindowTitle(QStringLiteral("Добавить планету"));
+
+        auto *nameInput = new QLineEdit(&dialog);
+        nameInput->setPlaceholderText(QStringLiteral("Название"));
+
+        auto *axisInput = new QLineEdit(&dialog);
+        axisInput->setPlaceholderText(QStringLiteral("Например, 1.0"));
+        auto *validator = new QDoubleValidator(0.0, std::numeric_limits<double>::max(), 10, &dialog);
+        validator->setNotation(QDoubleValidator::StandardNotation);
+        axisInput->setValidator(validator);
+
+        auto *formLayout = new QFormLayout(&dialog);
+        formLayout->addRow(QStringLiteral("Имя:"), nameInput);
+        formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
+
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        formLayout->addWidget(buttons);
+
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, nameInput, axisInput, this]() {
+            const QString name = nameInput->text().trimmed();
+            if (name.isEmpty()) {
+                showInputError(QStringLiteral("Введите имя планеты."));
+                return;
+            }
+
+            if (presetPlanetNames_.contains(name)) {
+                showInputError(QStringLiteral("Нельзя добавлять планеты с именем из пресета."));
+                return;
+            }
+
+            bool ok = false;
+            const double axis = axisInput->text().toDouble(&ok);
+            if (!ok || axis <= 0.0) {
+                showInputError(QStringLiteral("Укажите положительную большую полуось орбиты планеты."));
+                return;
+            }
+
+            const int existingIndex = findPlanetIndexByName(name);
+            PlanetPreset preset{name, axis};
+            if (existingIndex >= 0) {
+                if (!isCustomPlanetIndex(existingIndex)) {
+                    showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
+                    return;
+                }
+                planetComboBox_->setItemText(existingIndex, formatPlanetName(preset));
+                planetComboBox_->setItemData(existingIndex, axis, Qt::UserRole);
+                planetComboBox_->setItemData(existingIndex, true, Qt::UserRole + 1);
+                planetComboBox_->setItemData(existingIndex, name, Qt::UserRole + 2);
+                planetComboBox_->setCurrentIndex(existingIndex);
+            } else {
+                addPlanetItem(preset, true);
+                planetComboBox_->setCurrentIndex(planetComboBox_->count() - 1);
+            }
+
+            updatePlanetSemiMajorAxisLabel();
+            updatePlanetActions();
+            dialog.accept();
+        });
+
+        dialog.exec();
     }
 };
 }  // namespace
