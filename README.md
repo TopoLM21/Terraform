@@ -11,6 +11,9 @@ sudo apt update
 sudo apt install qt6-base-dev qt6-base-dev-tools qt6-tools-dev qt6-tools-dev-tools qt6-declarative-dev
 ```
 
+Библиотека Qwt (Qt 6) загружается и собирается автоматически во время конфигурации
+проекта. Пользователю не требуется устанавливать отдельный пакет.
+
 ## Сборка
 
 ```bash
