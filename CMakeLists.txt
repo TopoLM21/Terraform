@@ -4,7 +4,7 @@ project(SolarConstantCalculator LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt5 REQUIRED COMPONENTS Widgets)
+find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent)
 # find_package( REQUIRED)
 # target_link_libraries()
 add_executable(solar_constant
@@ -18,7 +18,7 @@ add_executable(solar_constant
 )
 
 target_include_directories(solar_constant PRIVATE include src)
-target_link_libraries(solar_constant PRIVATE Qt5::Widgets qwt-qt5)
+target_link_libraries(solar_constant PRIVATE Qt5::Widgets Qt5::Concurrent qwt-qt5)
 
 if (MSVC)
     target_compile_options(solar_constant PRIVATE /W4 /permissive-)
