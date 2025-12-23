@@ -20,10 +20,11 @@ QVector<SurfaceMaterial> surfaceMaterials() {
 
 QVector<PlanetPreset> solarSystemPresets() {
     return {
-        {QStringLiteral("Меркурий"), 0.39, 58.6, QStringLiteral("regolith_mercury")},
+        // dayLengthDays: солнечные сутки (длительность солнечного дня), не сидерический период
+        {QStringLiteral("Меркурий"), 0.39, 176.0, QStringLiteral("regolith_mercury")},
         {QStringLiteral("Венера"), 0.72, 243.0, QStringLiteral("desert")},
         {QStringLiteral("Земля"), 1.00, 1.0, QStringLiteral("ocean")},
-        {QStringLiteral("Луна"), 1.00, 27.3, QStringLiteral("regolith_moon")},
+        {QStringLiteral("Луна"), 1.00, 29.5, QStringLiteral("regolith_moon")},
         {QStringLiteral("Марс"), 1.52, 1.03, QStringLiteral("desert")},
         {QStringLiteral("Церрера"), 2.77, 0.38, QStringLiteral("ice")},
     };
