@@ -1,3 +1,4 @@
+#include "orbit_segment_calculator.h"
 #include "planet_presets.h"
 #include "solar_calculator.h"
 #include "solar_display.h"
@@ -11,6 +12,7 @@
 #include <QtCore/QSignalBlocker>
 // #include <QtCore/QOverload>
 #include <QtGlobal>
+#include <QtCore/QtMath>
 #include <QtCore/QSet>
 #include <QtCore/QFutureWatcher>
 #include <QtGui/QDoubleValidator>
@@ -43,6 +45,9 @@ constexpr int kRoleIsCustom = Qt::UserRole + 1;
 constexpr int kRolePlanetName = Qt::UserRole + 2;
 constexpr int kRoleMaterialId = Qt::UserRole + 3;
 constexpr int kRoleDayLength = Qt::UserRole + 4;
+constexpr int kRoleEccentricity = Qt::UserRole + 5;
+constexpr int kRoleObliquity = Qt::UserRole + 6;
+constexpr int kRolePerihelionArgument = Qt::UserRole + 7;
 
 class SolarCalculatorWidget : public QWidget {
 public:
@@ -148,6 +153,9 @@ public:
         planetComboBox_ = new QComboBox(this);
         planetSemiMajorAxisLabel_ = new QLabel(QStringLiteral("—"), this);
         planetDayLengthLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetEccentricityLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetObliquityLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetPerihelionArgumentLabel_ = new QLabel(QStringLiteral("—"), this);
         materialComboBox_ = new QComboBox(this);
         populateMaterials();
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
@@ -164,6 +172,10 @@ public:
         planetFormLayout->addRow(QStringLiteral("Планета:"), planetSelectorLayout);
         planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
         planetFormLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), planetDayLengthLabel_);
+        planetFormLayout->addRow(QStringLiteral("Эксцентриситет орбиты:"), planetEccentricityLabel_);
+        planetFormLayout->addRow(QStringLiteral("Наклон оси (°):"), planetObliquityLabel_);
+        planetFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
+                                 planetPerihelionArgumentLabel_);
         planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
         planetFormLayout->addRow(QString(), addPlanetButton_);
@@ -180,6 +192,12 @@ public:
         temperaturePlot_ = new SurfaceTemperaturePlot(this);
         auto *plotGroupBox = new QGroupBox(QStringLiteral("Температурный профиль"), this);
         auto *plotLayout = new QVBoxLayout(plotGroupBox);
+        auto *segmentLayout = new QHBoxLayout();
+        segmentComboBox_ = new QComboBox(plotGroupBox);
+        segmentComboBox_->setEnabled(false);
+        segmentLayout->addWidget(new QLabel(QStringLiteral("Сегмент орбиты:"), plotGroupBox));
+        segmentLayout->addWidget(segmentComboBox_, 1);
+        plotLayout->addLayout(segmentLayout);
         plotLayout->addWidget(temperaturePlot_);
         plotGroupBox->setLayout(plotLayout);
 
@@ -214,6 +232,7 @@ public:
             cancelTemperatureCalculation();
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
+            updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
             updatePlanetActions();
             if (hasPrimaryInputs() && (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -249,6 +268,9 @@ public:
             syncPlanetMaterialWithSelection();
             updateTemperaturePlot();
         });
+
+        connect(segmentComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int) { updateTemperaturePlotForSelectedSegment(); });
 
         applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
         applySecondary(std::nullopt);
@@ -355,12 +377,16 @@ private:
     QComboBox *planetComboBox_ = nullptr;
     QLabel *planetSemiMajorAxisLabel_ = nullptr;
     QLabel *planetDayLengthLabel_ = nullptr;
+    QLabel *planetEccentricityLabel_ = nullptr;
+    QLabel *planetObliquityLabel_ = nullptr;
+    QLabel *planetPerihelionArgumentLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
 
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
+    QComboBox *segmentComboBox_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
     std::shared_ptr<std::atomic_bool> temperatureCancelFlag_;
     int temperatureRequestId_ = 0;
@@ -368,6 +394,8 @@ private:
     QSet<QString> presetPlanetNames_;
     double lastSolarConstant_ = 0.0;
     bool hasSolarConstant_ = false;
+    QVector<OrbitSegment> lastOrbitSegments_;
+    QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
 
     void setInputValue(QLineEdit *input, double value) {
         input->setText(QString::number(value));
@@ -390,6 +418,7 @@ private:
         }
         updatePlanetSemiMajorAxisLabel();
         updatePlanetDayLengthLabel();
+        updatePlanetOrbitLabels();
         syncMaterialWithPlanet();
         updatePlanetActions();
     }
@@ -400,6 +429,9 @@ private:
         presetPlanetNames_.clear();
         planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
         planetDayLengthLabel_->setText(QStringLiteral("—"));
+        planetEccentricityLabel_->setText(QStringLiteral("—"));
+        planetObliquityLabel_->setText(QStringLiteral("—"));
+        planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
         updatePlanetActions();
         updateTemperaturePlot();
     }
@@ -413,8 +445,28 @@ private:
         return QLocale().toString(value, 'f', 2);
     }
 
+    QString formatDistance(double value) const {
+        return QLocale().toString(value, 'f', 3);
+    }
+
     QString formatDayLength(double value) const {
         return QLocale().toString(value, 'f', 2);
+    }
+
+    QString formatEccentricity(double value) const {
+        return QLocale().toString(value, 'f', 3);
+    }
+
+    QString formatAngle(double value) const {
+        return QLocale().toString(value, 'f', 1);
+    }
+
+    QString formatSegmentLabel(const OrbitSegment &segment) const {
+        const double meanAnomalyDegrees = qRadiansToDegrees(segment.meanAnomalyRadians);
+        return QStringLiteral("Сегмент %1 (M=%2°, r=%3 а.е.)")
+            .arg(segment.index + 1)
+            .arg(QLocale().toString(meanAnomalyDegrees, 'f', 0))
+            .arg(formatDistance(segment.distanceAU));
     }
 
     void updatePlanetSemiMajorAxisLabel() {
@@ -435,6 +487,21 @@ private:
         planetDayLengthLabel_->setText(formatDayLength(value.toDouble()));
     }
 
+    void updatePlanetOrbitLabels() {
+        const QVariant eccentricity = planetComboBox_->currentData(kRoleEccentricity);
+        const QVariant obliquity = planetComboBox_->currentData(kRoleObliquity);
+        const QVariant perihelionArgument = planetComboBox_->currentData(kRolePerihelionArgument);
+        if (!eccentricity.isValid() || !obliquity.isValid() || !perihelionArgument.isValid()) {
+            planetEccentricityLabel_->setText(QStringLiteral("—"));
+            planetObliquityLabel_->setText(QStringLiteral("—"));
+            planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        planetEccentricityLabel_->setText(formatEccentricity(eccentricity.toDouble()));
+        planetObliquityLabel_->setText(formatAngle(obliquity.toDouble()));
+        planetPerihelionArgumentLabel_->setText(formatAngle(perihelionArgument.toDouble()));
+    }
+
     bool hasPrimaryInputs() const {
         return !radiusInput_->text().trimmed().isEmpty() &&
                !temperatureInput_->text().trimmed().isEmpty();
@@ -450,6 +517,9 @@ private:
         const int index = planetComboBox_->count() - 1;
         planetComboBox_->setItemData(index, planet.semiMajorAxis, kRoleSemiMajorAxis);
         planetComboBox_->setItemData(index, planet.dayLengthDays, kRoleDayLength);
+        planetComboBox_->setItemData(index, planet.eccentricity, kRoleEccentricity);
+        planetComboBox_->setItemData(index, planet.obliquityDegrees, kRoleObliquity);
+        planetComboBox_->setItemData(index, planet.perihelionArgumentDegrees, kRolePerihelionArgument);
         planetComboBox_->setItemData(index, isCustom, kRoleIsCustom);
         planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
@@ -491,10 +561,34 @@ private:
         dayLengthInput->setPlaceholderText(QStringLiteral("Например, 1.0"));
         dayLengthInput->setValidator(validator);
 
+        auto *eccentricityInput = new QLineEdit(&dialog);
+        eccentricityInput->setPlaceholderText(QStringLiteral("Например, 0.0167"));
+        auto *eccentricityValidator = new QDoubleValidator(0.0, 0.999, 6, &dialog);
+        eccentricityValidator->setNotation(QDoubleValidator::StandardNotation);
+        eccentricityValidator->setLocale(QLocale::C);
+        eccentricityInput->setValidator(eccentricityValidator);
+
+        auto *obliquityInput = new QLineEdit(&dialog);
+        obliquityInput->setPlaceholderText(QStringLiteral("Например, 23.44"));
+        auto *obliquityValidator = new QDoubleValidator(0.0, 180.0, 4, &dialog);
+        obliquityValidator->setNotation(QDoubleValidator::StandardNotation);
+        obliquityValidator->setLocale(QLocale::C);
+        obliquityInput->setValidator(obliquityValidator);
+
+        auto *perihelionArgumentInput = new QLineEdit(&dialog);
+        perihelionArgumentInput->setPlaceholderText(QStringLiteral("Например, 102.94"));
+        auto *perihelionValidator = new QDoubleValidator(0.0, 360.0, 4, &dialog);
+        perihelionValidator->setNotation(QDoubleValidator::StandardNotation);
+        perihelionValidator->setLocale(QLocale::C);
+        perihelionArgumentInput->setValidator(perihelionValidator);
+
         auto *formLayout = new QFormLayout(&dialog);
         formLayout->addRow(QStringLiteral("Имя:"), nameInput);
         formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
         formLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), dayLengthInput);
+        formLayout->addRow(QStringLiteral("Эксцентриситет:"), eccentricityInput);
+        formLayout->addRow(QStringLiteral("Наклон оси (°):"), obliquityInput);
+        formLayout->addRow(QStringLiteral("Аргумент перицентра (°):"), perihelionArgumentInput);
 
         auto *materialInput = new QComboBox(&dialog);
         for (const auto &material : surfaceMaterials()) {
@@ -507,7 +601,8 @@ private:
 
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
-                [&dialog, nameInput, axisInput, dayLengthInput, materialInput, this]() {
+                [&dialog, nameInput, axisInput, dayLengthInput, eccentricityInput,
+                 obliquityInput, perihelionArgumentInput, materialInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -532,9 +627,28 @@ private:
                 return;
             }
 
+            const double eccentricity = eccentricityInput->text().toDouble(&ok);
+            if (!ok || eccentricity < 0.0 || eccentricity >= 1.0) {
+                showInputError(QStringLiteral("Укажите эксцентриситет от 0 до 1 (не включая 1)."));
+                return;
+            }
+
+            const double obliquity = obliquityInput->text().toDouble(&ok);
+            if (!ok || obliquity < 0.0 || obliquity > 180.0) {
+                showInputError(QStringLiteral("Укажите наклон оси от 0 до 180 градусов."));
+                return;
+            }
+
+            const double perihelionArgument = perihelionArgumentInput->text().toDouble(&ok);
+            if (!ok || perihelionArgument < 0.0 || perihelionArgument >= 360.0) {
+                showInputError(QStringLiteral("Укажите аргумент перицентра от 0 до 360 градусов."));
+                return;
+            }
+
             const int existingIndex = findPlanetIndexByName(name);
             const QString materialId = materialInput->currentData().toString();
-            PlanetPreset preset{name, axis, dayLength, materialId};
+            PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
+                                perihelionArgument, materialId};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -543,6 +657,10 @@ private:
                 planetComboBox_->setItemText(existingIndex, formatPlanetName(preset));
                 planetComboBox_->setItemData(existingIndex, axis, kRoleSemiMajorAxis);
                 planetComboBox_->setItemData(existingIndex, dayLength, kRoleDayLength);
+                planetComboBox_->setItemData(existingIndex, eccentricity, kRoleEccentricity);
+                planetComboBox_->setItemData(existingIndex, obliquity, kRoleObliquity);
+                planetComboBox_->setItemData(existingIndex, perihelionArgument,
+                                             kRolePerihelionArgument);
                 planetComboBox_->setItemData(existingIndex, true, kRoleIsCustom);
                 planetComboBox_->setItemData(existingIndex, name, kRolePlanetName);
                 planetComboBox_->setItemData(existingIndex, materialId, kRoleMaterialId);
@@ -554,6 +672,7 @@ private:
 
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
+            updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
             updatePlanetActions();
             dialog.accept();
@@ -599,38 +718,95 @@ private:
         planetComboBox_->setItemData(index, materialComboBox_->currentData(), kRoleMaterialId);
     }
 
-    void updateTemperaturePlot() {
-        cancelTemperatureCalculation();
+    void updateSegmentComboBox() {
+        const QSignalBlocker blocker(segmentComboBox_);
+        const int previousIndex = segmentComboBox_->currentIndex();
+        segmentComboBox_->clear();
 
-        if (!hasSolarConstant_) {
+        if (lastOrbitSegments_.isEmpty()) {
+            segmentComboBox_->setEnabled(false);
+            return;
+        }
+
+        for (const auto &segment : lastOrbitSegments_) {
+            segmentComboBox_->addItem(formatSegmentLabel(segment));
+        }
+
+        segmentComboBox_->setEnabled(true);
+        if (previousIndex >= 0 && previousIndex < segmentComboBox_->count()) {
+            segmentComboBox_->setCurrentIndex(previousIndex);
+        } else {
+            segmentComboBox_->setCurrentIndex(0);
+        }
+    }
+
+    void updateTemperaturePlotForSelectedSegment() {
+        if (segmentComboBox_->currentIndex() < 0 ||
+            segmentComboBox_->currentIndex() >= lastTemperatureSegments_.size()) {
             temperaturePlot_->clearSeries();
             return;
         }
 
+        const int index = segmentComboBox_->currentIndex();
+        const QString label = segmentComboBox_->itemText(index);
+        temperaturePlot_->setTemperatureSeries(lastTemperatureSegments_.at(index), label);
+    }
+
+    void clearTemperatureSegments() {
+        lastOrbitSegments_.clear();
+        lastTemperatureSegments_.clear();
+        segmentComboBox_->clear();
+        segmentComboBox_->setEnabled(false);
+        temperaturePlot_->clearSeries();
+    }
+
+    void updateTemperaturePlot() {
+        cancelTemperatureCalculation();
+
+        if (!hasSolarConstant_) {
+            clearTemperatureSegments();
+            return;
+        }
+
         if (planetComboBox_->currentIndex() < 0) {
-            temperaturePlot_->clearSeries();
+            clearTemperatureSegments();
+            return;
+        }
+
+        const double semiMajorAxis = planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble();
+        if (semiMajorAxis <= 0.0) {
+            clearTemperatureSegments();
             return;
         }
 
         const double dayLength = planetComboBox_->currentData(kRoleDayLength).toDouble();
         if (dayLength <= 0.0) {
-            temperaturePlot_->clearSeries();
+            clearTemperatureSegments();
             return;
         }
 
+        const double eccentricity = planetComboBox_->currentData(kRoleEccentricity).toDouble();
+        const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
+        const double perihelionArgument =
+            planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
+
         const auto material = currentMaterial();
         if (!material) {
-            temperaturePlot_->clearSeries();
+            clearTemperatureSegments();
             return;
         }
+
+        lastTemperatureSegments_.clear();
 
         const int requestId = ++temperatureRequestId_;
         temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
         const auto cancelFlag = temperatureCancelFlag_;
         const int stepDegrees = 1;
+        const int segmentCount = 12;
         const int totalLatitudes = 180 / stepDegrees + 1;
+        const int totalProgress = totalLatitudes * segmentCount;
 
-        temperatureProgressDialog_->setRange(0, totalLatitudes);
+        temperatureProgressDialog_->setRange(0, totalProgress);
         temperatureProgressDialog_->setValue(0);
         temperatureProgressDialog_->show();
 
@@ -655,8 +831,8 @@ private:
         };
 
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength);
-        auto *watcher = new QFutureWatcher<QVector<TemperatureRangePoint>>(this);
-        connect(watcher, &QFutureWatcher<QVector<TemperatureRangePoint>>::finished, this,
+        auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
+        connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
                 [this, watcher, requestId, cancelFlag]() {
             watcher->deleteLater();
             if (requestId == temperatureRequestId_) {
@@ -669,11 +845,25 @@ private:
             if (result.isEmpty()) {
                 return;
             }
-            temperaturePlot_->setTemperatureSeries(result);
+            lastTemperatureSegments_ = result;
+            updateSegmentComboBox();
+            updateTemperaturePlotForSelectedSegment();
         });
 
-        watcher->setFuture(QtConcurrent::run([calculator, stepDegrees, progressCallback, cancelFlag]() {
-            return calculator.temperatureRangesByLatitude(stepDegrees, progressCallback, cancelFlag.get());
+        const OrbitSegmentCalculator orbitCalculator(semiMajorAxis, eccentricity);
+        lastOrbitSegments_ = orbitCalculator.segments(segmentCount);
+        updateSegmentComboBox();
+
+        watcher->setFuture(QtConcurrent::run([calculator, stepDegrees, progressCallback, cancelFlag,
+                                              segments = lastOrbitSegments_,
+                                              semiMajorAxis, obliquity, perihelionArgument]() {
+            return calculator.temperatureRangesByOrbitSegments(segments,
+                                                               semiMajorAxis,
+                                                               obliquity,
+                                                               perihelionArgument,
+                                                               stepDegrees,
+                                                               progressCallback,
+                                                               cancelFlag.get());
         }));
     }
 
