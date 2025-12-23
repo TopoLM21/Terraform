@@ -1,12 +1,14 @@
-if (NOT DEFINED QWT_SOURCE_DIR)
-    message(FATAL_ERROR "QWT_SOURCE_DIR is required.")
+if (NOT DEFINED qwtconfig_path)
+    if (NOT DEFINED QWT_SOURCE_DIR)
+        message(FATAL_ERROR "qwtconfig_path or QWT_SOURCE_DIR is required.")
+    endif()
+
+    set(qwtconfig_path "${QWT_SOURCE_DIR}/qwtconfig.pri")
 endif()
 
 if (NOT DEFINED QWT_INSTALL_PREFIX)
     message(FATAL_ERROR "QWT_INSTALL_PREFIX is required.")
 endif()
-
-set(qwtconfig_path "${QWT_SOURCE_DIR}/qwtconfig.pri")
 
 if (NOT EXISTS "${qwtconfig_path}")
     message(FATAL_ERROR "Qwt config file not found at ${qwtconfig_path}.")
