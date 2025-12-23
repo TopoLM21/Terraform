@@ -27,6 +27,14 @@ public:
     QVector<TemperatureRangePoint> temperatureRangesByLatitude(int stepDegrees,
                                                                const ProgressCallback &progressCallback,
                                                                const std::atomic_bool *cancelFlag) const;
+    QVector<TemperatureRangePoint> temperatureRangesForOrbitSegment(
+        const OrbitSegment &segment,
+        double referenceDistanceAU,
+        double obliquityDegrees,
+        double perihelionArgumentDegrees,
+        int stepDegrees,
+        const ProgressCallback &progressCallback,
+        const std::atomic_bool *cancelFlag) const;
     QVector<QVector<TemperatureRangePoint>> temperatureRangesByOrbitSegments(
         const QVector<OrbitSegment> &segments,
         double referenceDistanceAU,

@@ -10,6 +10,8 @@
 #include <QtCore/QLocale>
 #include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
+#include <QtCore/QThread>
+#include <QtCore/QThreadPool>
 // #include <QtCore/QOverload>
 #include <QtGlobal>
 #include <QtCore/QtMath>
@@ -227,6 +229,9 @@ public:
 
         setLayout(layout);
         resize(480, 360);
+        // Оставляем один поток под UI, чтобы параллельные вычисления не блокировали интерфейс.
+        QThreadPool::globalInstance()->setMaxThreadCount(
+            qMax(1, QThread::idealThreadCount() - 1));
 
         connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             cancelTemperatureCalculation();
@@ -854,17 +859,44 @@ private:
         lastOrbitSegments_ = orbitCalculator.segments(segmentCount);
         updateSegmentComboBox();
 
-        watcher->setFuture(QtConcurrent::run([calculator, stepDegrees, progressCallback, cancelFlag,
-                                              segments = lastOrbitSegments_,
-                                              semiMajorAxis, obliquity, perihelionArgument]() {
-            return calculator.temperatureRangesByOrbitSegments(segments,
+        auto progressCounter = std::make_shared<std::atomic_int>(0);
+        auto segmentProgress = [progressCounter, progressCallback, totalProgress, cancelFlag](int, int) {
+            if (cancelFlag && cancelFlag->load()) {
+                return;
+            }
+            const int processed = progressCounter->fetch_add(1) + 1;
+            progressCallback(processed, totalProgress);
+        };
+
+        auto mapSegment = [calculator,
+                           stepDegrees,
+                           segmentProgress,
+                           cancelFlag,
+                           semiMajorAxis,
+                           obliquity,
+                           perihelionArgument](const OrbitSegment &segment) {
+            if (cancelFlag && cancelFlag->load()) {
+                return QVector<TemperatureRangePoint>{};
+            }
+            return calculator.temperatureRangesForOrbitSegment(segment,
                                                                semiMajorAxis,
                                                                obliquity,
                                                                perihelionArgument,
                                                                stepDegrees,
-                                                               progressCallback,
+                                                               segmentProgress,
                                                                cancelFlag.get());
-        }));
+        };
+
+        auto reduceSegments = [](QVector<QVector<TemperatureRangePoint>> &results,
+                                 const QVector<TemperatureRangePoint> &segmentResult) {
+            results.push_back(segmentResult);
+        };
+
+        watcher->setFuture(QtConcurrent::mappedReduced(
+            lastOrbitSegments_,
+            mapSegment,
+            reduceSegments,
+            QtConcurrent::OrderedReduce));
     }
 
     void cancelTemperatureCalculation() {
