@@ -17,6 +17,9 @@ struct PlanetPreset {
     QString name;
     double semiMajorAxis;
     double dayLengthDays;
+    double eccentricity;
+    double obliquityDegrees;
+    double perihelionArgumentDegrees;
     QString surfaceMaterialId;
 };
 

@@ -60,9 +60,17 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     maximumCurve_->attach(this);
 }
 
-void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points) {
+void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
+                                                  const QString &segmentLabel) {
     points_ = points;
-    tracker_->setTemperatureSeries(points_);
+    segmentLabel_ = segmentLabel;
+    tracker_->setTemperatureSeries(points_, segmentLabel_);
+
+    if (!segmentLabel_.isEmpty()) {
+        setTitle(QStringLiteral("Температура поверхности по широтам — %1").arg(segmentLabel_));
+    } else {
+        setTitle(QStringLiteral("Температура поверхности по широтам"));
+    }
 
     QVector<QPointF> minimumSeries;
     QVector<QPointF> maximumSeries;
@@ -81,7 +89,9 @@ void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRange
 
 void SurfaceTemperaturePlot::clearSeries() {
     points_.clear();
+    segmentLabel_.clear();
     tracker_->clearSeries();
+    setTitle(QStringLiteral("Температура поверхности по широтам"));
     minimumCurve_->setSamples(QVector<QPointF>{});
     maximumCurve_->setSamples(QVector<QPointF>{});
     replot();

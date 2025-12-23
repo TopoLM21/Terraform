@@ -8,6 +8,7 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets)
 # find_package( REQUIRED)
 # target_link_libraries()
 add_executable(solar_constant
+    src/orbit_segment_calculator.cpp
     src/planet_presets.cpp
     src/solar_calculator.cpp
     src/solar_display.cpp
@@ -16,7 +17,7 @@ add_executable(solar_constant
     src/temperature_plot_tracker.cpp
 )
 
-target_include_directories(solar_constant PRIVATE include)
+target_include_directories(solar_constant PRIVATE include src)
 target_link_libraries(solar_constant PRIVATE Qt5::Widgets qwt-qt5)
 
 if (MSVC)

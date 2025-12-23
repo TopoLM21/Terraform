@@ -18,6 +18,26 @@ constexpr int kMaxStepsPerDay = 20000;
 constexpr int kLayerCount = 8;
 constexpr double kSurfaceDepthMeters = 1.0;
 constexpr double kMaxSurfaceTemperature = 4000.0;
+
+double meanDailyCosine(double latitudeRadians, double declinationRadians) {
+    const double tanProduct = std::tan(latitudeRadians) * std::tan(declinationRadians);
+    double hourAngleLimit = 0.0;
+
+    if (tanProduct >= 1.0) {
+        // Полярный день: Солнце не заходит, H0 = π.
+        hourAngleLimit = kPi;
+    } else if (tanProduct <= -1.0) {
+        // Полярная ночь: Солнце не восходит, H0 = 0.
+        hourAngleLimit = 0.0;
+    } else {
+        hourAngleLimit = std::acos(-tanProduct);
+    }
+
+    const double meanCosine =
+        (hourAngleLimit * std::sin(latitudeRadians) * std::sin(declinationRadians) +
+         std::cos(latitudeRadians) * std::cos(declinationRadians) * std::sin(hourAngleLimit)) / kPi;
+    return qMax(0.0, meanCosine);
+}
 }  // namespace
 
 SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
@@ -34,6 +54,66 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     int stepDegrees,
     const ProgressCallback &progressCallback,
     const std::atomic_bool *cancelFlag) const {
+    const int totalLatitudes = stepDegrees > 0 ? 180 / stepDegrees + 1 : 0;
+    return temperatureRangesByLatitudeForSegment(stepDegrees, solarConstant_, 0.0, progressCallback,
+                                                 cancelFlag, 0, totalLatitudes);
+}
+
+QVector<QVector<TemperatureRangePoint>> SurfaceTemperatureCalculator::temperatureRangesByOrbitSegments(
+    const QVector<OrbitSegment> &segments,
+    double referenceDistanceAU,
+    double obliquityDegrees,
+    double perihelionArgumentDegrees,
+    int stepDegrees,
+    const ProgressCallback &progressCallback,
+    const std::atomic_bool *cancelFlag) const {
+    QVector<QVector<TemperatureRangePoint>> results;
+    if (segments.isEmpty() || stepDegrees <= 0) {
+        return results;
+    }
+
+    const double obliquityRadians = qDegreesToRadians(obliquityDegrees);
+    const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgumentDegrees);
+    const int latitudesCount = 180 / stepDegrees + 1;
+    const int totalProgress = latitudesCount * segments.size();
+
+    results.reserve(segments.size());
+    for (int i = 0; i < segments.size(); ++i) {
+        if (cancelFlag && cancelFlag->load()) {
+            return {};
+        }
+
+        const auto &segment = segments.at(i);
+        // Сезонная деклинация: угол между лучами звезды и экватором планеты.
+        // δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
+        const double solarLongitude = segment.trueAnomalyRadians + perihelionArgumentRadians;
+        const double declinationDegrees = qRadiansToDegrees(
+            std::asin(std::sin(obliquityRadians) * std::sin(solarLongitude)));
+        // Инсоляция меняется с расстоянием как 1 / r^2 относительно опорной дистанции.
+        const double segmentSolarConstant =
+            solarConstant_ * std::pow(referenceDistanceAU / segment.distanceAU, 2.0);
+        const int progressOffset = i * latitudesCount;
+
+        results.push_back(temperatureRangesByLatitudeForSegment(stepDegrees,
+                                                                segmentSolarConstant,
+                                                                declinationDegrees,
+                                                                progressCallback,
+                                                                cancelFlag,
+                                                                progressOffset,
+                                                                totalProgress));
+    }
+
+    return results;
+}
+
+QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitudeForSegment(
+    int stepDegrees,
+    double segmentSolarConstant,
+    double declinationDegrees,
+    const ProgressCallback &progressCallback,
+    const std::atomic_bool *cancelFlag,
+    int progressOffset,
+    int totalProgress) const {
     QVector<TemperatureRangePoint> points;
     if (stepDegrees <= 0) {
         return points;
@@ -42,8 +122,8 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     const int steps = 180 / stepDegrees;
     points.reserve(steps + 1);
 
-    const int totalLatitudes = steps + 1;
     int processedLatitudes = 0;
+    const double declinationRadians = qDegreesToRadians(declinationDegrees);
 
     for (int latitude = -90; latitude <= 90; latitude += stepDegrees) {
         if (cancelFlag && cancelFlag->load()) {
@@ -63,7 +143,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         const double conductionFactor = thermalConductivity / layerThickness;
         const double emissivity = qMax(0.0001, material_.emissivity);
         const double spaceTemperaturePower = std::pow(kSpaceTemperatureKelvin, 4.0);
-        const double maxSolarFlux = solarConstant_ * (1.0 - material_.albedo);
+        const double maxSolarFlux = segmentSolarConstant * (1.0 - material_.albedo);
         const double maxRadiativeTemperature =
             std::pow((maxSolarFlux + kInternalHeatFlux) /
                          (emissivity * kStefanBoltzmannConstant) +
@@ -84,9 +164,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
             static_cast<int>(std::ceil(dayLengthSeconds / stableTimeStep)),
             kMaxStepsPerDay);
         const double timeStepSeconds = dayLengthSeconds / stepsPerDay;
-        const double averageCosine = qMax(0.0, std::cos(latitudeRadians)) / kPi;
-        // Усредненная за сутки инсоляция нужна для старта итераций без резких скачков.
-        const double meanSolarFlux = solarConstant_ * averageCosine * (1.0 - material_.albedo);
+        // Усредненная за сутки инсоляция: учитываем сезонную деклинацию.
+        const double averageCosine = meanDailyCosine(latitudeRadians, declinationRadians);
+        const double meanSolarFlux =
+            segmentSolarConstant * averageCosine * (1.0 - material_.albedo);
         const double meanFlux = meanSolarFlux + kInternalHeatFlux +
                                 emissivity * kStefanBoltzmannConstant * spaceTemperaturePower;
         const double initialTemperature = std::pow(meanFlux / (emissivity * kStefanBoltzmannConstant),
@@ -104,8 +185,11 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                 }
                 const double phase = static_cast<double>(step) / stepsPerDay;
                 const double hourAngle = 2.0 * kPi * phase - kPi;
-                const double solarFactor = std::cos(latitudeRadians) * std::cos(hourAngle);
-                const double solarFlux = solarConstant_ * qMax(0.0, solarFactor) *
+                // Солнечный фактор: cos(зенитного угла) с поправкой на сезонную деклинацию.
+                const double solarFactor = std::sin(latitudeRadians) * std::sin(declinationRadians) +
+                                           std::cos(latitudeRadians) * std::cos(declinationRadians) *
+                                               std::cos(hourAngle);
+                const double solarFlux = segmentSolarConstant * qMax(0.0, solarFactor) *
                                          (1.0 - material_.albedo);
 
                 QVector<double> nextLayers = layers;
@@ -160,7 +244,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
 
         ++processedLatitudes;
         if (progressCallback) {
-            progressCallback(processedLatitudes, totalLatitudes);
+            progressCallback(progressOffset + processedLatitudes, totalProgress);
         }
     }
 

@@ -13,12 +13,15 @@ TemperaturePlotTracker::TemperaturePlotTracker(QWidget *canvas)
     setRubberBand(QwtPicker::VLineRubberBand);
 }
 
-void TemperaturePlotTracker::setTemperatureSeries(const QVector<TemperatureRangePoint> &points) {
+void TemperaturePlotTracker::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
+                                                  const QString &segmentLabel) {
     points_ = points;
+    segmentLabel_ = segmentLabel;
 }
 
 void TemperaturePlotTracker::clearSeries() {
     points_.clear();
+    segmentLabel_.clear();
 }
 
 QwtText TemperaturePlotTracker::trackerTextF(const QPointF &pos) const {
@@ -32,12 +35,15 @@ QwtText TemperaturePlotTracker::trackerTextF(const QPointF &pos) const {
     }
 
     const auto &point = points_.at(index);
-    const QString text = QStringLiteral("Широта: %1°\nМин: %2 K (%3 °C)\nМакс: %4 K (%5 °C)")
-                             .arg(point.latitudeDegrees, 0, 'f', 0)
-                             .arg(point.minimumKelvin, 0, 'f', 1)
-                             .arg(point.minimumCelsius, 0, 'f', 1)
-                             .arg(point.maximumKelvin, 0, 'f', 1)
-                             .arg(point.maximumCelsius, 0, 'f', 1);
+    QString text = QStringLiteral("Широта: %1°\nМин: %2 K (%3 °C)\nМакс: %4 K (%5 °C)")
+                       .arg(point.latitudeDegrees, 0, 'f', 0)
+                       .arg(point.minimumKelvin, 0, 'f', 1)
+                       .arg(point.minimumCelsius, 0, 'f', 1)
+                       .arg(point.maximumKelvin, 0, 'f', 1)
+                       .arg(point.maximumCelsius, 0, 'f', 1);
+    if (!segmentLabel_.isEmpty()) {
+        text.append(QStringLiteral("\n%1").arg(segmentLabel_));
+    }
 
     QwtText trackerText(text);
     trackerText.setBackgroundBrush(QBrush(QColor(255, 255, 255, 220)));
