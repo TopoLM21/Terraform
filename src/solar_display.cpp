@@ -18,6 +18,8 @@
 #include <QtCore/QSet>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QHash>
+#include <QtCore/QHashFunctions>
+#include <QtCore/QEndian>
 #include <QtGui/QDoubleValidator>
 #include <QtConcurrent/QtConcurrent>
 #include <QtWidgets/QApplication>
@@ -42,6 +44,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <cstring>
 
 namespace {
 constexpr int kRoleSemiMajorAxis = Qt::UserRole;
@@ -78,13 +81,21 @@ struct TemperatureCacheKey {
 };
 
 uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
-    seed = qHash(key.solarConstant, seed);
+    const auto hashDoubleBits = [](double value) -> quint64 {
+        // Хэшируем битовое представление (в big-endian), чтобы не зависеть от qHash(double).
+        quint64 bits = 0;
+        static_assert(sizeof(bits) == sizeof(value), "Unexpected double size.");
+        std::memcpy(&bits, &value, sizeof(bits));
+        return qToBigEndian(bits);
+    };
+
+    seed = qHash(hashDoubleBits(key.solarConstant), seed);
     seed = qHash(key.materialId, seed);
-    seed = qHash(key.dayLength, seed);
-    seed = qHash(key.semiMajorAxis, seed);
-    seed = qHash(key.eccentricity, seed);
-    seed = qHash(key.obliquity, seed);
-    seed = qHash(key.perihelionArgument, seed);
+    seed = qHash(hashDoubleBits(key.dayLength), seed);
+    seed = qHash(hashDoubleBits(key.semiMajorAxis), seed);
+    seed = qHash(hashDoubleBits(key.eccentricity), seed);
+    seed = qHash(hashDoubleBits(key.obliquity), seed);
+    seed = qHash(hashDoubleBits(key.perihelionArgument), seed);
     seed = qHash(key.stepDegrees, seed);
     seed = qHash(key.segmentCount, seed);
     return seed;
