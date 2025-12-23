@@ -17,9 +17,6 @@ constexpr int kMinStepsPerDay = 48;
 constexpr int kMaxStepsPerDay = 20000;
 constexpr int kLayerCount = 8;
 constexpr double kSurfaceDepthMeters = 1.0;
-constexpr double kDensity = 1500.0;
-constexpr double kSpecificHeat = 800.0;
-constexpr double kThermalConductivity = 0.5;
 constexpr double kMaxSurfaceTemperature = 4000.0;
 }  // namespace
 
@@ -55,8 +52,15 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         const double latitudeRadians = qDegreesToRadians(static_cast<double>(latitude));
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double layerThickness = kSurfaceDepthMeters / kLayerCount;
-        const double heatCapacity = kDensity * kSpecificHeat * layerThickness;
-        const double conductionFactor = kThermalConductivity / layerThickness;
+        const double density = qMax(1.0, material_.density);
+        const double specificHeat = qMax(1.0, material_.specificHeat);
+        const double thermalConductivity = qMax(1e-6, material_.thermalConductivity);
+        // Тепловая инерция I = sqrt(k * rho * c) описывает устойчивость поверхности к нагреву.
+        const double thermalInertia =
+            std::sqrt(thermalConductivity * density * specificHeat);
+        const double heatCapacity = density * specificHeat * layerThickness;
+        // Коэффициент теплопереноса между слоями: k / dz.
+        const double conductionFactor = thermalConductivity / layerThickness;
         const double emissivity = qMax(0.0001, material_.emissivity);
         const double spaceTemperaturePower = std::pow(kSpaceTemperatureKelvin, 4.0);
         const double maxSolarFlux = solarConstant_ * (1.0 - material_.albedo);
@@ -65,8 +69,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                          (emissivity * kStefanBoltzmannConstant) +
                      spaceTemperaturePower,
                      0.25);
-        // Ограничиваем шаг по времени по условиям устойчивости явной схемы
-        // для теплопроводности и радиационного охлаждения.
+        // Ограничиваем шаг по времени по условиям устойчивости явной схемы:
+        // Δt_cond ~ (rho * c * dz^2) / (2 * k), Δt_rad ~ (rho * c * dz) / (4 * εσT^3).
+        // thermalInertia влияет на выбор Δt_cond через k, rho и c.
+        (void)thermalInertia;
         const double conductionTimeStep = heatCapacity / (2.0 * conductionFactor);
         const double radiativeTimeStep =
             heatCapacity /

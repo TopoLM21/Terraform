@@ -8,6 +8,9 @@ struct SurfaceMaterial {
     QString name;
     double albedo;
     double emissivity;
+    double thermalConductivity;
+    double density;
+    double specificHeat;
 };
 
 struct PlanetPreset {
