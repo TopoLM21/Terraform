@@ -17,6 +17,7 @@
 #include <QtCore/QtMath>
 #include <QtCore/QSet>
 #include <QtCore/QFutureWatcher>
+#include <QtCore/QHash>
 #include <QtGui/QDoubleValidator>
 #include <QtConcurrent/QtConcurrent>
 #include <QtWidgets/QApplication>
@@ -51,6 +52,64 @@ constexpr int kRoleDayLength = Qt::UserRole + 4;
 constexpr int kRoleEccentricity = Qt::UserRole + 5;
 constexpr int kRoleObliquity = Qt::UserRole + 6;
 constexpr int kRolePerihelionArgument = Qt::UserRole + 7;
+
+struct TemperatureCacheKey {
+    double solarConstant = 0.0;
+    QString materialId;
+    double dayLength = 0.0;
+    double semiMajorAxis = 0.0;
+    double eccentricity = 0.0;
+    double obliquity = 0.0;
+    double perihelionArgument = 0.0;
+    int stepDegrees = 0;
+    int segmentCount = 0;
+
+    bool operator==(const TemperatureCacheKey &other) const {
+        return solarConstant == other.solarConstant &&
+               materialId == other.materialId &&
+               dayLength == other.dayLength &&
+               semiMajorAxis == other.semiMajorAxis &&
+               eccentricity == other.eccentricity &&
+               obliquity == other.obliquity &&
+               perihelionArgument == other.perihelionArgument &&
+               stepDegrees == other.stepDegrees &&
+               segmentCount == other.segmentCount;
+    }
+};
+
+uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
+    seed = qHash(key.solarConstant, seed);
+    seed = qHash(key.materialId, seed);
+    seed = qHash(key.dayLength, seed);
+    seed = qHash(key.semiMajorAxis, seed);
+    seed = qHash(key.eccentricity, seed);
+    seed = qHash(key.obliquity, seed);
+    seed = qHash(key.perihelionArgument, seed);
+    seed = qHash(key.stepDegrees, seed);
+    seed = qHash(key.segmentCount, seed);
+    return seed;
+}
+
+struct TemperatureCacheEntry {
+    QVector<OrbitSegment> orbitSegments;
+    QVector<QVector<TemperatureRangePoint>> temperatureSegments;
+};
+
+struct StellarCacheKey {
+    double primaryRadius = 0.0;
+    double primaryTemperature = 0.0;
+    bool hasSecondary = false;
+    double secondaryRadius = 0.0;
+    double secondaryTemperature = 0.0;
+
+    bool operator==(const StellarCacheKey &other) const {
+        return primaryRadius == other.primaryRadius &&
+               primaryTemperature == other.primaryTemperature &&
+               hasSecondary == other.hasSecondary &&
+               secondaryRadius == other.secondaryRadius &&
+               secondaryTemperature == other.secondaryTemperature;
+    }
+};
 
 class SolarCalculatorWidget : public QWidget {
 public:
@@ -272,16 +331,19 @@ public:
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
             updatePlanetActions();
+            clearTemperatureCache();
             updateTemperaturePlot();
         });
 
         connect(materialComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             syncPlanetMaterialWithSelection();
+            clearTemperatureCache();
             updateTemperaturePlot();
         });
 
         connect(latitudeStepSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) {
             latitudeStepManuallySet_ = true;
+            clearTemperatureCache();
             updateTemperaturePlot();
         });
 
@@ -309,6 +371,17 @@ private:
                 return;
             }
             parameters.secondary = secondary;
+        }
+
+        const StellarCacheKey stellarKey{
+            parameters.primary.radiusInSolarRadii,
+            parameters.primary.temperatureKelvin,
+            static_cast<bool>(parameters.secondary),
+            parameters.secondary ? parameters.secondary->radiusInSolarRadii : 0.0,
+            parameters.secondary ? parameters.secondary->temperatureKelvin : 0.0};
+        if (!lastStellarKey_ || *lastStellarKey_ != stellarKey) {
+            clearTemperatureCache();
+            lastStellarKey_ = stellarKey;
         }
 
         double semiMajorAxis = 0.0;
@@ -414,6 +487,8 @@ private:
     QVector<OrbitSegment> lastOrbitSegments_;
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
     bool latitudeStepManuallySet_ = false;
+    QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
+    std::optional<StellarCacheKey> lastStellarKey_;
 
     void setInputValue(QLineEdit *input, double value) {
         input->setText(QString::number(value));
@@ -424,6 +499,7 @@ private:
         const QSignalBlocker blocker(planetComboBox_);
         planetComboBox_->clear();
         presetPlanetNames_.clear();
+        clearTemperatureCache();
         for (const auto &planet : planets) {
             presetPlanetNames_.insert(planet.name);
             addPlanetItem(planet, false);
@@ -446,6 +522,7 @@ private:
         const QSignalBlocker blocker(planetComboBox_);
         planetComboBox_->clear();
         presetPlanetNames_.clear();
+        clearTemperatureCache();
         planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
         planetDayLengthLabel_->setText(QStringLiteral("—"));
         planetEccentricityLabel_->setText(QStringLiteral("—"));
@@ -712,6 +789,7 @@ private:
             updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
             updatePlanetActions();
+            clearTemperatureCache();
             dialog.accept();
         });
 
@@ -797,6 +875,10 @@ private:
         temperaturePlot_->clearSeries();
     }
 
+    void clearTemperatureCache() {
+        temperatureCache_.clear();
+    }
+
     void updateTemperaturePlot() {
         cancelTemperatureCalculation();
 
@@ -833,13 +915,32 @@ private:
             return;
         }
 
+        const int stepDegrees = latitudeStepSpinBox_->value();
+        const int segmentCount = 12;
+        const TemperatureCacheKey cacheKey{lastSolarConstant_,
+                                            material->id,
+                                            dayLength,
+                                            semiMajorAxis,
+                                            eccentricity,
+                                            obliquity,
+                                            perihelionArgument,
+                                            stepDegrees,
+                                            segmentCount};
+        const auto cached = temperatureCache_.constFind(cacheKey);
+        if (cached != temperatureCache_.constEnd()) {
+            // Кэш нужен для быстрого переключения сегментов/планет без повторного расчёта.
+            lastOrbitSegments_ = cached->orbitSegments;
+            lastTemperatureSegments_ = cached->temperatureSegments;
+            updateSegmentComboBox();
+            updateTemperaturePlotForSelectedSegment();
+            return;
+        }
+
         lastTemperatureSegments_.clear();
 
         const int requestId = ++temperatureRequestId_;
         temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
         const auto cancelFlag = temperatureCancelFlag_;
-        const int stepDegrees = latitudeStepSpinBox_->value();
-        const int segmentCount = 12;
         const int totalLatitudes = 180 / stepDegrees + 1;
         const int totalProgress = totalLatitudes * segmentCount;
 
@@ -870,7 +971,7 @@ private:
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
-                [this, watcher, requestId, cancelFlag]() {
+                [this, watcher, requestId, cancelFlag, cacheKey]() {
             watcher->deleteLater();
             if (requestId == temperatureRequestId_) {
                 temperatureProgressDialog_->hide();
@@ -883,6 +984,7 @@ private:
                 return;
             }
             lastTemperatureSegments_ = result;
+            temperatureCache_.insert(cacheKey, TemperatureCacheEntry{lastOrbitSegments_, result});
             updateSegmentComboBox();
             updateTemperaturePlotForSelectedSegment();
         });
@@ -949,6 +1051,7 @@ private:
         lastSolarConstant_ = 0.0;
         resultLabel_->setText(
             QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."));
+        clearTemperatureCache();
         updateTemperaturePlot();
     }
 };
