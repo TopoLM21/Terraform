@@ -14,7 +14,7 @@ constexpr double kInternalHeatFlux = 0.05;
 constexpr double kSecondsPerEarthDay = 86400.0;
 constexpr double kBaseStepSeconds = 900.0;
 constexpr int kMinStepsPerDay = 48;
-constexpr int kMaxStepsPerDay = 720;
+constexpr int kMaxStepsPerDay = 20000;
 constexpr int kLayerCount = 8;
 constexpr double kSurfaceDepthMeters = 1.0;
 constexpr double kDensity = 1500.0;
@@ -41,16 +41,30 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     for (int latitude = -90; latitude <= 90; latitude += stepDegrees) {
         const double latitudeRadians = qDegreesToRadians(static_cast<double>(latitude));
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
-        const int stepsPerDay = qBound(
-            kMinStepsPerDay,
-            static_cast<int>(std::ceil(dayLengthSeconds / kBaseStepSeconds)),
-            kMaxStepsPerDay);
-        const double timeStepSeconds = dayLengthSeconds / stepsPerDay;
         const double layerThickness = kSurfaceDepthMeters / kLayerCount;
         const double heatCapacity = kDensity * kSpecificHeat * layerThickness;
         const double conductionFactor = kThermalConductivity / layerThickness;
         const double emissivity = qMax(0.0001, material_.emissivity);
         const double spaceTemperaturePower = std::pow(kSpaceTemperatureKelvin, 4.0);
+        const double maxSolarFlux = solarConstant_ * (1.0 - material_.albedo);
+        const double maxRadiativeTemperature =
+            std::pow((maxSolarFlux + kInternalHeatFlux) /
+                         (emissivity * kStefanBoltzmannConstant) +
+                     spaceTemperaturePower,
+                     0.25);
+        // Ограничиваем шаг по времени по условиям устойчивости явной схемы
+        // для теплопроводности и радиационного охлаждения.
+        const double conductionTimeStep = heatCapacity / (2.0 * conductionFactor);
+        const double radiativeTimeStep =
+            heatCapacity /
+            (4.0 * emissivity * kStefanBoltzmannConstant *
+             std::pow(qMax(1.0, maxRadiativeTemperature), 3.0));
+        const double stableTimeStep = qMin(kBaseStepSeconds, qMin(conductionTimeStep, radiativeTimeStep));
+        const int stepsPerDay = qBound(
+            kMinStepsPerDay,
+            static_cast<int>(std::ceil(dayLengthSeconds / stableTimeStep)),
+            kMaxStepsPerDay);
+        const double timeStepSeconds = dayLengthSeconds / stepsPerDay;
         const double averageCosine = qMax(0.0, std::cos(latitudeRadians)) / kPi;
         // Усредненная за сутки инсоляция нужна для старта итераций без резких скачков.
         const double meanSolarFlux = solarConstant_ * averageCosine * (1.0 - material_.albedo);
