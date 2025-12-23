@@ -30,6 +30,13 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitude(
     int stepDegrees) const {
+    return temperatureRangesByLatitude(stepDegrees, ProgressCallback{}, nullptr);
+}
+
+QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitude(
+    int stepDegrees,
+    const ProgressCallback &progressCallback,
+    const std::atomic_bool *cancelFlag) const {
     QVector<TemperatureRangePoint> points;
     if (stepDegrees <= 0) {
         return points;
@@ -38,7 +45,13 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     const int steps = 180 / stepDegrees;
     points.reserve(steps + 1);
 
+    const int totalLatitudes = steps + 1;
+    int processedLatitudes = 0;
+
     for (int latitude = -90; latitude <= 90; latitude += stepDegrees) {
+        if (cancelFlag && cancelFlag->load()) {
+            return {};
+        }
         const double latitudeRadians = qDegreesToRadians(static_cast<double>(latitude));
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double layerThickness = kSurfaceDepthMeters / kLayerCount;
@@ -80,6 +93,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         constexpr int kSpinupCycles = 3;
         for (int cycle = 0; cycle < kSpinupCycles; ++cycle) {
             for (int step = 0; step < stepsPerDay; ++step) {
+                if (cancelFlag && cancelFlag->load()) {
+                    return {};
+                }
                 const double phase = static_cast<double>(step) / stepsPerDay;
                 const double hourAngle = 2.0 * kPi * phase - kPi;
                 const double solarFactor = std::cos(latitudeRadians) * std::cos(hourAngle);
@@ -135,6 +151,11 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         point.minimumCelsius = minimumTemperature - kKelvinOffset;
         point.maximumCelsius = maximumTemperature - kKelvinOffset;
         points.push_back(point);
+
+        ++processedLatitudes;
+        if (progressCallback) {
+            progressCallback(processedLatitudes, totalLatitudes);
+        }
     }
 
     return points;
