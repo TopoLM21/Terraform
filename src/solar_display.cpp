@@ -32,6 +32,7 @@
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QSpinBox>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
@@ -160,6 +161,9 @@ public:
         planetPerihelionArgumentLabel_ = new QLabel(QStringLiteral("—"), this);
         materialComboBox_ = new QComboBox(this);
         populateMaterials();
+        latitudeStepSpinBox_ = new QSpinBox(this);
+        latitudeStepSpinBox_->setRange(1, 45);
+        latitudeStepSpinBox_->setValue(1);
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
         deletePlanetButton_ = new QPushButton(this);
         deletePlanetButton_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
@@ -179,6 +183,7 @@ public:
         planetFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
                                  planetPerihelionArgumentLabel_);
         planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
+        planetFormLayout->addRow(QStringLiteral("Шаг широты (°):"), latitudeStepSpinBox_);
         planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
         planetFormLayout->addRow(QString(), addPlanetButton_);
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
@@ -238,6 +243,7 @@ public:
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
             updatePlanetOrbitLabels();
+            updateLatitudeStepDefault();
             syncMaterialWithPlanet();
             updatePlanetActions();
             if (hasPrimaryInputs() && (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -271,6 +277,11 @@ public:
 
         connect(materialComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             syncPlanetMaterialWithSelection();
+            updateTemperaturePlot();
+        });
+
+        connect(latitudeStepSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) {
+            latitudeStepManuallySet_ = true;
             updateTemperaturePlot();
         });
 
@@ -386,6 +397,7 @@ private:
     QLabel *planetObliquityLabel_ = nullptr;
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
+    QSpinBox *latitudeStepSpinBox_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
 
@@ -401,6 +413,7 @@ private:
     bool hasSolarConstant_ = false;
     QVector<OrbitSegment> lastOrbitSegments_;
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
+    bool latitudeStepManuallySet_ = false;
 
     void setInputValue(QLineEdit *input, double value) {
         input->setText(QString::number(value));
@@ -424,6 +437,7 @@ private:
         updatePlanetSemiMajorAxisLabel();
         updatePlanetDayLengthLabel();
         updatePlanetOrbitLabels();
+        updateLatitudeStepDefault();
         syncMaterialWithPlanet();
         updatePlanetActions();
     }
@@ -490,6 +504,24 @@ private:
             return;
         }
         planetDayLengthLabel_->setText(formatDayLength(value.toDouble()));
+    }
+
+    void updateLatitudeStepDefault() {
+        if (latitudeStepManuallySet_) {
+            return;
+        }
+
+        const QVariant value = planetComboBox_->currentData(kRoleDayLength);
+        if (!value.isValid()) {
+            return;
+        }
+
+        const double dayLength = value.toDouble();
+        // Для медленных планет увеличиваем шаг широты, чтобы профили быстро считались
+        // и оставались читаемыми при малом числе характерных широт.
+        const int defaultStep = (dayLength > 30.0) ? 45 : 1;
+        const QSignalBlocker blocker(latitudeStepSpinBox_);
+        latitudeStepSpinBox_->setValue(defaultStep);
     }
 
     void updatePlanetOrbitLabels() {
@@ -806,7 +838,7 @@ private:
         const int requestId = ++temperatureRequestId_;
         temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
         const auto cancelFlag = temperatureCancelFlag_;
-        const int stepDegrees = 1;
+        const int stepDegrees = latitudeStepSpinBox_->value();
         const int segmentCount = 12;
         const int totalLatitudes = 180 / stepDegrees + 1;
         const int totalProgress = totalLatitudes * segmentCount;
