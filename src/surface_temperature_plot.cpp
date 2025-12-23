@@ -1,9 +1,11 @@
 #include "surface_temperature_plot.h"
+#include "temperature_plot_tracker.h"
 
 #include <qwt/qwt_plot_curve.h>
 #include <qwt/qwt_plot_grid.h>
 #include <qwt/qwt_plot_marker.h>
 #include <qwt/qwt_scale_draw.h>
+#include <qwt/qwt_legend.h>
 #include <qwt/qwt_text.h>
 
 #include <QtGui/QPalette>
@@ -24,12 +26,19 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     : QwtPlot(parent),
       minimumCurve_(new QwtPlotCurve(QStringLiteral("Минимум за сутки"))),
       maximumCurve_(new QwtPlotCurve(QStringLiteral("Максимум за сутки"))),
-      grid_(new QwtPlotGrid()), freezingMarker_(new QwtPlotMarker()) {
+      grid_(new QwtPlotGrid()),
+      freezingMarker_(new QwtPlotMarker()),
+      tracker_(new TemperaturePlotTracker(canvas())) {
     setTitle(QStringLiteral("Температура поверхности по широтам"));
     setAxisTitle(QwtPlot::xBottom, QStringLiteral("Широта (°)"));
     setAxisTitle(QwtPlot::yLeft, QStringLiteral("Температура (K, °C)"));
     setAxisScale(QwtPlot::xBottom, -90.0, 90.0, 15.0);
     setAxisScaleDraw(QwtPlot::yLeft, new TemperatureScaleDraw());
+
+    canvas()->setMouseTracking(true);
+
+    auto *legend = new QwtLegend(this);
+    insertLegend(legend, QwtPlot::RightLegend);
 
     grid_->setMajorPen(QPen(palette().color(QPalette::Mid), 0.0, Qt::DashLine));
     grid_->attach(this);
@@ -52,6 +61,9 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
 }
 
 void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points) {
+    points_ = points;
+    tracker_->setTemperatureSeries(points_);
+
     QVector<QPointF> minimumSeries;
     QVector<QPointF> maximumSeries;
     minimumSeries.reserve(points.size());
@@ -68,6 +80,8 @@ void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRange
 }
 
 void SurfaceTemperaturePlot::clearSeries() {
+    points_.clear();
+    tracker_->clearSeries();
     minimumCurve_->setSamples(QVector<QPointF>{});
     maximumCurve_->setSamples(QVector<QPointF>{});
     replot();

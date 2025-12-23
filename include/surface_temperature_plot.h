@@ -7,6 +7,7 @@
 class QwtPlotCurve;
 class QwtPlotGrid;
 class QwtPlotMarker;
+class TemperaturePlotTracker;
 
 class SurfaceTemperaturePlot : public QwtPlot {
 public:
@@ -20,4 +21,6 @@ private:
     QwtPlotCurve *maximumCurve_;
     QwtPlotGrid *grid_;
     QwtPlotMarker *freezingMarker_;
+    TemperaturePlotTracker *tracker_;
+    QVector<TemperatureRangePoint> points_;
 };

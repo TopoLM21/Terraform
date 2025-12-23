@@ -13,6 +13,7 @@ add_executable(solar_constant
     src/solar_display.cpp
     src/surface_temperature_calculator.cpp
     src/surface_temperature_plot.cpp
+    src/temperature_plot_tracker.cpp
 )
 
 target_include_directories(solar_constant PRIVATE include)
