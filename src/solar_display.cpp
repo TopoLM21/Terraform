@@ -7,7 +7,8 @@
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QLocale>
-#include <QtCore/QOverload>
+// #include <QtCore/QOverload>
+#include <QtGlobal>
 #include <QtCore/QSet>
 #include <QtGui/QDoubleValidator>
 #include <QtWidgets/QApplication>

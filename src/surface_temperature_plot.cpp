@@ -1,9 +1,9 @@
 #include "surface_temperature_plot.h"
 
-#include <qwt_plot_curve.h>
-#include <qwt_plot_grid.h>
-#include <qwt_scale_draw.h>
-#include <qwt_text.h>
+#include <qwt/qwt_plot_curve.h>
+#include <qwt/qwt_plot_grid.h>
+#include <qwt/qwt_scale_draw.h>
+#include <qwt/qwt_text.h>
 
 #include <QtGui/QPalette>
 
