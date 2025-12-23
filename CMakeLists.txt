@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 REQUIRED COMPONENTS Widgets Svg)
 
 option(USE_BUNDLED_QWT "Build Qwt from the bundled 3rdparty sources" ON)
-option(QWT_FORCE_REBUILD "Force a clean rebuild of bundled Qwt" ON)
+option(QWT_FORCE_REBUILD "Force a clean rebuild of bundled Qwt" OFF)
 
 if (USE_BUNDLED_QWT)
     include(ExternalProject)
@@ -50,12 +50,12 @@ if (USE_BUNDLED_QWT)
         SOURCE_DIR "${QWT_SOURCE_DIR}"
         BINARY_DIR "${QWT_BINARY_DIR}"
         PATCH_COMMAND ${CMAKE_COMMAND}
-            -DQWT_SOURCE_DIR=<SOURCE_DIR>
-            -DQWT_INSTALL_PREFIX="${QWT_INSTALL_DIR}"
+            -Dqwtconfig_path=<SOURCE_DIR>/qwtconfig.pri
+            -DQWT_INSTALL_PREFIX=${QWT_INSTALL_DIR}
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_qwtconfig.cmake"
-        CONFIGURE_COMMAND "${QT_QMAKE_EXECUTABLE}" -o <BINARY_DIR>/Makefile <SOURCE_DIR>/qwt.pro
-        BUILD_COMMAND ${GNU_MAKE_EXECUTABLE}
-        INSTALL_COMMAND ${GNU_MAKE_EXECUTABLE} install
+        CONFIGURE_COMMAND ${CMAKE_COMMAND} -E chdir <BINARY_DIR> "${QT_QMAKE_EXECUTABLE}" "<SOURCE_DIR>/qwt.pro" "QWT_INSTALL_PREFIX=${QWT_INSTALL_DIR}"
+        BUILD_COMMAND ${CMAKE_COMMAND} -E chdir <BINARY_DIR> "${GNU_MAKE_EXECUTABLE}" -j
+        INSTALL_COMMAND ${CMAKE_COMMAND} -E chdir <BINARY_DIR> "${GNU_MAKE_EXECUTABLE}" install
         UPDATE_COMMAND ""
     )
     ExternalProject_Add_Step(qwt create_moc_dir
