@@ -2,7 +2,7 @@
 
 #include "surface_temperature_calculator.h"
 
-#include <qwt_plot.h>
+#include <qwt/qwt_plot.h>
 
 class QwtPlotCurve;
 class QwtPlotGrid;

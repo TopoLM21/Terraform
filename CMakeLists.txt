@@ -5,8 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
-find_package(Qwt REQUIRED)
-
+# find_package( REQUIRED)
+# target_link_libraries()
 add_executable(solar_constant
     src/planet_presets.cpp
     src/solar_calculator.cpp
@@ -16,7 +16,7 @@ add_executable(solar_constant
 )
 
 target_include_directories(solar_constant PRIVATE include)
-target_link_libraries(solar_constant PRIVATE Qt5::Widgets Qwt::Qwt)
+target_link_libraries(solar_constant PRIVATE Qt5::Widgets qwt-qt5)
 
 if (MSVC)
     target_compile_options(solar_constant PRIVATE /W4 /permissive-)
