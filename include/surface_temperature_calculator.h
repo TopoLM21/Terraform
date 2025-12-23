@@ -17,7 +17,7 @@ public:
     SurfaceTemperatureCalculator(double solarConstant, const SurfaceMaterial &material,
                                  double dayLengthDays);
 
-    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int stepDegrees = 15) const;
+    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int stepDegrees = 1) const;
 
 private:
     double solarConstant_;
