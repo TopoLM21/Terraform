@@ -13,19 +13,19 @@ QVector<SurfaceMaterial> surfaceMaterials() {
 
 QVector<PlanetPreset> solarSystemPresets() {
     return {
-        {QStringLiteral("Меркурий"), 0.39, QStringLiteral("rocky")},
-        {QStringLiteral("Венера"), 0.72, QStringLiteral("desert")},
-        {QStringLiteral("Земля"), 1.00, QStringLiteral("ocean")},
-        {QStringLiteral("Луна"), 1.00, QStringLiteral("rocky")},
-        {QStringLiteral("Марс"), 1.52, QStringLiteral("desert")},
-        {QStringLiteral("Церрера"), 2.77, QStringLiteral("ice")},
+        {QStringLiteral("Меркурий"), 0.39, 58.6, QStringLiteral("rocky")},
+        {QStringLiteral("Венера"), 0.72, 243.0, QStringLiteral("desert")},
+        {QStringLiteral("Земля"), 1.00, 1.0, QStringLiteral("ocean")},
+        {QStringLiteral("Луна"), 1.00, 27.3, QStringLiteral("rocky")},
+        {QStringLiteral("Марс"), 1.52, 1.03, QStringLiteral("desert")},
+        {QStringLiteral("Церрера"), 2.77, 0.38, QStringLiteral("ice")},
     };
 }
 
 QVector<PlanetPreset> sweetSkyPresets() {
     return {
-        {QStringLiteral("Планета 1"), 0.30, QStringLiteral("rocky")},
-        {QStringLiteral("Планета 2"), 0.40, QStringLiteral("forest")},
-        {QStringLiteral("Планета 3"), 0.51, QStringLiteral("ocean")},
+        {QStringLiteral("Планета 1"), 0.30, 0.7, QStringLiteral("rocky")},
+        {QStringLiteral("Планета 2"), 0.40, 1.4, QStringLiteral("forest")},
+        {QStringLiteral("Планета 3"), 0.51, 2.2, QStringLiteral("ocean")},
     };
 }

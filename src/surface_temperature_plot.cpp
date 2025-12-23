@@ -21,7 +21,9 @@ public:
 }  // namespace
 
 SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
-    : QwtPlot(parent), curve_(new QwtPlotCurve(QStringLiteral("Температура"))),
+    : QwtPlot(parent),
+      minimumCurve_(new QwtPlotCurve(QStringLiteral("Минимум за сутки"))),
+      maximumCurve_(new QwtPlotCurve(QStringLiteral("Максимум за сутки"))),
       grid_(new QwtPlotGrid()), freezingMarker_(new QwtPlotMarker()) {
     setTitle(QStringLiteral("Температура поверхности по широтам"));
     setAxisTitle(QwtPlot::xBottom, QStringLiteral("Широта (°)"));
@@ -40,24 +42,33 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     freezingMarker_->setLabelAlignment(Qt::AlignRight | Qt::AlignTop);
     freezingMarker_->attach(this);
 
-    curve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
-    curve_->setPen(QPen(palette().color(QPalette::Highlight), 2.0));
-    curve_->attach(this);
+    minimumCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
+    minimumCurve_->setPen(QPen(palette().color(QPalette::Highlight), 2.0));
+    minimumCurve_->attach(this);
+
+    maximumCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
+    maximumCurve_->setPen(QPen(palette().color(QPalette::Highlight).lighter(130), 2.0));
+    maximumCurve_->attach(this);
 }
 
-void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperaturePoint> &points) {
-    QVector<QPointF> series;
-    series.reserve(points.size());
+void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points) {
+    QVector<QPointF> minimumSeries;
+    QVector<QPointF> maximumSeries;
+    minimumSeries.reserve(points.size());
+    maximumSeries.reserve(points.size());
 
     for (const auto &point : points) {
-        series.push_back(QPointF(point.latitudeDegrees, point.temperatureKelvin));
+        minimumSeries.push_back(QPointF(point.latitudeDegrees, point.minimumKelvin));
+        maximumSeries.push_back(QPointF(point.latitudeDegrees, point.maximumKelvin));
     }
 
-    curve_->setSamples(series);
+    minimumCurve_->setSamples(minimumSeries);
+    maximumCurve_->setSamples(maximumSeries);
     replot();
 }
 
 void SurfaceTemperaturePlot::clearSeries() {
-    curve_->setSamples(QVector<QPointF>{});
+    minimumCurve_->setSamples(QVector<QPointF>{});
+    maximumCurve_->setSamples(QVector<QPointF>{});
     replot();
 }
