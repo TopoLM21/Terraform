@@ -7,6 +7,7 @@
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QLocale>
+#include <QtCore/QOverload>
 #include <QtCore/QSet>
 #include <QtGui/QDoubleValidator>
 #include <QtWidgets/QApplication>
@@ -180,7 +181,7 @@ public:
         setLayout(layout);
         resize(480, 360);
 
-        connect(planetComboBox_, &QComboBox::currentIndexChanged, this, [this]() {
+        connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             updatePlanetSemiMajorAxisLabel();
             syncMaterialWithPlanet();
             updatePlanetActions();
@@ -212,7 +213,7 @@ public:
             updateTemperaturePlot();
         });
 
-        connect(materialComboBox_, &QComboBox::currentIndexChanged, this, [this]() {
+        connect(materialComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             syncPlanetMaterialWithSelection();
             updateTemperaturePlot();
         });
