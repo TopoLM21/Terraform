@@ -858,6 +858,7 @@ private:
         const OrbitSegmentCalculator orbitCalculator(semiMajorAxis, eccentricity);
         lastOrbitSegments_ = orbitCalculator.segments(segmentCount);
         updateSegmentComboBox();
+        const auto segments = lastOrbitSegments_;
 
         auto progressCounter = std::make_shared<std::atomic_int>(0);
         auto segmentProgress = [progressCounter, progressCallback, totalProgress, cancelFlag](int, int) {
@@ -893,7 +894,7 @@ private:
         };
 
         watcher->setFuture(QtConcurrent::mappedReduced(
-            lastOrbitSegments_,
+            segments,
             mapSegment,
             reduceSegments,
             QtConcurrent::OrderedReduce));
