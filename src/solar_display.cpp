@@ -10,6 +10,7 @@
 #include <QtCore/QLocale>
 #include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
+#include <QtCore/QSysInfo>
 #include <QtCore/QThread>
 #include <QtCore/QThreadPool>
 // #include <QtCore/QOverload>
@@ -86,7 +87,10 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
         quint64 bits = 0;
         static_assert(sizeof(bits) == sizeof(value), "Unexpected double size.");
         std::memcpy(&bits, &value, sizeof(bits));
-        return qToBigEndian(bits);
+        if (QSysInfo::ByteOrder == QSysInfo::LittleEndian) {
+            bits = qbswap(bits);
+        }
+        return bits;
     };
 
     seed = qHash(hashDoubleBits(key.solarConstant), seed);
