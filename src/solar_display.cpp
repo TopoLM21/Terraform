@@ -888,16 +888,19 @@ private:
                                                                cancelFlag.get());
         };
 
-        auto reduceSegments = [](QVector<QVector<TemperatureRangePoint>> &results,
-                                 const QVector<TemperatureRangePoint> &segmentResult) {
-            results.push_back(segmentResult);
-        };
-
-        watcher->setFuture(QtConcurrent::mappedReduced(
-            segments,
-            mapSegment,
-            reduceSegments,
-            QtConcurrent::OrderedReduce));
+        // В Qt 5.15 возникают проблемы с выводом типов в mappedReduced для сложных лямбд.
+        // Запускаем фоновый расчет вручную, сохраняя порядок сегментов.
+        watcher->setFuture(QtConcurrent::run([segments, mapSegment, cancelFlag]() {
+            QVector<QVector<TemperatureRangePoint>> results;
+            results.reserve(segments.size());
+            for (const auto &segment : segments) {
+                if (cancelFlag && cancelFlag->load()) {
+                    break;
+                }
+                results.push_back(mapSegment(segment));
+            }
+            return results;
+        }));
     }
 
     void cancelTemperatureCalculation() {
