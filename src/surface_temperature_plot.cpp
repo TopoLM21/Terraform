@@ -2,6 +2,7 @@
 
 #include <qwt/qwt_plot_curve.h>
 #include <qwt/qwt_plot_grid.h>
+#include <qwt/qwt_plot_marker.h>
 #include <qwt/qwt_scale_draw.h>
 #include <qwt/qwt_text.h>
 
@@ -21,7 +22,7 @@ public:
 
 SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     : QwtPlot(parent), curve_(new QwtPlotCurve(QStringLiteral("Температура"))),
-      grid_(new QwtPlotGrid()) {
+      grid_(new QwtPlotGrid()), freezingMarker_(new QwtPlotMarker()) {
     setTitle(QStringLiteral("Температура поверхности по широтам"));
     setAxisTitle(QwtPlot::xBottom, QStringLiteral("Широта (°)"));
     setAxisTitle(QwtPlot::yLeft, QStringLiteral("Температура (K, °C)"));
@@ -30,6 +31,14 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
 
     grid_->setMajorPen(QPen(palette().color(QPalette::Mid), 0.0, Qt::DashLine));
     grid_->attach(this);
+
+    freezingMarker_->setLineStyle(QwtPlotMarker::HLine);
+    // Линия замерзания воды: 0 °C соответствует 273.15 K.
+    freezingMarker_->setYValue(273.15);
+    freezingMarker_->setLinePen(QPen(palette().color(QPalette::Mid), 1.0, Qt::DashLine));
+    freezingMarker_->setLabel(QwtText(QStringLiteral("0 °C")));
+    freezingMarker_->setLabelAlignment(Qt::AlignRight | Qt::AlignTop);
+    freezingMarker_->attach(this);
 
     curve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
     curve_->setPen(QPen(palette().color(QPalette::Highlight), 2.0));

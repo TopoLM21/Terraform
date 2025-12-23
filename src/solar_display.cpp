@@ -171,13 +171,16 @@ public:
         plotLayout->addWidget(temperaturePlot_);
         plotGroupBox->setLayout(plotLayout);
 
-        auto *layout = new QVBoxLayout(this);
-        layout->addLayout(presetsLayout);
-        layout->addWidget(starsPanel);
-        layout->addWidget(planetGroupBox);
-        layout->addWidget(plotGroupBox);
-        layout->addWidget(calculateButton);
-        layout->addStretch();
+        auto *leftLayout = new QVBoxLayout();
+        leftLayout->addLayout(presetsLayout);
+        leftLayout->addWidget(starsPanel);
+        leftLayout->addWidget(planetGroupBox);
+        leftLayout->addWidget(calculateButton);
+        leftLayout->addStretch();
+
+        auto *layout = new QHBoxLayout(this);
+        layout->addLayout(leftLayout, 0);
+        layout->addWidget(plotGroupBox, 1);
 
         setLayout(layout);
         resize(480, 360);

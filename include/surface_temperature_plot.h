@@ -6,6 +6,7 @@
 
 class QwtPlotCurve;
 class QwtPlotGrid;
+class QwtPlotMarker;
 
 class SurfaceTemperaturePlot : public QwtPlot {
 public:
@@ -17,4 +18,5 @@ public:
 private:
     QwtPlotCurve *curve_;
     QwtPlotGrid *grid_;
+    QwtPlotMarker *freezingMarker_;
 };
