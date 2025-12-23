@@ -4,19 +4,23 @@
 
 #include <QtCore/QVector>
 
-struct TemperaturePoint {
+struct TemperatureRangePoint {
     double latitudeDegrees;
-    double temperatureKelvin;
-    double temperatureCelsius;
+    double minimumKelvin;
+    double maximumKelvin;
+    double minimumCelsius;
+    double maximumCelsius;
 };
 
 class SurfaceTemperatureCalculator {
 public:
-    SurfaceTemperatureCalculator(double solarConstant, const SurfaceMaterial &material);
+    SurfaceTemperatureCalculator(double solarConstant, const SurfaceMaterial &material,
+                                 double dayLengthDays);
 
-    QVector<TemperaturePoint> temperaturesByLatitude(int stepDegrees = 15) const;
+    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int stepDegrees = 15) const;
 
 private:
     double solarConstant_;
     SurfaceMaterial material_;
+    double dayLengthDays_;
 };

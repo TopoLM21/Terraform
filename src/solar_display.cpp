@@ -36,6 +36,7 @@ constexpr int kRoleSemiMajorAxis = Qt::UserRole;
 constexpr int kRoleIsCustom = Qt::UserRole + 1;
 constexpr int kRolePlanetName = Qt::UserRole + 2;
 constexpr int kRoleMaterialId = Qt::UserRole + 3;
+constexpr int kRoleDayLength = Qt::UserRole + 4;
 
 class SolarCalculatorWidget : public QWidget {
 public:
@@ -137,6 +138,7 @@ public:
 
         planetComboBox_ = new QComboBox(this);
         planetSemiMajorAxisLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetDayLengthLabel_ = new QLabel(QStringLiteral("—"), this);
         materialComboBox_ = new QComboBox(this);
         populateMaterials();
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
@@ -152,6 +154,7 @@ public:
         auto *planetFormLayout = new QFormLayout();
         planetFormLayout->addRow(QStringLiteral("Планета:"), planetSelectorLayout);
         planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
+        planetFormLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), planetDayLengthLabel_);
         planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
         planetFormLayout->addRow(QString(), addPlanetButton_);
@@ -187,6 +190,7 @@ public:
 
         connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             updatePlanetSemiMajorAxisLabel();
+            updatePlanetDayLengthLabel();
             syncMaterialWithPlanet();
             updatePlanetActions();
             if (hasPrimaryInputs() && (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -213,6 +217,7 @@ public:
             }
             planetComboBox_->removeItem(index);
             updatePlanetSemiMajorAxisLabel();
+            updatePlanetDayLengthLabel();
             updatePlanetActions();
             updateTemperaturePlot();
         });
@@ -322,6 +327,7 @@ private:
     QGroupBox *secondaryGroupBox_ = nullptr;
     QComboBox *planetComboBox_ = nullptr;
     QLabel *planetSemiMajorAxisLabel_ = nullptr;
+    QLabel *planetDayLengthLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
@@ -345,6 +351,7 @@ private:
             addPlanetItem(planet, false);
         }
         updatePlanetSemiMajorAxisLabel();
+        updatePlanetDayLengthLabel();
         syncMaterialWithPlanet();
         updatePlanetActions();
     }
@@ -353,6 +360,7 @@ private:
         planetComboBox_->clear();
         presetPlanetNames_.clear();
         planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
+        planetDayLengthLabel_->setText(QStringLiteral("—"));
         updatePlanetActions();
         updateTemperaturePlot();
     }
@@ -366,6 +374,10 @@ private:
         return QLocale().toString(value, 'f', 2);
     }
 
+    QString formatDayLength(double value) const {
+        return QLocale().toString(value, 'f', 2);
+    }
+
     void updatePlanetSemiMajorAxisLabel() {
         const QVariant value = planetComboBox_->currentData(kRoleSemiMajorAxis);
         if (!value.isValid()) {
@@ -373,6 +385,15 @@ private:
             return;
         }
         planetSemiMajorAxisLabel_->setText(formatSemiMajorAxis(value.toDouble()));
+    }
+
+    void updatePlanetDayLengthLabel() {
+        const QVariant value = planetComboBox_->currentData(kRoleDayLength);
+        if (!value.isValid()) {
+            planetDayLengthLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        planetDayLengthLabel_->setText(formatDayLength(value.toDouble()));
     }
 
     bool hasPrimaryInputs() const {
@@ -389,6 +410,7 @@ private:
         planetComboBox_->addItem(formatPlanetName(planet), planet.semiMajorAxis);
         const int index = planetComboBox_->count() - 1;
         planetComboBox_->setItemData(index, planet.semiMajorAxis, kRoleSemiMajorAxis);
+        planetComboBox_->setItemData(index, planet.dayLengthDays, kRoleDayLength);
         planetComboBox_->setItemData(index, isCustom, kRoleIsCustom);
         planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
@@ -426,9 +448,14 @@ private:
         validator->setLocale(QLocale::C);
         axisInput->setValidator(validator);
 
+        auto *dayLengthInput = new QLineEdit(&dialog);
+        dayLengthInput->setPlaceholderText(QStringLiteral("Например, 1.0"));
+        dayLengthInput->setValidator(validator);
+
         auto *formLayout = new QFormLayout(&dialog);
         formLayout->addRow(QStringLiteral("Имя:"), nameInput);
         formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
+        formLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), dayLengthInput);
 
         auto *materialInput = new QComboBox(&dialog);
         for (const auto &material : surfaceMaterials()) {
@@ -441,7 +468,7 @@ private:
 
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
-                [&dialog, nameInput, axisInput, materialInput, this]() {
+                [&dialog, nameInput, axisInput, dayLengthInput, materialInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -460,9 +487,15 @@ private:
                 return;
             }
 
+            const double dayLength = dayLengthInput->text().toDouble(&ok);
+            if (!ok || dayLength <= 0.0) {
+                showInputError(QStringLiteral("Укажите положительную длину суток планеты."));
+                return;
+            }
+
             const int existingIndex = findPlanetIndexByName(name);
             const QString materialId = materialInput->currentData().toString();
-            PlanetPreset preset{name, axis, materialId};
+            PlanetPreset preset{name, axis, dayLength, materialId};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -470,6 +503,7 @@ private:
                 }
                 planetComboBox_->setItemText(existingIndex, formatPlanetName(preset));
                 planetComboBox_->setItemData(existingIndex, axis, kRoleSemiMajorAxis);
+                planetComboBox_->setItemData(existingIndex, dayLength, kRoleDayLength);
                 planetComboBox_->setItemData(existingIndex, true, kRoleIsCustom);
                 planetComboBox_->setItemData(existingIndex, name, kRolePlanetName);
                 planetComboBox_->setItemData(existingIndex, materialId, kRoleMaterialId);
@@ -480,6 +514,7 @@ private:
             }
 
             updatePlanetSemiMajorAxisLabel();
+            updatePlanetDayLengthLabel();
             syncMaterialWithPlanet();
             updatePlanetActions();
             dialog.accept();
@@ -536,14 +571,20 @@ private:
             return;
         }
 
+        const double dayLength = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        if (dayLength <= 0.0) {
+            temperaturePlot_->clearSeries();
+            return;
+        }
+
         const auto material = currentMaterial();
         if (!material) {
             temperaturePlot_->clearSeries();
             return;
         }
 
-        SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material);
-        temperaturePlot_->setTemperatureSeries(calculator.temperaturesByLatitude());
+        SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength);
+        temperaturePlot_->setTemperatureSeries(calculator.temperatureRangesByLatitude());
     }
 };
 }  // namespace

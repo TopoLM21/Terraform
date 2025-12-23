@@ -13,6 +13,7 @@ struct SurfaceMaterial {
 struct PlanetPreset {
     QString name;
     double semiMajorAxis;
+    double dayLengthDays;
     QString surfaceMaterialId;
 };
 
