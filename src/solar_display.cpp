@@ -19,7 +19,7 @@
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QHash>
 #include <QtCore/QHashFunctions>
-#include <QtCore/QEndian>
+#include <QtEndian>
 #include <QtGui/QDoubleValidator>
 #include <QtConcurrent/QtConcurrent>
 #include <QtWidgets/QApplication>
