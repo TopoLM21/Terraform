@@ -8,6 +8,7 @@
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QLocale>
 #include <QtCore/QPointer>
+#include <QtCore/QSignalBlocker>
 // #include <QtCore/QOverload>
 #include <QtGlobal>
 #include <QtCore/QSet>
@@ -88,18 +89,21 @@ public:
         addPresetButton(QStringLiteral("Солнце"), [this, applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
             applySecondary(std::nullopt);
+            resetSolarConstant();
             setPlanetPresets(solarSystemPresets());
         });
 
         addPresetButton(QStringLiteral("Сладкое Небо"), [this, applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{0.3761, 2576.0, 1.0});
             applySecondary(StellarParameters{0.3741, 2349.0, 1.0});
+            resetSolarConstant();
             setPlanetPresets(sweetSkyPresets());
         });
 
         addPresetButton(QStringLiteral("Пусто"), [this, applyPrimary, applySecondary]() {
             radiusInput_->clear();
             temperatureInput_->clear();
+            resetSolarConstant();
             clearPlanetPresets();
             applySecondary(std::nullopt);
         });
@@ -245,6 +249,10 @@ public:
             syncPlanetMaterialWithSelection();
             updateTemperaturePlot();
         });
+
+        applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
+        applySecondary(std::nullopt);
+        setPlanetPresets(solarSystemPresets(), QStringLiteral("Земля"));
     }
 
 private:
@@ -365,12 +373,20 @@ private:
         input->setText(QString::number(value));
     }
 
-    void setPlanetPresets(const QVector<PlanetPreset> &planets) {
+    void setPlanetPresets(const QVector<PlanetPreset> &planets,
+                          const QString &selectedPlanetName = QString()) {
+        const QSignalBlocker blocker(planetComboBox_);
         planetComboBox_->clear();
         presetPlanetNames_.clear();
         for (const auto &planet : planets) {
             presetPlanetNames_.insert(planet.name);
             addPlanetItem(planet, false);
+        }
+        if (selectedPlanetName.isEmpty()) {
+            planetComboBox_->setCurrentIndex(-1);
+        } else {
+            const int selectedIndex = findPlanetIndexByName(selectedPlanetName);
+            planetComboBox_->setCurrentIndex(selectedIndex);
         }
         updatePlanetSemiMajorAxisLabel();
         updatePlanetDayLengthLabel();
@@ -379,6 +395,7 @@ private:
     }
 
     void clearPlanetPresets() {
+        const QSignalBlocker blocker(planetComboBox_);
         planetComboBox_->clear();
         presetPlanetNames_.clear();
         planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
@@ -618,11 +635,17 @@ private:
         temperatureProgressDialog_->show();
 
         QPointer<QProgressDialog> dialogGuard(temperatureProgressDialog_);
-        auto progressCallback = [this, dialogGuard, requestId](int processed, int total) {
+        QPointer<SolarCalculatorWidget> widgetGuard(this);
+        // Вызов из фонового потока: защищаемся от удаления виджета во время вычисления.
+        auto progressCallback = [widgetGuard, dialogGuard, requestId](int processed, int total) {
+            if (!widgetGuard) {
+                return;
+            }
             QMetaObject::invokeMethod(
-                this,
-                [this, dialogGuard, processed, total, requestId]() {
-                    if (!dialogGuard || requestId != temperatureRequestId_) {
+                widgetGuard.data(),
+                [widgetGuard, dialogGuard, processed, total, requestId]() {
+                    if (!widgetGuard || !dialogGuard ||
+                        requestId != widgetGuard->temperatureRequestId_) {
                         return;
                     }
                     dialogGuard->setMaximum(total);
@@ -661,6 +684,14 @@ private:
         if (temperatureProgressDialog_) {
             temperatureProgressDialog_->hide();
         }
+    }
+
+    void resetSolarConstant() {
+        hasSolarConstant_ = false;
+        lastSolarConstant_ = 0.0;
+        resultLabel_->setText(
+            QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."));
+        updateTemperaturePlot();
     }
 };
 }  // namespace
