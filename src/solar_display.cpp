@@ -7,10 +7,13 @@
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QLocale>
+#include <QtCore/QPointer>
 // #include <QtCore/QOverload>
 #include <QtGlobal>
 #include <QtCore/QSet>
+#include <QtCore/QFutureWatcher>
 #include <QtGui/QDoubleValidator>
+#include <QtConcurrent/QtConcurrent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QDialog>
@@ -22,11 +25,13 @@
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
+#include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
 
+#include <atomic>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -181,6 +186,19 @@ public:
         leftLayout->addWidget(calculateButton);
         leftLayout->addStretch();
 
+        temperatureProgressDialog_ = new QProgressDialog(this);
+        temperatureProgressDialog_->setWindowTitle(QStringLiteral("Расчет температур"));
+        temperatureProgressDialog_->setLabelText(QStringLiteral("Вычисление температурного профиля..."));
+        temperatureProgressDialog_->setCancelButtonText(QStringLiteral("Отмена"));
+        temperatureProgressDialog_->setWindowModality(Qt::WindowModal);
+        temperatureProgressDialog_->setAutoClose(true);
+        temperatureProgressDialog_->setAutoReset(true);
+        temperatureProgressDialog_->hide();
+
+        connect(temperatureProgressDialog_, &QProgressDialog::canceled, this, [this]() {
+            cancelTemperatureCalculation();
+        });
+
         auto *layout = new QHBoxLayout(this);
         layout->addLayout(leftLayout, 0);
         layout->addWidget(plotGroupBox, 1);
@@ -189,6 +207,7 @@ public:
         resize(480, 360);
 
         connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+            cancelTemperatureCalculation();
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
             syncMaterialWithPlanet();
@@ -334,6 +353,9 @@ private:
 
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
+    QProgressDialog *temperatureProgressDialog_ = nullptr;
+    std::shared_ptr<std::atomic_bool> temperatureCancelFlag_;
+    int temperatureRequestId_ = 0;
     int precision_ = kDefaultPrecision;
     QSet<QString> presetPlanetNames_;
     double lastSolarConstant_ = 0.0;
@@ -561,6 +583,8 @@ private:
     }
 
     void updateTemperaturePlot() {
+        cancelTemperatureCalculation();
+
         if (!hasSolarConstant_) {
             temperaturePlot_->clearSeries();
             return;
@@ -583,8 +607,60 @@ private:
             return;
         }
 
+        const int requestId = ++temperatureRequestId_;
+        temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
+        const auto cancelFlag = temperatureCancelFlag_;
+        const int stepDegrees = 1;
+        const int totalLatitudes = 180 / stepDegrees + 1;
+
+        temperatureProgressDialog_->setRange(0, totalLatitudes);
+        temperatureProgressDialog_->setValue(0);
+        temperatureProgressDialog_->show();
+
+        QPointer<QProgressDialog> dialogGuard(temperatureProgressDialog_);
+        auto progressCallback = [this, dialogGuard, requestId](int processed, int total) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, dialogGuard, processed, total, requestId]() {
+                    if (!dialogGuard || requestId != temperatureRequestId_) {
+                        return;
+                    }
+                    dialogGuard->setMaximum(total);
+                    dialogGuard->setValue(processed);
+                },
+                Qt::QueuedConnection);
+        };
+
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength);
-        temperaturePlot_->setTemperatureSeries(calculator.temperatureRangesByLatitude());
+        auto *watcher = new QFutureWatcher<QVector<TemperatureRangePoint>>(this);
+        connect(watcher, &QFutureWatcher<QVector<TemperatureRangePoint>>::finished, this,
+                [this, watcher, requestId, cancelFlag]() {
+            watcher->deleteLater();
+            if (requestId == temperatureRequestId_) {
+                temperatureProgressDialog_->hide();
+            }
+            if (requestId != temperatureRequestId_ || cancelFlag->load()) {
+                return;
+            }
+            const auto result = watcher->result();
+            if (result.isEmpty()) {
+                return;
+            }
+            temperaturePlot_->setTemperatureSeries(result);
+        });
+
+        watcher->setFuture(QtConcurrent::run([calculator, stepDegrees, progressCallback, cancelFlag]() {
+            return calculator.temperatureRangesByLatitude(stepDegrees, progressCallback, cancelFlag.get());
+        }));
+    }
+
+    void cancelTemperatureCalculation() {
+        if (temperatureCancelFlag_) {
+            temperatureCancelFlag_->store(true);
+        }
+        if (temperatureProgressDialog_) {
+            temperatureProgressDialog_->hide();
+        }
     }
 };
 }  // namespace
