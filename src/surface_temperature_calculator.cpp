@@ -59,6 +59,42 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                                                  cancelFlag, 0, totalLatitudes);
 }
 
+QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesForOrbitSegment(
+    const OrbitSegment &segment,
+    double referenceDistanceAU,
+    double obliquityDegrees,
+    double perihelionArgumentDegrees,
+    int stepDegrees,
+    const ProgressCallback &progressCallback,
+    const std::atomic_bool *cancelFlag) const {
+    if (cancelFlag && cancelFlag->load()) {
+        return {};
+    }
+    if (stepDegrees <= 0) {
+        return {};
+    }
+
+    const double obliquityRadians = qDegreesToRadians(obliquityDegrees);
+    const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgumentDegrees);
+    // Сезонная деклинация: угол между лучами звезды и экватором планеты.
+    // δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
+    const double solarLongitude = segment.trueAnomalyRadians + perihelionArgumentRadians;
+    const double declinationDegrees = qRadiansToDegrees(
+        std::asin(std::sin(obliquityRadians) * std::sin(solarLongitude)));
+    // Инсоляция меняется с расстоянием как 1 / r^2 относительно опорной дистанции.
+    const double segmentSolarConstant =
+        solarConstant_ * std::pow(referenceDistanceAU / segment.distanceAU, 2.0);
+    const int totalLatitudes = 180 / stepDegrees + 1;
+
+    return temperatureRangesByLatitudeForSegment(stepDegrees,
+                                                 segmentSolarConstant,
+                                                 declinationDegrees,
+                                                 progressCallback,
+                                                 cancelFlag,
+                                                 0,
+                                                 totalLatitudes);
+}
+
 QVector<QVector<TemperatureRangePoint>> SurfaceTemperatureCalculator::temperatureRangesByOrbitSegments(
     const QVector<OrbitSegment> &segments,
     double referenceDistanceAU,
@@ -68,6 +104,9 @@ QVector<QVector<TemperatureRangePoint>> SurfaceTemperatureCalculator::temperatur
     const ProgressCallback &progressCallback,
     const std::atomic_bool *cancelFlag) const {
     QVector<QVector<TemperatureRangePoint>> results;
+    if (cancelFlag && cancelFlag->load()) {
+        return results;
+    }
     if (segments.isEmpty() || stepDegrees <= 0) {
         return results;
     }
@@ -117,6 +156,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     QVector<TemperatureRangePoint> points;
     if (stepDegrees <= 0) {
         return points;
+    }
+    if (cancelFlag && cancelFlag->load()) {
+        return {};
     }
 
     const int steps = 180 / stepDegrees;
