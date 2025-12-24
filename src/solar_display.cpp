@@ -227,7 +227,6 @@ public:
         });
 
         auto *calculateButton = new QPushButton(QStringLiteral("Рассчитать"), this);
-        connect(calculateButton, &QPushButton::clicked, this, [this]() { onCalculateRequested(); });
 
         resultLabel_ = new QLabel(
             QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."), this);
@@ -326,7 +325,8 @@ public:
             updateLatitudeStepDefault();
             syncMaterialWithPlanet();
             updatePlanetActions();
-            if (hasPrimaryInputs() && (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
+            if (autoCalculateEnabled_ && hasPrimaryInputs() &&
+                (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
                 onCalculateRequested();
             } else {
                 updateTemperaturePlot();
@@ -370,6 +370,11 @@ public:
 
         connect(segmentSelectorWidget_, &SegmentSelectorWidget::currentIndexChanged, this,
                 [this](int) { updateTemperaturePlotForSelectedSegment(); });
+
+        connect(calculateButton, &QPushButton::clicked, this, [this]() {
+            autoCalculateEnabled_ = true;
+            onCalculateRequested();
+        });
 
         applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
         applySecondary(std::nullopt);
@@ -508,6 +513,7 @@ private:
     QVector<OrbitSegment> lastOrbitSegments_;
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
     bool latitudeStepManuallySet_ = false;
+    bool autoCalculateEnabled_ = false;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
     std::optional<StellarCacheKey> lastStellarKey_;
 
