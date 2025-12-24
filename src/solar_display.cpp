@@ -67,7 +67,7 @@ struct TemperatureCacheKey {
     double eccentricity = 0.0;
     double obliquity = 0.0;
     double perihelionArgument = 0.0;
-    int stepDegrees = 0;
+    int latitudePoints = 0;
     int segmentCount = 0;
 
     bool operator==(const TemperatureCacheKey &other) const {
@@ -78,7 +78,7 @@ struct TemperatureCacheKey {
                eccentricity == other.eccentricity &&
                obliquity == other.obliquity &&
                perihelionArgument == other.perihelionArgument &&
-               stepDegrees == other.stepDegrees &&
+               latitudePoints == other.latitudePoints &&
                segmentCount == other.segmentCount;
     }
 };
@@ -103,7 +103,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.eccentricity), seed);
     seed = qHash(hashDoubleBits(key.obliquity), seed);
     seed = qHash(hashDoubleBits(key.perihelionArgument), seed);
-    seed = qHash(key.stepDegrees, seed);
+    seed = qHash(key.latitudePoints, seed);
     seed = qHash(key.segmentCount, seed);
     return seed;
 }
@@ -241,9 +241,9 @@ public:
         planetPerihelionArgumentLabel_ = new QLabel(QStringLiteral("—"), this);
         materialComboBox_ = new QComboBox(this);
         populateMaterials();
-        latitudeStepSpinBox_ = new QSpinBox(this);
-        latitudeStepSpinBox_->setRange(1, 45);
-        latitudeStepSpinBox_->setValue(1);
+        latitudePointsSpinBox_ = new QSpinBox(this);
+        latitudePointsSpinBox_->setRange(2, 181);
+        latitudePointsSpinBox_->setValue(181);
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
         deletePlanetButton_ = new QPushButton(this);
         deletePlanetButton_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
@@ -263,7 +263,7 @@ public:
         planetFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
                                  planetPerihelionArgumentLabel_);
         planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
-        planetFormLayout->addRow(QStringLiteral("Шаг широты (°):"), latitudeStepSpinBox_);
+        planetFormLayout->addRow(QStringLiteral("Точки по широте:"), latitudePointsSpinBox_);
         planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
         planetFormLayout->addRow(QString(), addPlanetButton_);
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
@@ -285,6 +285,8 @@ public:
         segmentLayout->addWidget(new QLabel(QStringLiteral("Сегмент орбиты:"), plotGroupBox));
         segmentLayout->addWidget(segmentSelectorWidget_, 1);
         plotLayout->addLayout(segmentLayout);
+        auto *smoothingCheckBox = new QCheckBox(QStringLiteral("Сглаживать график"), plotGroupBox);
+        plotLayout->addWidget(smoothingCheckBox);
         plotLayout->addWidget(temperaturePlot_);
         plotGroupBox->setLayout(plotLayout);
 
@@ -310,7 +312,7 @@ public:
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
             updatePlanetOrbitLabels();
-            updateLatitudeStepDefault();
+            updateLatitudePointsDefault();
             syncMaterialWithPlanet();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
@@ -350,14 +352,18 @@ public:
             updateTemperaturePlot();
         });
 
-        connect(latitudeStepSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) {
-            latitudeStepManuallySet_ = true;
+        connect(latitudePointsSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) {
+            latitudePointsManuallySet_ = true;
             clearTemperatureCache();
             updateTemperaturePlot();
         });
 
         connect(segmentSelectorWidget_, &SegmentSelectorWidget::currentIndexChanged, this,
                 [this](int) { updateTemperaturePlotForSelectedSegment(); });
+
+        // Сглаживание влияет только на отображение кривых, а не на физический расчет.
+        connect(smoothingCheckBox, &QCheckBox::toggled, temperaturePlot_,
+                &SurfaceTemperaturePlot::setSmoothingEnabled);
 
         connect(calculateButton, &QPushButton::clicked, this, [this]() {
             autoCalculateEnabled_ = true;
@@ -484,7 +490,7 @@ private:
     QLabel *planetObliquityLabel_ = nullptr;
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
-    QSpinBox *latitudeStepSpinBox_ = nullptr;
+    QSpinBox *latitudePointsSpinBox_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
 
@@ -501,7 +507,7 @@ private:
     QVector<OrbitSegment> lastOrbitSegments_;
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
     QVector<TemperatureSummaryPoint> temperatureSummary_;
-    bool latitudeStepManuallySet_ = false;
+    bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
     std::optional<StellarCacheKey> lastStellarKey_;
@@ -529,7 +535,7 @@ private:
         updatePlanetSemiMajorAxisLabel();
         updatePlanetDayLengthLabel();
         updatePlanetOrbitLabels();
-        updateLatitudeStepDefault();
+        updateLatitudePointsDefault();
         syncMaterialWithPlanet();
         updatePlanetActions();
     }
@@ -599,8 +605,8 @@ private:
         planetDayLengthLabel_->setText(formatDayLength(value.toDouble()));
     }
 
-    void updateLatitudeStepDefault() {
-        if (latitudeStepManuallySet_) {
+    void updateLatitudePointsDefault() {
+        if (latitudePointsManuallySet_) {
             return;
         }
 
@@ -613,8 +619,9 @@ private:
         // Для медленных планет увеличиваем шаг широты, чтобы профили быстро считались
         // и оставались читаемыми при малом числе характерных широт.
         const int defaultStep = (dayLength > 30.0) ? 45 : 1;
-        const QSignalBlocker blocker(latitudeStepSpinBox_);
-        latitudeStepSpinBox_->setValue(defaultStep);
+        const int defaultLatitudePoints = 180 / defaultStep + 1;
+        const QSignalBlocker blocker(latitudePointsSpinBox_);
+        latitudePointsSpinBox_->setValue(defaultLatitudePoints);
     }
 
     void updatePlanetOrbitLabels() {
@@ -1007,7 +1014,7 @@ private:
             return;
         }
 
-        const int stepDegrees = latitudeStepSpinBox_->value();
+        const int latitudePoints = latitudePointsSpinBox_->value();
         const int segmentCount = 12;
         const TemperatureCacheKey cacheKey{lastSolarConstant_,
                                             material->id,
@@ -1016,7 +1023,7 @@ private:
                                             eccentricity,
                                             obliquity,
                                             perihelionArgument,
-                                            stepDegrees,
+                                            latitudePoints,
                                             segmentCount};
         const auto cached = temperatureCache_.constFind(cacheKey);
         if (cached != temperatureCache_.constEnd()) {
@@ -1034,7 +1041,7 @@ private:
         const int requestId = ++temperatureRequestId_;
         temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
         const auto cancelFlag = temperatureCancelFlag_;
-        const int totalLatitudes = 180 / stepDegrees + 1;
+        const int totalLatitudes = latitudePoints;
         const int totalProgress = totalLatitudes * segmentCount;
 
         auto *progressDialog = ensureTemperatureProgressDialog();
@@ -1099,7 +1106,7 @@ private:
         };
 
         auto mapSegment = [calculator,
-                           stepDegrees,
+                           latitudePoints,
                            segmentProgress,
                            cancelFlag,
                            semiMajorAxis,
@@ -1112,7 +1119,7 @@ private:
                                                                semiMajorAxis,
                                                                obliquity,
                                                                perihelionArgument,
-                                                               stepDegrees,
+                                                               latitudePoints,
                                                                segmentProgress,
                                                                cancelFlag.get());
         };
