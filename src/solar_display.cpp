@@ -57,6 +57,7 @@ constexpr int kRoleDayLength = Qt::UserRole + 4;
 constexpr int kRoleEccentricity = Qt::UserRole + 5;
 constexpr int kRoleObliquity = Qt::UserRole + 6;
 constexpr int kRolePerihelionArgument = Qt::UserRole + 7;
+constexpr double kKelvinOffset = 273.15;
 
 struct TemperatureCacheKey {
     double solarConstant = 0.0;
@@ -499,6 +500,7 @@ private:
     bool hasSolarConstant_ = false;
     QVector<OrbitSegment> lastOrbitSegments_;
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
+    QVector<TemperatureSummaryPoint> temperatureSummary_;
     bool latitudeStepManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
@@ -865,6 +867,51 @@ private:
         }
     }
 
+    void rebuildTemperatureSummary() {
+        temperatureSummary_.clear();
+        if (lastTemperatureSegments_.isEmpty()) {
+            return;
+        }
+
+        const int latitudeCount = lastTemperatureSegments_.front().size();
+        temperatureSummary_.reserve(latitudeCount);
+
+        for (int i = 0; i < latitudeCount; ++i) {
+            double minimumOverall = std::numeric_limits<double>::max();
+            double maximumOverall = 0.0;
+            double meanAnnualSum = 0.0;
+            int samples = 0;
+            double latitudeDegrees = 0.0;
+
+            for (const auto &segment : lastTemperatureSegments_) {
+                if (i >= segment.size()) {
+                    continue;
+                }
+                const auto &point = segment.at(i);
+                latitudeDegrees = point.latitudeDegrees;
+                minimumOverall = qMin(minimumOverall, point.minimumKelvin);
+                maximumOverall = qMax(maximumOverall, point.maximumKelvin);
+                // Годовая средняя берется как среднее по сегментам равной длительности.
+                meanAnnualSum += point.meanDailyKelvin;
+                ++samples;
+            }
+
+            if (samples == 0) {
+                continue;
+            }
+
+            TemperatureSummaryPoint summaryPoint;
+            summaryPoint.latitudeDegrees = latitudeDegrees;
+            summaryPoint.minimumKelvin = minimumOverall;
+            summaryPoint.maximumKelvin = maximumOverall;
+            summaryPoint.meanAnnualKelvin = meanAnnualSum / samples;
+            summaryPoint.minimumCelsius = minimumOverall - kKelvinOffset;
+            summaryPoint.maximumCelsius = maximumOverall - kKelvinOffset;
+            summaryPoint.meanAnnualCelsius = summaryPoint.meanAnnualKelvin - kKelvinOffset;
+            temperatureSummary_.push_back(summaryPoint);
+        }
+    }
+
     void updateTemperaturePlotForSelectedSegment() {
         if (segmentSelectorWidget_->currentIndex() < 0 ||
             segmentSelectorWidget_->currentIndex() >= lastTemperatureSegments_.size()) {
@@ -874,12 +921,15 @@ private:
 
         const int index = segmentSelectorWidget_->currentIndex();
         const QString label = formatSegmentLabel(lastOrbitSegments_.at(index));
-        temperaturePlot_->setTemperatureSeries(lastTemperatureSegments_.at(index), label);
+        temperaturePlot_->setTemperatureSeries(lastTemperatureSegments_.at(index),
+                                               temperatureSummary_,
+                                               label);
     }
 
     void clearTemperatureSegments() {
         lastOrbitSegments_.clear();
         lastTemperatureSegments_.clear();
+        temperatureSummary_.clear();
         segmentSelectorWidget_->setSegments({});
         segmentSelectorWidget_->setEnabled(false);
         temperaturePlot_->clearSeries();
@@ -963,6 +1013,7 @@ private:
             // Кэш нужен для быстрого переключения сегментов/планет без повторного расчёта.
             lastOrbitSegments_ = cached->orbitSegments;
             lastTemperatureSegments_ = cached->temperatureSegments;
+            rebuildTemperatureSummary();
             updateSegmentComboBox();
             updateTemperaturePlotForSelectedSegment();
             return;
@@ -1018,6 +1069,7 @@ private:
             }
             lastTemperatureSegments_ = result;
             temperatureCache_.insert(cacheKey, TemperatureCacheEntry{lastOrbitSegments_, result});
+            rebuildTemperatureSummary();
             updateSegmentComboBox();
             updateTemperaturePlotForSelectedSegment();
         });
