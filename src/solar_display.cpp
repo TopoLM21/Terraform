@@ -82,6 +82,7 @@ struct TemperatureCacheKey {
 };
 
 uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
+    using ::qHash;
     const auto hashDoubleBits = [](double value) -> quint64 {
         // Хэшируем битовое представление (в big-endian), чтобы не зависеть от qHash(double).
         quint64 bits = 0;
