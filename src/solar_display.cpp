@@ -125,6 +125,10 @@ struct StellarCacheKey {
                secondaryRadius == other.secondaryRadius &&
                secondaryTemperature == other.secondaryTemperature;
     }
+
+    bool operator!=(const StellarCacheKey &other) const {
+        return !(*this == other);
+    }
 };
 
 class SolarCalculatorWidget : public QWidget {
