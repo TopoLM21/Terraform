@@ -1,6 +1,7 @@
 #pragma once
 
 #include "surface_temperature_calculator.h"
+#include "rotation_mode.h"
 
 #include <qwt/qwt_plot.h>
 #include <QtCore/QString>
@@ -16,7 +17,8 @@ public:
 
     void setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
                               const QVector<TemperatureSummaryPoint> &summaryPoints,
-                              const QString &segmentLabel);
+                              const QString &segmentLabel,
+                              RotationMode rotationMode);
     void setSmoothingEnabled(bool enabled);
     void clearSeries();
 
@@ -33,4 +35,5 @@ private:
     QVector<TemperatureSummaryPoint> summaryPoints_;
     QString segmentLabel_;
     bool smoothingEnabled_ = false;
+    RotationMode rotationMode_ = RotationMode::Normal;
 };

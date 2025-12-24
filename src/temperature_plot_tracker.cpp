@@ -15,10 +15,12 @@ TemperaturePlotTracker::TemperaturePlotTracker(QWidget *canvas)
 
 void TemperaturePlotTracker::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
                                                   const QVector<TemperatureSummaryPoint> &summaryPoints,
-                                                  const QString &segmentLabel) {
+                                                  const QString &segmentLabel,
+                                                  RotationMode rotationMode) {
     points_ = points;
     summaryPoints_ = summaryPoints;
     segmentLabel_ = segmentLabel;
+    rotationMode_ = rotationMode;
 }
 
 void TemperaturePlotTracker::clearSeries() {
@@ -38,8 +40,13 @@ QwtText TemperaturePlotTracker::trackerTextF(const QPointF &pos) const {
     }
 
     const auto &point = points_.at(index);
-    QString text = QStringLiteral("Широта: %1°\nСегмент: мин %2 K (%3 °C)\n"
-                                  "Сегмент: макс %4 K (%5 °C)")
+    const QString axisLabel =
+        (rotationMode_ == RotationMode::Normal)
+            ? QStringLiteral("Широта")
+            : QStringLiteral("Угол от подсолнечной точки");
+    QString text = QStringLiteral("%1: %2°\nСегмент: мин %3 K (%4 °C)\n"
+                                  "Сегмент: макс %5 K (%6 °C)")
+                       .arg(axisLabel)
                        .arg(point.latitudeDegrees, 0, 'f', 0)
                        .arg(point.minimumKelvin, 0, 'f', 1)
                        .arg(point.minimumCelsius, 0, 'f', 1)

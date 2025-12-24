@@ -1,5 +1,7 @@
 #pragma once
 
+#include "rotation_mode.h"
+
 #include <QtCore/QString>
 #include <QtCore/QVector>
 
@@ -21,6 +23,7 @@ struct PlanetPreset {
     double obliquityDegrees;
     double perihelionArgumentDegrees;
     QString surfaceMaterialId;
+    RotationMode rotationMode = RotationMode::Normal;
 };
 
 QVector<SurfaceMaterial> surfaceMaterials();

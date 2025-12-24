@@ -10,6 +10,7 @@
 #include <qwt/qwt_legend_data.h>
 #include <qwt/qwt_text.h>
 
+#include <QtCore/QPair>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtGui/QPalette>
@@ -24,6 +25,28 @@ public:
                            .arg(celsius, 0, 'f', 0));
     }
 };
+
+QString axisTitleForMode(RotationMode mode) {
+    return (mode == RotationMode::Normal)
+               ? QStringLiteral("Широта (°)")
+               : QStringLiteral("Угол от подсолнечной точки (°)");
+}
+
+QString plotTitleForMode(RotationMode mode) {
+    return (mode == RotationMode::Normal)
+               ? QStringLiteral("Температура поверхности по широтам")
+               : QStringLiteral("Температура поверхности по углу от подсолнечной точки");
+}
+
+QPair<double, double> axisRangeForMode(RotationMode mode) {
+    return (mode == RotationMode::Normal)
+               ? QPair<double, double>{-90.0, 90.0}
+               : QPair<double, double>{0.0, 180.0};
+}
+
+double axisStepForMode(RotationMode mode) {
+    return (mode == RotationMode::Normal) ? 15.0 : 30.0;
+}
 }  // namespace
 
 SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
@@ -36,10 +59,12 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
       grid_(new QwtPlotGrid()),
       freezingMarker_(new QwtPlotMarker()),
       tracker_(new TemperaturePlotTracker(canvas())) {
-    setTitle(QStringLiteral("Температура поверхности по широтам"));
-    setAxisTitle(QwtPlot::xBottom, QStringLiteral("Широта (°)"));
+    setTitle(plotTitleForMode(rotationMode_));
+    setAxisTitle(QwtPlot::xBottom, axisTitleForMode(rotationMode_));
     setAxisTitle(QwtPlot::yLeft, QStringLiteral("Температура (K, °C)"));
-    setAxisScale(QwtPlot::xBottom, -90.0, 90.0, 15.0);
+    const auto axisRange = axisRangeForMode(rotationMode_);
+    setAxisScale(QwtPlot::xBottom, axisRange.first, axisRange.second,
+                 axisStepForMode(rotationMode_));
     setAxisScaleDraw(QwtPlot::yLeft, new TemperatureScaleDraw());
 
     canvas()->setMouseTracking(true);
@@ -115,16 +140,22 @@ void SurfaceTemperaturePlot::setSmoothingEnabled(bool enabled) {
 
 void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
                                                   const QVector<TemperatureSummaryPoint> &summaryPoints,
-                                                  const QString &segmentLabel) {
+                                                  const QString &segmentLabel,
+                                                  RotationMode rotationMode) {
     points_ = points;
     summaryPoints_ = summaryPoints;
     segmentLabel_ = segmentLabel;
-    tracker_->setTemperatureSeries(points_, summaryPoints_, segmentLabel_);
+    rotationMode_ = rotationMode;
+    tracker_->setTemperatureSeries(points_, summaryPoints_, segmentLabel_, rotationMode_);
 
+    const auto axisRange = axisRangeForMode(rotationMode_);
+    setAxisTitle(QwtPlot::xBottom, axisTitleForMode(rotationMode_));
+    setAxisScale(QwtPlot::xBottom, axisRange.first, axisRange.second,
+                 axisStepForMode(rotationMode_));
     if (!segmentLabel_.isEmpty()) {
-        setTitle(QStringLiteral("Температура поверхности по широтам — %1").arg(segmentLabel_));
+        setTitle(QStringLiteral("%1 — %2").arg(plotTitleForMode(rotationMode_), segmentLabel_));
     } else {
-        setTitle(QStringLiteral("Температура поверхности по широтам"));
+        setTitle(plotTitleForMode(rotationMode_));
     }
 
     QVector<QPointF> minimumSeries;
@@ -164,7 +195,7 @@ void SurfaceTemperaturePlot::clearSeries() {
     summaryPoints_.clear();
     segmentLabel_.clear();
     tracker_->clearSeries();
-    setTitle(QStringLiteral("Температура поверхности по широтам"));
+    setTitle(plotTitleForMode(rotationMode_));
     minimumCurve_->setSamples(QVector<QPointF>{});
     maximumCurve_->setSamples(QVector<QPointF>{});
     meanAnnualCurve_->setSamples(QVector<QPointF>{});

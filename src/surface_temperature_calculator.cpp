@@ -42,8 +42,12 @@ double meanDailyCosine(double latitudeRadians, double declinationRadians) {
 
 SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            const SurfaceMaterial &material,
-                                                           double dayLengthDays)
-    : solarConstant_(solarConstant), material_(material), dayLengthDays_(dayLengthDays) {}
+                                                           double dayLengthDays,
+                                                           RotationMode rotationMode)
+    : solarConstant_(solarConstant),
+      material_(material),
+      dayLengthDays_(dayLengthDays),
+      rotationMode_(rotationMode) {}
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitude(
     int latitudePoints) const {
@@ -171,8 +175,13 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         if (cancelFlag && cancelFlag->load()) {
             return {};
         }
-        const double latitude = -90.0 + stepDegrees * static_cast<double>(i);
-        const double latitudeRadians = qDegreesToRadians(latitude);
+        const double axisDegrees = (rotationMode_ == RotationMode::Normal)
+                                       ? (-90.0 + stepDegrees * static_cast<double>(i))
+                                       : (stepDegrees * static_cast<double>(i));
+        // Ось X: широта (-90..90) для обычного вращения или
+        // угловое удаление от подсолнечной точки (0..180) для приливной синхронизации.
+        const double latitudeRadians = qDegreesToRadians(axisDegrees);
+        const double subsolarAngleRadians = latitudeRadians;
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double layerThickness = kSurfaceDepthMeters / kLayerCount;
         const double density = qMax(1.0, material_.density);
@@ -207,8 +216,12 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
             static_cast<int>(std::ceil(dayLengthSeconds / stableTimeStep)),
             kMaxStepsPerDay);
         const double timeStepSeconds = dayLengthSeconds / stepsPerDay;
-        // Усредненная за сутки инсоляция: учитываем сезонную деклинацию.
-        const double averageCosine = meanDailyCosine(latitudeRadians, declinationRadians);
+        const double averageCosine =
+            (rotationMode_ == RotationMode::Normal)
+                ? meanDailyCosine(latitudeRadians, declinationRadians)
+                // В приливной синхронизации угол от подсолнечной точки равен зенитному углу,
+                // поэтому cos(угол) задает локальную среднюю инсоляцию без суточного вращения.
+                : qMax(0.0, std::cos(subsolarAngleRadians));
         const double meanSolarFlux =
             segmentSolarConstant * averageCosine * (1.0 - material_.albedo);
         const double meanFlux = meanSolarFlux + kInternalHeatFlux +
@@ -227,17 +240,22 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         int meanNightCount = 0;
 
         constexpr int kSpinupCycles = 3;
+        const double tidalSolarFactor = qMax(0.0, std::cos(subsolarAngleRadians));
         for (int cycle = 0; cycle < kSpinupCycles; ++cycle) {
             for (int step = 0; step < stepsPerDay; ++step) {
                 if (cancelFlag && cancelFlag->load()) {
                     return {};
                 }
-                const double phase = static_cast<double>(step) / stepsPerDay;
-                const double hourAngle = 2.0 * kPi * phase - kPi;
-                // Солнечный фактор: cos(зенитного угла) с поправкой на сезонную деклинацию.
-                const double solarFactor = std::sin(latitudeRadians) * std::sin(declinationRadians) +
-                                           std::cos(latitudeRadians) * std::cos(declinationRadians) *
-                                               std::cos(hourAngle);
+                double solarFactor = tidalSolarFactor;
+                if (rotationMode_ == RotationMode::Normal) {
+                    const double phase = static_cast<double>(step) / stepsPerDay;
+                    const double hourAngle = 2.0 * kPi * phase - kPi;
+                    // Солнечный фактор: cos(зенитного угла) с поправкой на сезонную деклинацию,
+                    // где широта задаёт наклон поверхности относительно лучей звезды.
+                    solarFactor = std::sin(latitudeRadians) * std::sin(declinationRadians) +
+                                  std::cos(latitudeRadians) * std::cos(declinationRadians) *
+                                      std::cos(hourAngle);
+                }
                 const double solarFlux = segmentSolarConstant * qMax(0.0, solarFactor) *
                                          (1.0 - material_.albedo);
 
@@ -309,7 +327,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                                  : initialTemperature;
 
         TemperatureRangePoint point;
-        point.latitudeDegrees = latitude;
+        point.latitudeDegrees = axisDegrees;
         point.minimumKelvin = minimumTemperature;
         point.maximumKelvin = maximumTemperature;
         point.meanDailyKelvin = meanDailyTemperature;
