@@ -56,7 +56,7 @@ SegmentSelectorWidget::SegmentSelectorWidget(QWidget *parent)
 
     segmentButtonGroup_->setExclusive(true);
 
-    connect(segmentButtonGroup_, QOverload<int>::of(&QButtonGroup::buttonClicked),
+    connect(segmentButtonGroup_, QOverload<int>::of(&QButtonGroup::idClicked),
             this, [this](int index) { setCurrentIndex(index); });
     connect(previousButton_, &QToolButton::clicked, this, [this]() {
         if (segments_.isEmpty()) {
