@@ -9,6 +9,7 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent)
 # find_package( REQUIRED)
 # target_link_libraries()
 add_executable(solar_constant
+    include/segment_selector_widget.h
     src/orbit_segment_calculator.cpp
     src/planet_presets.cpp
     src/segment_selector_widget.cpp
