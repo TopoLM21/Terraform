@@ -35,12 +35,17 @@ QwtText TemperaturePlotTracker::trackerTextF(const QPointF &pos) const {
     }
 
     const auto &point = points_.at(index);
-    QString text = QStringLiteral("Широта: %1°\nМин: %2 K (%3 °C)\nМакс: %4 K (%5 °C)")
+    QString text = QStringLiteral("Широта: %1°\nМин: %2 K (%3 °C)\nМакс: %4 K (%5 °C)\n"
+                                  "Средн. день: %6 K (%7 °C)\nСредн. ночь: %8 K (%9 °C)")
                        .arg(point.latitudeDegrees, 0, 'f', 0)
                        .arg(point.minimumKelvin, 0, 'f', 1)
                        .arg(point.minimumCelsius, 0, 'f', 1)
                        .arg(point.maximumKelvin, 0, 'f', 1)
-                       .arg(point.maximumCelsius, 0, 'f', 1);
+                       .arg(point.maximumCelsius, 0, 'f', 1)
+                       .arg(point.meanDayKelvin, 0, 'f', 1)
+                       .arg(point.meanDayCelsius, 0, 'f', 1)
+                       .arg(point.meanNightKelvin, 0, 'f', 1)
+                       .arg(point.meanNightCelsius, 0, 'f', 1);
     if (!segmentLabel_.isEmpty()) {
         text.append(QStringLiteral("\n%1").arg(segmentLabel_));
     }
