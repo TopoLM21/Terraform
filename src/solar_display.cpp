@@ -880,6 +880,8 @@ private:
             double minimumOverall = std::numeric_limits<double>::max();
             double maximumOverall = 0.0;
             double meanAnnualSum = 0.0;
+            double meanAnnualDaySum = 0.0;
+            double meanAnnualNightSum = 0.0;
             int samples = 0;
             double latitudeDegrees = 0.0;
 
@@ -893,6 +895,9 @@ private:
                 maximumOverall = qMax(maximumOverall, point.maximumKelvin);
                 // Годовая средняя берется как среднее по сегментам равной длительности.
                 meanAnnualSum += point.meanDailyKelvin;
+                // Дневная/ночная годовая средняя получаются так же по сегментам.
+                meanAnnualDaySum += point.meanDayKelvin;
+                meanAnnualNightSum += point.meanNightKelvin;
                 ++samples;
             }
 
@@ -905,9 +910,14 @@ private:
             summaryPoint.minimumKelvin = minimumOverall;
             summaryPoint.maximumKelvin = maximumOverall;
             summaryPoint.meanAnnualKelvin = meanAnnualSum / samples;
+            summaryPoint.meanAnnualDayKelvin = meanAnnualDaySum / samples;
+            summaryPoint.meanAnnualNightKelvin = meanAnnualNightSum / samples;
             summaryPoint.minimumCelsius = minimumOverall - kKelvinOffset;
             summaryPoint.maximumCelsius = maximumOverall - kKelvinOffset;
             summaryPoint.meanAnnualCelsius = summaryPoint.meanAnnualKelvin - kKelvinOffset;
+            summaryPoint.meanAnnualDayCelsius = summaryPoint.meanAnnualDayKelvin - kKelvinOffset;
+            summaryPoint.meanAnnualNightCelsius =
+                summaryPoint.meanAnnualNightKelvin - kKelvinOffset;
             temperatureSummary_.push_back(summaryPoint);
         }
     }

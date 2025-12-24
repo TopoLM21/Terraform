@@ -49,9 +49,15 @@ QwtText TemperaturePlotTracker::trackerTextF(const QPointF &pos) const {
     if (index >= 0 && index < summaryPoints_.size()) {
         const auto &summaryPoint = summaryPoints_.at(index);
         text.append(QStringLiteral("\nСредняя за год: %1 K (%2 °C)\n"
-                                   "Год: мин %3 K (%4 °C)\nГод: макс %5 K (%6 °C)")
+                                   "Средняя за год (день): %3 K (%4 °C)\n"
+                                   "Средняя за год (ночь): %5 K (%6 °C)\n"
+                                   "Год: мин %7 K (%8 °C)\nГод: макс %9 K (%10 °C)")
                         .arg(summaryPoint.meanAnnualKelvin, 0, 'f', 1)
                         .arg(summaryPoint.meanAnnualCelsius, 0, 'f', 1)
+                        .arg(summaryPoint.meanAnnualDayKelvin, 0, 'f', 1)
+                        .arg(summaryPoint.meanAnnualDayCelsius, 0, 'f', 1)
+                        .arg(summaryPoint.meanAnnualNightKelvin, 0, 'f', 1)
+                        .arg(summaryPoint.meanAnnualNightCelsius, 0, 'f', 1)
                         .arg(summaryPoint.minimumKelvin, 0, 'f', 1)
                         .arg(summaryPoint.minimumCelsius, 0, 'f', 1)
                         .arg(summaryPoint.maximumKelvin, 0, 'f', 1)
