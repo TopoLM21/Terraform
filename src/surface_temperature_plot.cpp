@@ -5,7 +5,7 @@
 #include <qwt/qwt_plot_grid.h>
 #include <qwt/qwt_plot_marker.h>
 #include <qwt/qwt_scale_draw.h>
-#include <qwt/qwt_spline_curve_fitter.h>
+// #include <qwt/qwt_spline_curve_fitter.h>
 #include <qwt/qwt_legend.h>
 #include <qwt/qwt_legend_data.h>
 #include <qwt/qwt_text.h>
@@ -100,15 +100,16 @@ void SurfaceTemperaturePlot::setSmoothingEnabled(bool enabled) {
     }
 
     smoothingEnabled_ = enabled;
-    const auto applyFitter = [enabled](QwtPlotCurve *curve) {
-        curve->setCurveFitter(enabled ? new QwtSplineCurveFitter() : nullptr);
-    };
-
-    applyFitter(minimumCurve_);
-    applyFitter(maximumCurve_);
-    applyFitter(meanAnnualCurve_);
-    applyFitter(meanAnnualDayCurve_);
-    applyFitter(meanAnnualNightCurve_);
+    // Сглаживание временно отключено: оставляем флаг, но не применяем аппроксиматор.
+    // const auto applyFitter = [enabled](QwtPlotCurve *curve) {
+    //     curve->setCurveFitter(enabled ? new QwtSplineCurveFitter() : nullptr);
+    // };
+    //
+    // applyFitter(minimumCurve_);
+    // applyFitter(maximumCurve_);
+    // applyFitter(meanAnnualCurve_);
+    // applyFitter(meanAnnualDayCurve_);
+    // applyFitter(meanAnnualNightCurve_);
     replot();
 }
 
