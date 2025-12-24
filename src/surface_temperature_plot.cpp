@@ -10,6 +10,7 @@
 #include <qwt/qwt_text.h>
 
 #include <QtGui/QColor>
+#include <QtGui/QFont>
 #include <QtGui/QPalette>
 
 namespace {
@@ -28,8 +29,7 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     : QwtPlot(parent),
       minimumCurve_(new QwtPlotCurve(QStringLiteral("Минимум за сутки"))),
       maximumCurve_(new QwtPlotCurve(QStringLiteral("Максимум за сутки"))),
-      meanDayCurve_(new QwtPlotCurve(QStringLiteral("Средняя (день)"))),
-      meanNightCurve_(new QwtPlotCurve(QStringLiteral("Средняя (ночь)"))),
+      meanAnnualCurve_(new QwtPlotCurve(QStringLiteral("Средняя за год"))),
       grid_(new QwtPlotGrid()),
       freezingMarker_(new QwtPlotMarker()),
       tracker_(new TemperaturePlotTracker(canvas())) {
@@ -60,8 +60,13 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     freezingMarker_->setLineStyle(QwtPlotMarker::HLine);
     // Линия замерзания воды: 0 °C соответствует 273.15 K.
     freezingMarker_->setYValue(273.15);
-    freezingMarker_->setLinePen(QPen(palette().color(QPalette::Mid), 1.0, Qt::DashLine));
-    freezingMarker_->setLabel(QwtText(QStringLiteral("0 °C")));
+    freezingMarker_->setLinePen(QPen(QColor(220, 30, 30), 2.0, Qt::DashDotLine));
+    QwtText freezingLabel(QStringLiteral("0 °C"));
+    QFont freezingFont = freezingLabel.font();
+    freezingFont.setBold(true);
+    freezingLabel.setFont(freezingFont);
+    freezingLabel.setColor(QColor(220, 30, 30));
+    freezingMarker_->setLabel(freezingLabel);
     freezingMarker_->setLabelAlignment(Qt::AlignRight | Qt::AlignTop);
     freezingMarker_->attach(this);
 
@@ -73,20 +78,18 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     maximumCurve_->setPen(QPen(palette().color(QPalette::Highlight).lighter(130), 2.0));
     maximumCurve_->attach(this);
 
-    meanDayCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
-    meanDayCurve_->setPen(QPen(QColor(0, 150, 0), 1.5));
-    meanDayCurve_->attach(this);
-
-    meanNightCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
-    meanNightCurve_->setPen(QPen(palette().color(QPalette::Link), 1.5, Qt::DashLine));
-    meanNightCurve_->attach(this);
+    meanAnnualCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
+    meanAnnualCurve_->setPen(QPen(QColor(0, 150, 0), 1.8));
+    meanAnnualCurve_->attach(this);
 }
 
 void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
+                                                  const QVector<TemperatureSummaryPoint> &summaryPoints,
                                                   const QString &segmentLabel) {
     points_ = points;
+    summaryPoints_ = summaryPoints;
     segmentLabel_ = segmentLabel;
-    tracker_->setTemperatureSeries(points_, segmentLabel_);
+    tracker_->setTemperatureSeries(points_, summaryPoints_, segmentLabel_);
 
     if (!segmentLabel_.isEmpty()) {
         setTitle(QStringLiteral("Температура поверхности по широтам — %1").arg(segmentLabel_));
@@ -96,35 +99,34 @@ void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRange
 
     QVector<QPointF> minimumSeries;
     QVector<QPointF> maximumSeries;
-    QVector<QPointF> meanDaySeries;
-    QVector<QPointF> meanNightSeries;
+    QVector<QPointF> meanAnnualSeries;
     minimumSeries.reserve(points.size());
     maximumSeries.reserve(points.size());
-    meanDaySeries.reserve(points.size());
-    meanNightSeries.reserve(points.size());
+    meanAnnualSeries.reserve(summaryPoints.size());
 
     for (const auto &point : points) {
         minimumSeries.push_back(QPointF(point.latitudeDegrees, point.minimumKelvin));
         maximumSeries.push_back(QPointF(point.latitudeDegrees, point.maximumKelvin));
-        meanDaySeries.push_back(QPointF(point.latitudeDegrees, point.meanDayKelvin));
-        meanNightSeries.push_back(QPointF(point.latitudeDegrees, point.meanNightKelvin));
+    }
+
+    for (const auto &summaryPoint : summaryPoints) {
+        meanAnnualSeries.push_back(QPointF(summaryPoint.latitudeDegrees, summaryPoint.meanAnnualKelvin));
     }
 
     minimumCurve_->setSamples(minimumSeries);
     maximumCurve_->setSamples(maximumSeries);
-    meanDayCurve_->setSamples(meanDaySeries);
-    meanNightCurve_->setSamples(meanNightSeries);
+    meanAnnualCurve_->setSamples(meanAnnualSeries);
     replot();
 }
 
 void SurfaceTemperaturePlot::clearSeries() {
     points_.clear();
+    summaryPoints_.clear();
     segmentLabel_.clear();
     tracker_->clearSeries();
     setTitle(QStringLiteral("Температура поверхности по широтам"));
     minimumCurve_->setSamples(QVector<QPointF>{});
     maximumCurve_->setSamples(QVector<QPointF>{});
-    meanDayCurve_->setSamples(QVector<QPointF>{});
-    meanNightCurve_->setSamples(QVector<QPointF>{});
+    meanAnnualCurve_->setSamples(QVector<QPointF>{});
     replot();
 }

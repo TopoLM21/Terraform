@@ -14,13 +14,16 @@ TemperaturePlotTracker::TemperaturePlotTracker(QWidget *canvas)
 }
 
 void TemperaturePlotTracker::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
+                                                  const QVector<TemperatureSummaryPoint> &summaryPoints,
                                                   const QString &segmentLabel) {
     points_ = points;
+    summaryPoints_ = summaryPoints;
     segmentLabel_ = segmentLabel;
 }
 
 void TemperaturePlotTracker::clearSeries() {
     points_.clear();
+    summaryPoints_.clear();
     segmentLabel_.clear();
 }
 
@@ -35,17 +38,25 @@ QwtText TemperaturePlotTracker::trackerTextF(const QPointF &pos) const {
     }
 
     const auto &point = points_.at(index);
-    QString text = QStringLiteral("Широта: %1°\nМин: %2 K (%3 °C)\nМакс: %4 K (%5 °C)\n"
-                                  "Средн. день: %6 K (%7 °C)\nСредн. ночь: %8 K (%9 °C)")
+    QString text = QStringLiteral("Широта: %1°\nСегмент: мин %2 K (%3 °C)\n"
+                                  "Сегмент: макс %4 K (%5 °C)")
                        .arg(point.latitudeDegrees, 0, 'f', 0)
                        .arg(point.minimumKelvin, 0, 'f', 1)
                        .arg(point.minimumCelsius, 0, 'f', 1)
                        .arg(point.maximumKelvin, 0, 'f', 1)
-                       .arg(point.maximumCelsius, 0, 'f', 1)
-                       .arg(point.meanDayKelvin, 0, 'f', 1)
-                       .arg(point.meanDayCelsius, 0, 'f', 1)
-                       .arg(point.meanNightKelvin, 0, 'f', 1)
-                       .arg(point.meanNightCelsius, 0, 'f', 1);
+                       .arg(point.maximumCelsius, 0, 'f', 1);
+
+    if (index >= 0 && index < summaryPoints_.size()) {
+        const auto &summaryPoint = summaryPoints_.at(index);
+        text.append(QStringLiteral("\nСредняя за год: %1 K (%2 °C)\n"
+                                   "Год: мин %3 K (%4 °C)\nГод: макс %5 K (%6 °C)")
+                        .arg(summaryPoint.meanAnnualKelvin, 0, 'f', 1)
+                        .arg(summaryPoint.meanAnnualCelsius, 0, 'f', 1)
+                        .arg(summaryPoint.minimumKelvin, 0, 'f', 1)
+                        .arg(summaryPoint.minimumCelsius, 0, 'f', 1)
+                        .arg(summaryPoint.maximumKelvin, 0, 'f', 1)
+                        .arg(summaryPoint.maximumCelsius, 0, 'f', 1));
+    }
     if (!segmentLabel_.isEmpty()) {
         text.append(QStringLiteral("\n%1").arg(segmentLabel_));
     }

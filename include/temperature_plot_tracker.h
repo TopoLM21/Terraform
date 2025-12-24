@@ -10,6 +10,7 @@ public:
     explicit TemperaturePlotTracker(QWidget *canvas);
 
     void setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
+                              const QVector<TemperatureSummaryPoint> &summaryPoints,
                               const QString &segmentLabel);
     void clearSeries();
 
@@ -20,5 +21,6 @@ private:
     int nearestPointIndex(double latitudeDegrees) const;
 
     QVector<TemperatureRangePoint> points_;
+    QVector<TemperatureSummaryPoint> summaryPoints_;
     QString segmentLabel_;
 };

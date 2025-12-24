@@ -218,8 +218,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         QVector<double> layers(kLayerCount, initialTemperature);
         double minimumTemperature = std::numeric_limits<double>::max();
         double maximumTemperature = 0.0;
+        double meanDailySum = 0.0;
         double meanDaySum = 0.0;
         double meanNightSum = 0.0;
+        int meanDailyCount = 0;
         int meanDayCount = 0;
         int meanNightCount = 0;
 
@@ -277,6 +279,8 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                     const double surfaceTemperature = layers[0];
                     minimumTemperature = qMin(minimumTemperature, surfaceTemperature);
                     maximumTemperature = qMax(maximumTemperature, surfaceTemperature);
+                    meanDailySum += surfaceTemperature;
+                    ++meanDailyCount;
                     // Усредняем по шагам, разделяя день/ночь по знаку solarFactor:
                     // так видны отдельные характеристики нагрева и остывания,
                     // особенно при длительном полярном дне или ночи.
@@ -299,15 +303,20 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
             (meanNightCount > 0) ? (meanNightSum / meanNightCount)
                                  : ((meanDayCount > 0) ? (meanDaySum / meanDayCount)
                                                        : initialTemperature);
+        const double meanDailyTemperature =
+            (meanDailyCount > 0) ? (meanDailySum / meanDailyCount)
+                                 : initialTemperature;
 
         TemperatureRangePoint point;
         point.latitudeDegrees = latitude;
         point.minimumKelvin = minimumTemperature;
         point.maximumKelvin = maximumTemperature;
+        point.meanDailyKelvin = meanDailyTemperature;
         point.meanDayKelvin = meanDayTemperature;
         point.meanNightKelvin = meanNightTemperature;
         point.minimumCelsius = minimumTemperature - kKelvinOffset;
         point.maximumCelsius = maximumTemperature - kKelvinOffset;
+        point.meanDailyCelsius = meanDailyTemperature - kKelvinOffset;
         point.meanDayCelsius = meanDayTemperature - kKelvinOffset;
         point.meanNightCelsius = meanNightTemperature - kKelvinOffset;
         points.push_back(point);

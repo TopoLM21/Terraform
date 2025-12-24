@@ -15,17 +15,18 @@ public:
     explicit SurfaceTemperaturePlot(QWidget *parent = nullptr);
 
     void setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
+                              const QVector<TemperatureSummaryPoint> &summaryPoints,
                               const QString &segmentLabel);
     void clearSeries();
 
 private:
     QwtPlotCurve *minimumCurve_;
     QwtPlotCurve *maximumCurve_;
-    QwtPlotCurve *meanDayCurve_;
-    QwtPlotCurve *meanNightCurve_;
+    QwtPlotCurve *meanAnnualCurve_;
     QwtPlotGrid *grid_;
     QwtPlotMarker *freezingMarker_;
     TemperaturePlotTracker *tracker_;
     QVector<TemperatureRangePoint> points_;
+    QVector<TemperatureSummaryPoint> summaryPoints_;
     QString segmentLabel_;
 };
