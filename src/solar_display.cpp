@@ -58,6 +58,7 @@ constexpr int kRoleDayLength = Qt::UserRole + 4;
 constexpr int kRoleEccentricity = Qt::UserRole + 5;
 constexpr int kRoleObliquity = Qt::UserRole + 6;
 constexpr int kRolePerihelionArgument = Qt::UserRole + 7;
+constexpr int kRoleRotationMode = Qt::UserRole + 8;
 constexpr double kKelvinOffset = 273.15;
 
 struct TemperatureCacheKey {
@@ -70,6 +71,7 @@ struct TemperatureCacheKey {
     double perihelionArgument = 0.0;
     int latitudePoints = 0;
     int segmentCount = 0;
+    RotationMode rotationMode = RotationMode::Normal;
 
     bool operator==(const TemperatureCacheKey &other) const {
         return solarConstant == other.solarConstant &&
@@ -80,7 +82,8 @@ struct TemperatureCacheKey {
                obliquity == other.obliquity &&
                perihelionArgument == other.perihelionArgument &&
                latitudePoints == other.latitudePoints &&
-               segmentCount == other.segmentCount;
+               segmentCount == other.segmentCount &&
+               rotationMode == other.rotationMode;
     }
 };
 
@@ -106,6 +109,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.perihelionArgument), seed);
     seed = qHash(key.latitudePoints, seed);
     seed = qHash(key.segmentCount, seed);
+    seed = qHash(static_cast<int>(key.rotationMode), seed);
     return seed;
 }
 
@@ -695,6 +699,7 @@ private:
         planetComboBox_->setItemData(index, planet.eccentricity, kRoleEccentricity);
         planetComboBox_->setItemData(index, planet.obliquityDegrees, kRoleObliquity);
         planetComboBox_->setItemData(index, planet.perihelionArgumentDegrees, kRolePerihelionArgument);
+        planetComboBox_->setItemData(index, static_cast<int>(planet.rotationMode), kRoleRotationMode);
         planetComboBox_->setItemData(index, isCustom, kRoleIsCustom);
         planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
@@ -771,13 +776,20 @@ private:
         }
         formLayout->addRow(QStringLiteral("Материал поверхности:"), materialInput);
 
+        auto *rotationModeInput = new QComboBox(&dialog);
+        rotationModeInput->addItem(QStringLiteral("Обычное вращение (широта)"),
+                                   static_cast<int>(RotationMode::Normal));
+        rotationModeInput->addItem(QStringLiteral("Приливная синхронизация (угол от подсолнечной точки)"),
+                                   static_cast<int>(RotationMode::TidalLocked));
+        formLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeInput);
+
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         formLayout->addWidget(buttons);
 
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
                 [&dialog, nameInput, axisInput, dayLengthInput, eccentricityInput,
-                 obliquityInput, perihelionArgumentInput, materialInput, this]() {
+                 obliquityInput, perihelionArgumentInput, materialInput, rotationModeInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -822,8 +834,10 @@ private:
 
             const int existingIndex = findPlanetIndexByName(name);
             const QString materialId = materialInput->currentData().toString();
+            const RotationMode rotationMode =
+                static_cast<RotationMode>(rotationModeInput->currentData().toInt());
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
-                                perihelionArgument, materialId};
+                                perihelionArgument, materialId, rotationMode};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -836,6 +850,8 @@ private:
                 planetComboBox_->setItemData(existingIndex, obliquity, kRoleObliquity);
                 planetComboBox_->setItemData(existingIndex, perihelionArgument,
                                              kRolePerihelionArgument);
+                planetComboBox_->setItemData(existingIndex, static_cast<int>(rotationMode),
+                                             kRoleRotationMode);
                 planetComboBox_->setItemData(existingIndex, true, kRoleIsCustom);
                 planetComboBox_->setItemData(existingIndex, name, kRolePlanetName);
                 planetComboBox_->setItemData(existingIndex, materialId, kRoleMaterialId);
@@ -976,9 +992,12 @@ private:
 
         const int index = segmentSelectorWidget_->currentIndex();
         const QString label = formatSegmentLabel(lastOrbitSegments_.at(index));
+        const RotationMode rotationMode =
+            static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
         temperaturePlot_->setTemperatureSeries(lastTemperatureSegments_.at(index),
                                                temperatureSummary_,
-                                               label);
+                                               label,
+                                               rotationMode);
     }
 
     void clearTemperatureSegments() {
@@ -1053,6 +1072,8 @@ private:
         }
 
         const int latitudePointCount = latitudePoints();
+        const RotationMode rotationMode =
+            static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
         const int segmentCount = 12;
         const TemperatureCacheKey cacheKey{lastSolarConstant_,
                                             material->id,
@@ -1062,7 +1083,8 @@ private:
                                             obliquity,
                                             perihelionArgument,
                                             latitudePointCount,
-                                            segmentCount};
+                                            segmentCount,
+                                            rotationMode};
         const auto cached = temperatureCache_.constFind(cacheKey);
         if (cached != temperatureCache_.constEnd()) {
             // Кэш нужен для быстрого переключения сегментов/планет без повторного расчёта.
@@ -1107,7 +1129,8 @@ private:
                 Qt::QueuedConnection);
         };
 
-        SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength);
+        SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength,
+                                                rotationMode);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
                 [this, watcher, requestId, cancelFlag, cacheKey]() {

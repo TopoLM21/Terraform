@@ -1,5 +1,6 @@
 #pragma once
 
+#include "rotation_mode.h"
 #include "surface_temperature_calculator.h"
 
 #include <qwt/qwt_plot_picker.h>
@@ -11,7 +12,8 @@ public:
 
     void setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
                               const QVector<TemperatureSummaryPoint> &summaryPoints,
-                              const QString &segmentLabel);
+                              const QString &segmentLabel,
+                              RotationMode rotationMode);
     void clearSeries();
 
 protected:
@@ -23,4 +25,5 @@ private:
     QVector<TemperatureRangePoint> points_;
     QVector<TemperatureSummaryPoint> summaryPoints_;
     QString segmentLabel_;
+    RotationMode rotationMode_ = RotationMode::Normal;
 };

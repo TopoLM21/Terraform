@@ -2,6 +2,7 @@
 
 #include "orbit_segment_calculator.h"
 #include "planet_presets.h"
+#include "rotation_mode.h"
 
 #include <QtCore/QVector>
 
@@ -39,7 +40,7 @@ struct TemperatureSummaryPoint {
 class SurfaceTemperatureCalculator {
 public:
     SurfaceTemperatureCalculator(double solarConstant, const SurfaceMaterial &material,
-                                 double dayLengthDays);
+                                 double dayLengthDays, RotationMode rotationMode);
 
     using ProgressCallback = std::function<void(int processed, int total)>;
 
@@ -77,4 +78,5 @@ private:
     double solarConstant_;
     SurfaceMaterial material_;
     double dayLengthDays_;
+    RotationMode rotationMode_ = RotationMode::Normal;
 };
