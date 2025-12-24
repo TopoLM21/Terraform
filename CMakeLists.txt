@@ -3,6 +3,7 @@ project(SolarConstantCalculator LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
 
 find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent)
 # find_package( REQUIRED)
@@ -10,6 +11,7 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent)
 add_executable(solar_constant
     src/orbit_segment_calculator.cpp
     src/planet_presets.cpp
+    src/segment_selector_widget.cpp
     src/solar_calculator.cpp
     src/solar_display.cpp
     src/surface_temperature_calculator.cpp
