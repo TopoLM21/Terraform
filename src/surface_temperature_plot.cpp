@@ -5,6 +5,7 @@
 #include <qwt/qwt_plot_grid.h>
 #include <qwt/qwt_plot_marker.h>
 #include <qwt/qwt_scale_draw.h>
+#include <qwt/qwt_spline_curve_fitter.h>
 #include <qwt/qwt_legend.h>
 #include <qwt/qwt_legend_data.h>
 #include <qwt/qwt_text.h>
@@ -91,6 +92,24 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     meanAnnualNightCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
     meanAnnualNightCurve_->setPen(QPen(QColor(70, 110, 200), 1.6, Qt::DashLine));
     meanAnnualNightCurve_->attach(this);
+}
+
+void SurfaceTemperaturePlot::setSmoothingEnabled(bool enabled) {
+    if (smoothingEnabled_ == enabled) {
+        return;
+    }
+
+    smoothingEnabled_ = enabled;
+    const auto applyFitter = [enabled](QwtPlotCurve *curve) {
+        curve->setCurveFitter(enabled ? new QwtSplineCurveFitter() : nullptr);
+    };
+
+    applyFitter(minimumCurve_);
+    applyFitter(maximumCurve_);
+    applyFitter(meanAnnualCurve_);
+    applyFitter(meanAnnualDayCurve_);
+    applyFitter(meanAnnualNightCurve_);
+    replot();
 }
 
 void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,

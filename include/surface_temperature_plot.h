@@ -17,6 +17,7 @@ public:
     void setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
                               const QVector<TemperatureSummaryPoint> &summaryPoints,
                               const QString &segmentLabel);
+    void setSmoothingEnabled(bool enabled);
     void clearSeries();
 
 private:
@@ -31,4 +32,5 @@ private:
     QVector<TemperatureRangePoint> points_;
     QVector<TemperatureSummaryPoint> summaryPoints_;
     QString segmentLabel_;
+    bool smoothingEnabled_ = false;
 };

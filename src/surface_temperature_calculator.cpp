@@ -46,17 +46,17 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
     : solarConstant_(solarConstant), material_(material), dayLengthDays_(dayLengthDays) {}
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitude(
-    int stepDegrees) const {
-    return temperatureRangesByLatitude(stepDegrees, ProgressCallback{}, nullptr);
+    int latitudePoints) const {
+    return temperatureRangesByLatitude(latitudePoints, ProgressCallback{}, nullptr);
 }
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitude(
-    int stepDegrees,
+    int latitudePoints,
     const ProgressCallback &progressCallback,
     const std::atomic_bool *cancelFlag) const {
-    const int totalLatitudes = stepDegrees > 0 ? 180 / stepDegrees + 1 : 0;
-    return temperatureRangesByLatitudeForSegment(stepDegrees, solarConstant_, 0.0, progressCallback,
-                                                 cancelFlag, 0, totalLatitudes);
+    const int totalLatitudes = latitudePoints > 1 ? latitudePoints : 0;
+    return temperatureRangesByLatitudeForSegment(latitudePoints, solarConstant_, 0.0,
+                                                 progressCallback, cancelFlag, 0, totalLatitudes);
 }
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesForOrbitSegment(
@@ -64,13 +64,13 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesFo
     double referenceDistanceAU,
     double obliquityDegrees,
     double perihelionArgumentDegrees,
-    int stepDegrees,
+    int latitudePoints,
     const ProgressCallback &progressCallback,
     const std::atomic_bool *cancelFlag) const {
     if (cancelFlag && cancelFlag->load()) {
         return {};
     }
-    if (stepDegrees <= 0) {
+    if (latitudePoints <= 1) {
         return {};
     }
 
@@ -84,9 +84,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesFo
     // Инсоляция меняется с расстоянием как 1 / r^2 относительно опорной дистанции.
     const double segmentSolarConstant =
         solarConstant_ * std::pow(referenceDistanceAU / segment.distanceAU, 2.0);
-    const int totalLatitudes = 180 / stepDegrees + 1;
+    const int totalLatitudes = latitudePoints;
 
-    return temperatureRangesByLatitudeForSegment(stepDegrees,
+    return temperatureRangesByLatitudeForSegment(latitudePoints,
                                                  segmentSolarConstant,
                                                  declinationDegrees,
                                                  progressCallback,
@@ -100,20 +100,20 @@ QVector<QVector<TemperatureRangePoint>> SurfaceTemperatureCalculator::temperatur
     double referenceDistanceAU,
     double obliquityDegrees,
     double perihelionArgumentDegrees,
-    int stepDegrees,
+    int latitudePoints,
     const ProgressCallback &progressCallback,
     const std::atomic_bool *cancelFlag) const {
     QVector<QVector<TemperatureRangePoint>> results;
     if (cancelFlag && cancelFlag->load()) {
         return results;
     }
-    if (segments.isEmpty() || stepDegrees <= 0) {
+    if (segments.isEmpty() || latitudePoints <= 1) {
         return results;
     }
 
     const double obliquityRadians = qDegreesToRadians(obliquityDegrees);
     const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgumentDegrees);
-    const int latitudesCount = 180 / stepDegrees + 1;
+    const int latitudesCount = latitudePoints;
     const int totalProgress = latitudesCount * segments.size();
 
     results.reserve(segments.size());
@@ -133,7 +133,7 @@ QVector<QVector<TemperatureRangePoint>> SurfaceTemperatureCalculator::temperatur
             solarConstant_ * std::pow(referenceDistanceAU / segment.distanceAU, 2.0);
         const int progressOffset = i * latitudesCount;
 
-        results.push_back(temperatureRangesByLatitudeForSegment(stepDegrees,
+        results.push_back(temperatureRangesByLatitudeForSegment(latitudePoints,
                                                                 segmentSolarConstant,
                                                                 declinationDegrees,
                                                                 progressCallback,
@@ -146,7 +146,7 @@ QVector<QVector<TemperatureRangePoint>> SurfaceTemperatureCalculator::temperatur
 }
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitudeForSegment(
-    int stepDegrees,
+    int latitudePoints,
     double segmentSolarConstant,
     double declinationDegrees,
     const ProgressCallback &progressCallback,
@@ -154,24 +154,25 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     int progressOffset,
     int totalProgress) const {
     QVector<TemperatureRangePoint> points;
-    if (stepDegrees <= 0) {
+    if (latitudePoints <= 1) {
         return points;
     }
     if (cancelFlag && cancelFlag->load()) {
         return {};
     }
 
-    const int steps = 180 / stepDegrees;
-    points.reserve(steps + 1);
+    points.reserve(latitudePoints);
 
     int processedLatitudes = 0;
     const double declinationRadians = qDegreesToRadians(declinationDegrees);
+    const double stepDegrees = 180.0 / static_cast<double>(latitudePoints - 1);
 
-    for (int latitude = -90; latitude <= 90; latitude += stepDegrees) {
+    for (int i = 0; i < latitudePoints; ++i) {
         if (cancelFlag && cancelFlag->load()) {
             return {};
         }
-        const double latitudeRadians = qDegreesToRadians(static_cast<double>(latitude));
+        const double latitude = -90.0 + stepDegrees * static_cast<double>(i);
+        const double latitudeRadians = qDegreesToRadians(latitude);
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double layerThickness = kSurfaceDepthMeters / kLayerCount;
         const double density = qMax(1.0, material_.density);

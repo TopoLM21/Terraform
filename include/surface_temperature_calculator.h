@@ -43,8 +43,8 @@ public:
 
     using ProgressCallback = std::function<void(int processed, int total)>;
 
-    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int stepDegrees = 1) const;
-    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int stepDegrees,
+    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int latitudePoints = 181) const;
+    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int latitudePoints,
                                                                const ProgressCallback &progressCallback,
                                                                const std::atomic_bool *cancelFlag) const;
     QVector<TemperatureRangePoint> temperatureRangesForOrbitSegment(
@@ -52,7 +52,7 @@ public:
         double referenceDistanceAU,
         double obliquityDegrees,
         double perihelionArgumentDegrees,
-        int stepDegrees,
+        int latitudePoints,
         const ProgressCallback &progressCallback,
         const std::atomic_bool *cancelFlag) const;
     QVector<QVector<TemperatureRangePoint>> temperatureRangesByOrbitSegments(
@@ -60,13 +60,13 @@ public:
         double referenceDistanceAU,
         double obliquityDegrees,
         double perihelionArgumentDegrees,
-        int stepDegrees,
+        int latitudePoints,
         const ProgressCallback &progressCallback,
         const std::atomic_bool *cancelFlag) const;
 
 private:
     QVector<TemperatureRangePoint> temperatureRangesByLatitudeForSegment(
-        int stepDegrees,
+        int latitudePoints,
         double segmentSolarConstant,
         double declinationDegrees,
         const ProgressCallback &progressCallback,
