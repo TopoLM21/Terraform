@@ -1,5 +1,6 @@
 #include "orbit_segment_calculator.h"
 #include "planet_presets.h"
+#include "segment_selector_widget.h"
 #include "solar_calculator.h"
 #include "solar_display.h"
 #include "surface_temperature_calculator.h"
@@ -279,10 +280,10 @@ public:
         auto *plotGroupBox = new QGroupBox(QStringLiteral("Температурный профиль"), this);
         auto *plotLayout = new QVBoxLayout(plotGroupBox);
         auto *segmentLayout = new QHBoxLayout();
-        segmentComboBox_ = new QComboBox(plotGroupBox);
-        segmentComboBox_->setEnabled(false);
+        segmentSelectorWidget_ = new SegmentSelectorWidget(plotGroupBox);
+        segmentSelectorWidget_->setEnabled(false);
         segmentLayout->addWidget(new QLabel(QStringLiteral("Сегмент орбиты:"), plotGroupBox));
-        segmentLayout->addWidget(segmentComboBox_, 1);
+        segmentLayout->addWidget(segmentSelectorWidget_, 1);
         plotLayout->addLayout(segmentLayout);
         plotLayout->addWidget(temperaturePlot_);
         plotGroupBox->setLayout(plotLayout);
@@ -367,7 +368,7 @@ public:
             updateTemperaturePlot();
         });
 
-        connect(segmentComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+        connect(segmentSelectorWidget_, &SegmentSelectorWidget::currentIndexChanged, this,
                 [this](int) { updateTemperaturePlotForSelectedSegment(); });
 
         applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
@@ -496,7 +497,7 @@ private:
 
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
-    QComboBox *segmentComboBox_ = nullptr;
+    SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
     std::shared_ptr<std::atomic_bool> temperatureCancelFlag_;
     int temperatureRequestId_ = 0;
@@ -854,44 +855,40 @@ private:
     }
 
     void updateSegmentComboBox() {
-        const QSignalBlocker blocker(segmentComboBox_);
-        const int previousIndex = segmentComboBox_->currentIndex();
-        segmentComboBox_->clear();
+        const QSignalBlocker blocker(segmentSelectorWidget_);
+        const int previousIndex = segmentSelectorWidget_->currentIndex();
+
+        segmentSelectorWidget_->setSegments(lastOrbitSegments_);
 
         if (lastOrbitSegments_.isEmpty()) {
-            segmentComboBox_->setEnabled(false);
+            segmentSelectorWidget_->setEnabled(false);
             return;
         }
 
-        for (const auto &segment : lastOrbitSegments_) {
-            segmentComboBox_->addItem(formatSegmentLabel(segment));
-        }
-
-        segmentComboBox_->setEnabled(true);
-        if (previousIndex >= 0 && previousIndex < segmentComboBox_->count()) {
-            segmentComboBox_->setCurrentIndex(previousIndex);
+        if (previousIndex >= 0 && previousIndex < lastOrbitSegments_.size()) {
+            segmentSelectorWidget_->setCurrentIndex(previousIndex);
         } else {
-            segmentComboBox_->setCurrentIndex(0);
+            segmentSelectorWidget_->setCurrentIndex(0);
         }
     }
 
     void updateTemperaturePlotForSelectedSegment() {
-        if (segmentComboBox_->currentIndex() < 0 ||
-            segmentComboBox_->currentIndex() >= lastTemperatureSegments_.size()) {
+        if (segmentSelectorWidget_->currentIndex() < 0 ||
+            segmentSelectorWidget_->currentIndex() >= lastTemperatureSegments_.size()) {
             temperaturePlot_->clearSeries();
             return;
         }
 
-        const int index = segmentComboBox_->currentIndex();
-        const QString label = segmentComboBox_->itemText(index);
+        const int index = segmentSelectorWidget_->currentIndex();
+        const QString label = formatSegmentLabel(lastOrbitSegments_.at(index));
         temperaturePlot_->setTemperatureSeries(lastTemperatureSegments_.at(index), label);
     }
 
     void clearTemperatureSegments() {
         lastOrbitSegments_.clear();
         lastTemperatureSegments_.clear();
-        segmentComboBox_->clear();
-        segmentComboBox_->setEnabled(false);
+        segmentSelectorWidget_->setSegments({});
+        segmentSelectorWidget_->setEnabled(false);
         temperaturePlot_->clearSeries();
     }
 
