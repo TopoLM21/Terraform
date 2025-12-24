@@ -294,19 +294,6 @@ public:
         leftLayout->addWidget(calculateButton);
         leftLayout->addStretch();
 
-        temperatureProgressDialog_ = new QProgressDialog(this);
-        temperatureProgressDialog_->setWindowTitle(QStringLiteral("Расчет температур"));
-        temperatureProgressDialog_->setLabelText(QStringLiteral("Вычисление температурного профиля..."));
-        temperatureProgressDialog_->setCancelButtonText(QStringLiteral("Отмена"));
-        temperatureProgressDialog_->setWindowModality(Qt::WindowModal);
-        temperatureProgressDialog_->setAutoClose(true);
-        temperatureProgressDialog_->setAutoReset(true);
-        temperatureProgressDialog_->hide();
-
-        connect(temperatureProgressDialog_, &QProgressDialog::canceled, this, [this]() {
-            cancelTemperatureCalculation();
-        });
-
         auto *layout = new QHBoxLayout(this);
         layout->addLayout(leftLayout, 0);
         layout->addWidget(plotGroupBox, 1);
@@ -902,6 +889,28 @@ private:
         temperatureCache_.clear();
     }
 
+    QProgressDialog *ensureTemperatureProgressDialog() {
+        if (temperatureProgressDialog_) {
+            return temperatureProgressDialog_;
+        }
+
+        temperatureProgressDialog_ = new QProgressDialog(this);
+        temperatureProgressDialog_->setWindowTitle(QStringLiteral("Расчет температур"));
+        temperatureProgressDialog_->setLabelText(QStringLiteral("Вычисление температурного профиля..."));
+        temperatureProgressDialog_->setCancelButtonText(QStringLiteral("Отмена"));
+        temperatureProgressDialog_->setWindowModality(Qt::WindowModal);
+        temperatureProgressDialog_->setAutoClose(true);
+        temperatureProgressDialog_->setAutoReset(true);
+        // Диалог создается по требованию, чтобы не всплывать без запуска вычислений.
+        temperatureProgressDialog_->hide();
+
+        connect(temperatureProgressDialog_, &QProgressDialog::canceled, this, [this]() {
+            cancelTemperatureCalculation();
+        });
+
+        return temperatureProgressDialog_;
+    }
+
     void updateTemperaturePlot() {
         cancelTemperatureCalculation();
 
@@ -967,11 +976,12 @@ private:
         const int totalLatitudes = 180 / stepDegrees + 1;
         const int totalProgress = totalLatitudes * segmentCount;
 
-        temperatureProgressDialog_->setRange(0, totalProgress);
-        temperatureProgressDialog_->setValue(0);
-        temperatureProgressDialog_->show();
+        auto *progressDialog = ensureTemperatureProgressDialog();
+        progressDialog->setRange(0, totalProgress);
+        progressDialog->setValue(0);
+        progressDialog->show();
 
-        QPointer<QProgressDialog> dialogGuard(temperatureProgressDialog_);
+        QPointer<QProgressDialog> dialogGuard(progressDialog);
         QPointer<SolarCalculatorWidget> widgetGuard(this);
         // Вызов из фонового потока: защищаемся от удаления виджета во время вычисления.
         auto progressCallback = [widgetGuard, dialogGuard, requestId](int processed, int total) {
