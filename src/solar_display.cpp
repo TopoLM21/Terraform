@@ -36,8 +36,9 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressDialog>
+#include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QPushButton>
-#include <QtWidgets/QSpinBox>
+#include <QtWidgets/QRadioButton>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
@@ -241,9 +242,12 @@ public:
         planetPerihelionArgumentLabel_ = new QLabel(QStringLiteral("—"), this);
         materialComboBox_ = new QComboBox(this);
         populateMaterials();
-        latitudePointsSpinBox_ = new QSpinBox(this);
-        latitudePointsSpinBox_->setRange(2, 181);
-        latitudePointsSpinBox_->setValue(181);
+        latitudeStepFastRadio_ = new QRadioButton(QStringLiteral("Через 1° (быстрые)"), this);
+        latitudeStepSlowRadio_ = new QRadioButton(QStringLiteral("Через 10° (медленные)"), this);
+        latitudeStepGroup_ = new QButtonGroup(this);
+        latitudeStepGroup_->addButton(latitudeStepFastRadio_);
+        latitudeStepGroup_->addButton(latitudeStepSlowRadio_);
+        latitudeStepFastRadio_->setChecked(true);
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
         deletePlanetButton_ = new QPushButton(this);
         deletePlanetButton_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
@@ -263,7 +267,12 @@ public:
         planetFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
                                  planetPerihelionArgumentLabel_);
         planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
-        planetFormLayout->addRow(QStringLiteral("Точки по широте:"), latitudePointsSpinBox_);
+        auto *latitudeStepLayout = new QHBoxLayout();
+        latitudeStepLayout->addWidget(latitudeStepFastRadio_);
+        latitudeStepLayout->addWidget(latitudeStepSlowRadio_);
+        auto *latitudeStepWidget = new QWidget(this);
+        latitudeStepWidget->setLayout(latitudeStepLayout);
+        planetFormLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
         planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
         planetFormLayout->addRow(QString(), addPlanetButton_);
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
@@ -285,8 +294,8 @@ public:
         segmentLayout->addWidget(new QLabel(QStringLiteral("Сегмент орбиты:"), plotGroupBox));
         segmentLayout->addWidget(segmentSelectorWidget_, 1);
         plotLayout->addLayout(segmentLayout);
-        auto *smoothingCheckBox = new QCheckBox(QStringLiteral("Сглаживать график"), plotGroupBox);
-        plotLayout->addWidget(smoothingCheckBox);
+        // auto *smoothingCheckBox = new QCheckBox(QStringLiteral("Сглаживать график"), plotGroupBox);
+        // plotLayout->addWidget(smoothingCheckBox);
         plotLayout->addWidget(temperaturePlot_);
         plotGroupBox->setLayout(plotLayout);
 
@@ -352,7 +361,19 @@ public:
             updateTemperaturePlot();
         });
 
-        connect(latitudePointsSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) {
+        connect(latitudeStepFastRadio_, &QRadioButton::toggled, this, [this](bool checked) {
+            if (!checked) {
+                return;
+            }
+            latitudePointsManuallySet_ = true;
+            clearTemperatureCache();
+            updateTemperaturePlot();
+        });
+
+        connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this, [this](bool checked) {
+            if (!checked) {
+                return;
+            }
             latitudePointsManuallySet_ = true;
             clearTemperatureCache();
             updateTemperaturePlot();
@@ -362,8 +383,8 @@ public:
                 [this](int) { updateTemperaturePlotForSelectedSegment(); });
 
         // Сглаживание влияет только на отображение кривых, а не на физический расчет.
-        connect(smoothingCheckBox, &QCheckBox::toggled, temperaturePlot_,
-                &SurfaceTemperaturePlot::setSmoothingEnabled);
+        // connect(smoothingCheckBox, &QCheckBox::toggled, temperaturePlot_,
+        //         &SurfaceTemperaturePlot::setSmoothingEnabled);
 
         connect(calculateButton, &QPushButton::clicked, this, [this]() {
             autoCalculateEnabled_ = true;
@@ -490,7 +511,9 @@ private:
     QLabel *planetObliquityLabel_ = nullptr;
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
-    QSpinBox *latitudePointsSpinBox_ = nullptr;
+    QRadioButton *latitudeStepFastRadio_ = nullptr;
+    QRadioButton *latitudeStepSlowRadio_ = nullptr;
+    QButtonGroup *latitudeStepGroup_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
 
@@ -605,6 +628,17 @@ private:
         planetDayLengthLabel_->setText(formatDayLength(value.toDouble()));
     }
 
+    int latitudeStepDegrees() const {
+        if (latitudeStepSlowRadio_ && latitudeStepSlowRadio_->isChecked()) {
+            return 10;
+        }
+        return 1;
+    }
+
+    int latitudePoints() const {
+        return 180 / latitudeStepDegrees() + 1;
+    }
+
     void updateLatitudePointsDefault() {
         if (latitudePointsManuallySet_) {
             return;
@@ -618,10 +652,14 @@ private:
         const double dayLength = value.toDouble();
         // Для медленных планет увеличиваем шаг широты, чтобы профили быстро считались
         // и оставались читаемыми при малом числе характерных широт.
-        const int defaultStep = (dayLength > 30.0) ? 45 : 1;
-        const int defaultLatitudePoints = 180 / defaultStep + 1;
-        const QSignalBlocker blocker(latitudePointsSpinBox_);
-        latitudePointsSpinBox_->setValue(defaultLatitudePoints);
+        const bool useSlowStep = (dayLength > 30.0);
+        const QSignalBlocker fastBlocker(latitudeStepFastRadio_);
+        const QSignalBlocker slowBlocker(latitudeStepSlowRadio_);
+        if (useSlowStep) {
+            latitudeStepSlowRadio_->setChecked(true);
+        } else {
+            latitudeStepFastRadio_->setChecked(true);
+        }
     }
 
     void updatePlanetOrbitLabels() {
@@ -1014,7 +1052,7 @@ private:
             return;
         }
 
-        const int latitudePoints = latitudePointsSpinBox_->value();
+        const int latitudePoints = latitudePoints();
         const int segmentCount = 12;
         const TemperatureCacheKey cacheKey{lastSolarConstant_,
                                             material->id,
