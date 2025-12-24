@@ -30,6 +30,8 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
       minimumCurve_(new QwtPlotCurve(QStringLiteral("Минимум за сутки"))),
       maximumCurve_(new QwtPlotCurve(QStringLiteral("Максимум за сутки"))),
       meanAnnualCurve_(new QwtPlotCurve(QStringLiteral("Средняя за год"))),
+      meanAnnualDayCurve_(new QwtPlotCurve(QStringLiteral("Средняя за год (день)"))),
+      meanAnnualNightCurve_(new QwtPlotCurve(QStringLiteral("Средняя за год (ночь)"))),
       grid_(new QwtPlotGrid()),
       freezingMarker_(new QwtPlotMarker()),
       tracker_(new TemperaturePlotTracker(canvas())) {
@@ -81,6 +83,14 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     meanAnnualCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
     meanAnnualCurve_->setPen(QPen(QColor(0, 150, 0), 1.8));
     meanAnnualCurve_->attach(this);
+
+    meanAnnualDayCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
+    meanAnnualDayCurve_->setPen(QPen(QColor(220, 140, 0), 1.6, Qt::DashLine));
+    meanAnnualDayCurve_->attach(this);
+
+    meanAnnualNightCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
+    meanAnnualNightCurve_->setPen(QPen(QColor(70, 110, 200), 1.6, Qt::DashLine));
+    meanAnnualNightCurve_->attach(this);
 }
 
 void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
@@ -100,9 +110,13 @@ void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRange
     QVector<QPointF> minimumSeries;
     QVector<QPointF> maximumSeries;
     QVector<QPointF> meanAnnualSeries;
+    QVector<QPointF> meanAnnualDaySeries;
+    QVector<QPointF> meanAnnualNightSeries;
     minimumSeries.reserve(points.size());
     maximumSeries.reserve(points.size());
     meanAnnualSeries.reserve(summaryPoints.size());
+    meanAnnualDaySeries.reserve(summaryPoints.size());
+    meanAnnualNightSeries.reserve(summaryPoints.size());
 
     for (const auto &point : points) {
         minimumSeries.push_back(QPointF(point.latitudeDegrees, point.minimumKelvin));
@@ -111,11 +125,17 @@ void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRange
 
     for (const auto &summaryPoint : summaryPoints) {
         meanAnnualSeries.push_back(QPointF(summaryPoint.latitudeDegrees, summaryPoint.meanAnnualKelvin));
+        meanAnnualDaySeries.push_back(
+            QPointF(summaryPoint.latitudeDegrees, summaryPoint.meanAnnualDayKelvin));
+        meanAnnualNightSeries.push_back(
+            QPointF(summaryPoint.latitudeDegrees, summaryPoint.meanAnnualNightKelvin));
     }
 
     minimumCurve_->setSamples(minimumSeries);
     maximumCurve_->setSamples(maximumSeries);
     meanAnnualCurve_->setSamples(meanAnnualSeries);
+    meanAnnualDayCurve_->setSamples(meanAnnualDaySeries);
+    meanAnnualNightCurve_->setSamples(meanAnnualNightSeries);
     replot();
 }
 
@@ -128,5 +148,7 @@ void SurfaceTemperaturePlot::clearSeries() {
     minimumCurve_->setSamples(QVector<QPointF>{});
     maximumCurve_->setSamples(QVector<QPointF>{});
     meanAnnualCurve_->setSamples(QVector<QPointF>{});
+    meanAnnualDayCurve_->setSamples(QVector<QPointF>{});
+    meanAnnualNightCurve_->setSamples(QVector<QPointF>{});
     replot();
 }

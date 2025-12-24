@@ -27,9 +27,13 @@ struct TemperatureSummaryPoint {
     double minimumKelvin;
     double maximumKelvin;
     double meanAnnualKelvin;
+    double meanAnnualDayKelvin;
+    double meanAnnualNightKelvin;
     double minimumCelsius;
     double maximumCelsius;
     double meanAnnualCelsius;
+    double meanAnnualDayCelsius;
+    double meanAnnualNightCelsius;
 };
 
 class SurfaceTemperatureCalculator {
