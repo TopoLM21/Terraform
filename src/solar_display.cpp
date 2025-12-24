@@ -1052,7 +1052,7 @@ private:
             return;
         }
 
-        const int latitudePoints = latitudePoints();
+        const int latitudePointCount = latitudePoints();
         const int segmentCount = 12;
         const TemperatureCacheKey cacheKey{lastSolarConstant_,
                                             material->id,
@@ -1061,7 +1061,7 @@ private:
                                             eccentricity,
                                             obliquity,
                                             perihelionArgument,
-                                            latitudePoints,
+                                            latitudePointCount,
                                             segmentCount};
         const auto cached = temperatureCache_.constFind(cacheKey);
         if (cached != temperatureCache_.constEnd()) {
@@ -1079,7 +1079,7 @@ private:
         const int requestId = ++temperatureRequestId_;
         temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
         const auto cancelFlag = temperatureCancelFlag_;
-        const int totalLatitudes = latitudePoints;
+        const int totalLatitudes = latitudePointCount;
         const int totalProgress = totalLatitudes * segmentCount;
 
         auto *progressDialog = ensureTemperatureProgressDialog();
@@ -1144,7 +1144,7 @@ private:
         };
 
         auto mapSegment = [calculator,
-                           latitudePoints,
+                           latitudePointCount,
                            segmentProgress,
                            cancelFlag,
                            semiMajorAxis,
@@ -1157,7 +1157,7 @@ private:
                                                                semiMajorAxis,
                                                                obliquity,
                                                                perihelionArgument,
-                                                               latitudePoints,
+                                                               latitudePointCount,
                                                                segmentProgress,
                                                                cancelFlag.get());
         };
