@@ -44,7 +44,9 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     auto *legend = new QwtLegend(this);
     legend->setDefaultItemMode(QwtLegendData::Checkable);
     insertLegend(legend, QwtPlot::RightLegend);
-    connect(this, &QwtPlot::legendChecked, this, [this](QwtPlotItem *item, bool checked) {
+    connect(legend, &QwtLegend::checked, this, [this](const QVariant &info, bool checked, int index) {
+        Q_UNUSED(index);
+        QwtPlotItem *item = infoToItem(info);
         if (!item) {
             return;
         }
