@@ -12,8 +12,12 @@ struct TemperatureRangePoint {
     double latitudeDegrees;
     double minimumKelvin;
     double maximumKelvin;
+    double meanDayKelvin;
+    double meanNightKelvin;
     double minimumCelsius;
     double maximumCelsius;
+    double meanDayCelsius;
+    double meanNightCelsius;
 };
 
 class SurfaceTemperatureCalculator {

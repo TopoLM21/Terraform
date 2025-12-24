@@ -21,6 +21,8 @@ public:
 private:
     QwtPlotCurve *minimumCurve_;
     QwtPlotCurve *maximumCurve_;
+    QwtPlotCurve *meanDayCurve_;
+    QwtPlotCurve *meanNightCurve_;
     QwtPlotGrid *grid_;
     QwtPlotMarker *freezingMarker_;
     TemperaturePlotTracker *tracker_;

@@ -218,6 +218,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         QVector<double> layers(kLayerCount, initialTemperature);
         double minimumTemperature = std::numeric_limits<double>::max();
         double maximumTemperature = 0.0;
+        double meanDaySum = 0.0;
+        double meanNightSum = 0.0;
+        int meanDayCount = 0;
+        int meanNightCount = 0;
 
         constexpr int kSpinupCycles = 3;
         for (int cycle = 0; cycle < kSpinupCycles; ++cycle) {
@@ -270,18 +274,42 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                 layers = nextLayers;
 
                 if (cycle == kSpinupCycles - 1) {
-                    minimumTemperature = qMin(minimumTemperature, layers[0]);
-                    maximumTemperature = qMax(maximumTemperature, layers[0]);
+                    const double surfaceTemperature = layers[0];
+                    minimumTemperature = qMin(minimumTemperature, surfaceTemperature);
+                    maximumTemperature = qMax(maximumTemperature, surfaceTemperature);
+                    // Усредняем по шагам, разделяя день/ночь по знаку solarFactor:
+                    // так видны отдельные характеристики нагрева и остывания,
+                    // особенно при длительном полярном дне или ночи.
+                    if (solarFactor > 0.0) {
+                        meanDaySum += surfaceTemperature;
+                        ++meanDayCount;
+                    } else {
+                        meanNightSum += surfaceTemperature;
+                        ++meanNightCount;
+                    }
                 }
             }
         }
+
+        const double meanDayTemperature =
+            (meanDayCount > 0) ? (meanDaySum / meanDayCount)
+                               : ((meanNightCount > 0) ? (meanNightSum / meanNightCount)
+                                                       : initialTemperature);
+        const double meanNightTemperature =
+            (meanNightCount > 0) ? (meanNightSum / meanNightCount)
+                                 : ((meanDayCount > 0) ? (meanDaySum / meanDayCount)
+                                                       : initialTemperature);
 
         TemperatureRangePoint point;
         point.latitudeDegrees = latitude;
         point.minimumKelvin = minimumTemperature;
         point.maximumKelvin = maximumTemperature;
+        point.meanDayKelvin = meanDayTemperature;
+        point.meanNightKelvin = meanNightTemperature;
         point.minimumCelsius = minimumTemperature - kKelvinOffset;
         point.maximumCelsius = maximumTemperature - kKelvinOffset;
+        point.meanDayCelsius = meanDayTemperature - kKelvinOffset;
+        point.meanNightCelsius = meanNightTemperature - kKelvinOffset;
         points.push_back(point);
 
         ++processedLatitudes;
