@@ -283,7 +283,6 @@ public:
         planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         auto *rotationModeLayout = new QHBoxLayout();
         rotationModeLayout->addWidget(rotationModeComboBox_);
-        rotationModeLayout->addWidget(modeIllustrationWidget_);
         auto *rotationModeWidget = new QWidget(this);
         rotationModeWidget->setLayout(rotationModeLayout);
         planetFormLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
@@ -317,6 +316,7 @@ public:
         // auto *smoothingCheckBox = new QCheckBox(QStringLiteral("Сглаживать график"), plotGroupBox);
         // plotLayout->addWidget(smoothingCheckBox);
         plotLayout->addWidget(temperaturePlot_);
+        plotLayout->addWidget(modeIllustrationWidget_, 0, Qt::AlignHCenter);
         plotGroupBox->setLayout(plotLayout);
 
         auto *leftLayout = new QVBoxLayout();
