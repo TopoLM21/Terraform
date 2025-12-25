@@ -1,5 +1,32 @@
 #include "planet_presets.h"
 
+#include <QtCore/QPair>
+
+namespace {
+constexpr double kKgPerGigaton = 1.0e12;
+
+AtmosphereComposition atmosphereByPressureAtm(double pressureAtm,
+                                              double planetMassEarths,
+                                              double radiusKm,
+                                              const QVector<QPair<QString, double>> &shares) {
+    AtmosphereComposition composition;
+    if (pressureAtm <= 0.0 || shares.isEmpty()) {
+        return composition;
+    }
+
+    const double totalMassKg =
+        calculateAtmosphereMassKgFromPressureAtm(pressureAtm, planetMassEarths, radiusKm);
+    if (totalMassKg <= 0.0) {
+        return composition;
+    }
+
+    for (const auto &entry : shares) {
+        composition.setMassGigatons(entry.first, totalMassKg * entry.second / kKgPerGigaton);
+    }
+    return composition;
+}
+} // namespace
+
 QVector<SurfaceMaterial> surfaceMaterials() {
     return {
         {QStringLiteral("rocky"), QStringLiteral("Каменная поверхность"), 0.15, 0.95, 2.5, 2600.0,
@@ -22,27 +49,40 @@ QVector<PlanetPreset> solarSystemPresets() {
     return {
         // dayLengthDays: солнечные сутки (длительность солнечного дня), не сидерический период
         {QStringLiteral("Меркурий"), 0.39, 176.0, 0.2056, 0.03, 29.12, 0.0553, 2439.7,
-         QStringLiteral("regolith_mercury"), false},
+         QStringLiteral("regolith_mercury"), AtmosphereComposition{}, false},
         {QStringLiteral("Венера"), 0.72, 243.0, 0.0068, 177.36, 54.88, 0.815, 6051.8,
-         QStringLiteral("desert"), false},
+         QStringLiteral("desert"),
+         atmosphereByPressureAtm(92.0, 0.815, 6051.8, {{QStringLiteral("co2"), 1.0}}), false},
         {QStringLiteral("Земля"), 1.00, 1.0, 0.0167, 23.44, 102.94, 1.0, 6371.0,
-         QStringLiteral("ocean"), false},
+         QStringLiteral("ocean"),
+         atmosphereByPressureAtm(
+             1.0,
+             1.0,
+             6371.0,
+             {
+                 {QStringLiteral("n2"), 0.7808},
+                 {QStringLiteral("o2"), 0.2095},
+                 {QStringLiteral("ar"), 0.0093},
+                 {QStringLiteral("co2"), 0.0004},
+             }),
+         false},
         {QStringLiteral("Луна"), 1.00, 29.5, 0.0549, 6.68, 0.0, 0.0123, 1737.4,
-         QStringLiteral("regolith_moon"), false},
+         QStringLiteral("regolith_moon"), AtmosphereComposition{}, false},
         {QStringLiteral("Марс"), 1.52, 1.03, 0.0934, 25.19, 286.5, 0.107, 3389.5,
-         QStringLiteral("desert"), false},
+         QStringLiteral("desert"),
+         atmosphereByPressureAtm(0.006, 0.107, 3389.5, {{QStringLiteral("co2"), 1.0}}), false},
         {QStringLiteral("Церрера"), 2.77, 0.38, 0.0758, 4.0, 73.6, 0.00015, 473.0,
-         QStringLiteral("ice"), false},
+         QStringLiteral("ice"), AtmosphereComposition{}, false},
     };
 }
 
 QVector<PlanetPreset> sweetSkyPresets() {
     return {
         {QStringLiteral("Планета 1"), 0.30, 84.9, 0.0003, -10.5, 190.51, 0.7, 5200.0,
-         QStringLiteral("desert"), true},
+         QStringLiteral("desert"), AtmosphereComposition{}, true},
         {QStringLiteral("Планета 2"), 0.40, 2.4, 0.003, 11.94, 21.12, 1.1, 6800.0,
-         QStringLiteral("desert"), false},
+         QStringLiteral("desert"), AtmosphereComposition{}, false},
         {QStringLiteral("Планета 3"), 0.51, 1.4, 0.0001, -8.84, 343.60, 0.9, 6000.0,
-         QStringLiteral("desert"), false},
+         QStringLiteral("desert"), AtmosphereComposition{}, false},
     };
 }

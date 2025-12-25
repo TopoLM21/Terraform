@@ -13,6 +13,7 @@ public:
     explicit AtmosphereWidget(QWidget *parent = nullptr);
 
     void setPlanetParameters(double massEarths, double radiusKm);
+    void setComposition(const AtmosphereComposition &composition);
     void clearPlanetParameters();
 
 private:

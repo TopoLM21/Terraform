@@ -1,5 +1,6 @@
 #pragma once
 
+#include "atmosphere_model.h"
 #include "rotation_mode.h"
 
 #include <QtCore/QString>
@@ -27,6 +28,7 @@ struct PlanetPreset {
     // Радиус в километрах.
     double radiusKm;
     QString surfaceMaterialId;
+    AtmosphereComposition atmosphere;
     // Приливная синхронизация задается отдельно: длина суток может совпадать
     // с резонансом вращения (например, 3:2) и не означает жесткую блокировку.
     bool tidallyLocked = false;
