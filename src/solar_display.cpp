@@ -246,6 +246,12 @@ public:
         planetPerihelionArgumentLabel_ = new QLabel(QStringLiteral("—"), this);
         materialComboBox_ = new QComboBox(this);
         populateMaterials();
+        rotationModeComboBox_ = new QComboBox(this);
+        rotationModeComboBox_->addItem(QStringLiteral("Обычное вращение (широта)"),
+                                       static_cast<int>(RotationMode::Normal));
+        rotationModeComboBox_->addItem(
+            QStringLiteral("Приливная синхронизация (угол от подсолнечной точки)"),
+            static_cast<int>(RotationMode::TidalLocked));
         latitudeStepFastRadio_ = new QRadioButton(QStringLiteral("Через 1° (быстрые)"), this);
         latitudeStepSlowRadio_ = new QRadioButton(QStringLiteral("Через 10° (медленные)"), this);
         latitudeStepGroup_ = new QButtonGroup(this);
@@ -271,6 +277,7 @@ public:
         planetFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
                                  planetPerihelionArgumentLabel_);
         planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
+        planetFormLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeComboBox_);
         auto *latitudeStepLayout = new QHBoxLayout();
         latitudeStepLayout->addWidget(latitudeStepFastRadio_);
         latitudeStepLayout->addWidget(latitudeStepSlowRadio_);
@@ -327,6 +334,7 @@ public:
             updatePlanetOrbitLabels();
             updateLatitudePointsDefault();
             syncMaterialWithPlanet();
+            syncRotationModeWithPlanet();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
                 (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -361,6 +369,13 @@ public:
 
         connect(materialComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             syncPlanetMaterialWithSelection();
+            clearTemperatureCache();
+            updateTemperaturePlot();
+        });
+
+        connect(rotationModeComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int) {
+            syncPlanetRotationModeWithSelection();
             clearTemperatureCache();
             updateTemperaturePlot();
         });
@@ -515,6 +530,7 @@ private:
     QLabel *planetObliquityLabel_ = nullptr;
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
+    QComboBox *rotationModeComboBox_ = nullptr;
     QRadioButton *latitudeStepFastRadio_ = nullptr;
     QRadioButton *latitudeStepSlowRadio_ = nullptr;
     QButtonGroup *latitudeStepGroup_ = nullptr;
@@ -564,6 +580,7 @@ private:
         updatePlanetOrbitLabels();
         updateLatitudePointsDefault();
         syncMaterialWithPlanet();
+        syncRotationModeWithPlanet();
         updatePlanetActions();
     }
 
@@ -577,6 +594,10 @@ private:
         planetEccentricityLabel_->setText(QStringLiteral("—"));
         planetObliquityLabel_->setText(QStringLiteral("—"));
         planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
+        {
+            const QSignalBlocker rotationBlocker(rotationModeComboBox_);
+            rotationModeComboBox_->setCurrentIndex(-1);
+        }
         updatePlanetActions();
         updateTemperaturePlot();
     }
@@ -699,7 +720,9 @@ private:
         planetComboBox_->setItemData(index, planet.eccentricity, kRoleEccentricity);
         planetComboBox_->setItemData(index, planet.obliquityDegrees, kRoleObliquity);
         planetComboBox_->setItemData(index, planet.perihelionArgumentDegrees, kRolePerihelionArgument);
-        planetComboBox_->setItemData(index, static_cast<int>(planet.rotationMode), kRoleRotationMode);
+        const RotationMode rotationMode =
+            planet.tidallyLocked ? RotationMode::TidalLocked : RotationMode::Normal;
+        planetComboBox_->setItemData(index, static_cast<int>(rotationMode), kRoleRotationMode);
         planetComboBox_->setItemData(index, isCustom, kRoleIsCustom);
         planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
@@ -836,8 +859,9 @@ private:
             const QString materialId = materialInput->currentData().toString();
             const RotationMode rotationMode =
                 static_cast<RotationMode>(rotationModeInput->currentData().toInt());
+            const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
-                                perihelionArgument, materialId, rotationMode};
+                                perihelionArgument, materialId, tidallyLocked};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -865,6 +889,7 @@ private:
             updatePlanetDayLengthLabel();
             updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
+            syncRotationModeWithPlanet();
             updatePlanetActions();
             clearTemperatureCache();
             dialog.accept();
@@ -902,12 +927,35 @@ private:
         }
     }
 
+    void syncRotationModeWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+
+        const RotationMode rotationMode =
+            static_cast<RotationMode>(planetComboBox_->itemData(index, kRoleRotationMode).toInt());
+        const int modeIndex = rotationModeComboBox_->findData(static_cast<int>(rotationMode));
+        if (modeIndex >= 0) {
+            const QSignalBlocker blocker(rotationModeComboBox_);
+            rotationModeComboBox_->setCurrentIndex(modeIndex);
+        }
+    }
+
     void syncPlanetMaterialWithSelection() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0) {
             return;
         }
         planetComboBox_->setItemData(index, materialComboBox_->currentData(), kRoleMaterialId);
+    }
+
+    void syncPlanetRotationModeWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+        planetComboBox_->setItemData(index, rotationModeComboBox_->currentData(), kRoleRotationMode);
     }
 
     void updateSegmentComboBox() {
