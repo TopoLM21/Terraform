@@ -1,4 +1,5 @@
 #include "orbit_segment_calculator.h"
+#include "mode_illustration_widget.h"
 #include "planet_presets.h"
 #include "segment_selector_widget.h"
 #include "solar_calculator.h"
@@ -252,6 +253,9 @@ public:
         rotationModeComboBox_->addItem(
             QStringLiteral("Приливная синхронизация (угол от подсолнечной точки)"),
             static_cast<int>(RotationMode::TidalLocked));
+        modeIllustrationWidget_ = new ModeIllustrationWidget(this);
+        modeIllustrationWidget_->setRotationMode(
+            static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
         latitudeStepFastRadio_ = new QRadioButton(QStringLiteral("Через 1° (быстрые)"), this);
         latitudeStepSlowRadio_ = new QRadioButton(QStringLiteral("Через 10° (медленные)"), this);
         latitudeStepGroup_ = new QButtonGroup(this);
@@ -277,7 +281,12 @@ public:
         planetFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
                                  planetPerihelionArgumentLabel_);
         planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
-        planetFormLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeComboBox_);
+        auto *rotationModeLayout = new QHBoxLayout();
+        rotationModeLayout->addWidget(rotationModeComboBox_);
+        rotationModeLayout->addWidget(modeIllustrationWidget_);
+        auto *rotationModeWidget = new QWidget(this);
+        rotationModeWidget->setLayout(rotationModeLayout);
+        planetFormLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
         auto *latitudeStepLayout = new QHBoxLayout();
         latitudeStepLayout->addWidget(latitudeStepFastRadio_);
         latitudeStepLayout->addWidget(latitudeStepSlowRadio_);
@@ -376,6 +385,7 @@ public:
         connect(rotationModeComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [this](int) {
             syncPlanetRotationModeWithSelection();
+            updateRotationModeIllustration();
             clearTemperatureCache();
             updateTemperaturePlot();
         });
@@ -531,6 +541,7 @@ private:
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
     QComboBox *rotationModeComboBox_ = nullptr;
+    ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
     QRadioButton *latitudeStepFastRadio_ = nullptr;
     QRadioButton *latitudeStepSlowRadio_ = nullptr;
     QButtonGroup *latitudeStepGroup_ = nullptr;
@@ -598,6 +609,7 @@ private:
             const QSignalBlocker rotationBlocker(rotationModeComboBox_);
             rotationModeComboBox_->setCurrentIndex(-1);
         }
+        updateRotationModeIllustration();
         updatePlanetActions();
         updateTemperaturePlot();
     }
@@ -940,6 +952,7 @@ private:
             const QSignalBlocker blocker(rotationModeComboBox_);
             rotationModeComboBox_->setCurrentIndex(modeIndex);
         }
+        updateRotationModeIllustration();
     }
 
     void syncPlanetMaterialWithSelection() {
@@ -956,6 +969,17 @@ private:
             return;
         }
         planetComboBox_->setItemData(index, rotationModeComboBox_->currentData(), kRoleRotationMode);
+    }
+
+    void updateRotationModeIllustration() {
+        if (!modeIllustrationWidget_) {
+            return;
+        }
+        const QVariant modeData = rotationModeComboBox_->currentData();
+        const auto mode = modeData.isValid()
+            ? static_cast<RotationMode>(modeData.toInt())
+            : RotationMode::Normal;
+        modeIllustrationWidget_->setRotationMode(mode);
     }
 
     void updateSegmentComboBox() {
