@@ -66,6 +66,9 @@ constexpr int kRoleRadiusKm = Qt::UserRole + 9;
 constexpr int kRoleRotationMode = Qt::UserRole + 10;
 constexpr int kRoleAtmosphere = Qt::UserRole + 11;
 constexpr double kKelvinOffset = 273.15;
+constexpr double kEarthMassKg = 5.9722e24;
+constexpr double kGravitationalConstant = 6.67430e-11;
+constexpr double kMetersPerKm = 1000.0;
 
 struct TemperatureCacheKey {
     double solarConstant = 0.0;
@@ -249,6 +252,8 @@ public:
         planetDayLengthLabel_ = new QLabel(QStringLiteral("—"), this);
         planetMassLabel_ = new QLabel(QStringLiteral("—"), this);
         planetRadiusLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetSurfaceGravityLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetSurfaceAreaLabel_ = new QLabel(QStringLiteral("—"), this);
         planetEccentricityLabel_ = new QLabel(QStringLiteral("—"), this);
         planetObliquityLabel_ = new QLabel(QStringLiteral("—"), this);
         planetPerihelionArgumentLabel_ = new QLabel(QStringLiteral("—"), this);
@@ -279,30 +284,47 @@ public:
         planetSelectorLayout->addWidget(planetComboBox_);
         planetSelectorLayout->addWidget(deletePlanetButton_);
 
-        auto *planetFormLayout = new QFormLayout();
-        planetFormLayout->addRow(QStringLiteral("Планета:"), planetSelectorLayout);
-        planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
-        planetFormLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), planetDayLengthLabel_);
-        planetFormLayout->addRow(QStringLiteral("Масса (M⊕):"), planetMassLabel_);
-        planetFormLayout->addRow(QStringLiteral("Радиус (км):"), planetRadiusLabel_);
-        planetFormLayout->addRow(QStringLiteral("Эксцентриситет орбиты:"), planetEccentricityLabel_);
-        planetFormLayout->addRow(QStringLiteral("Наклон оси (°):"), planetObliquityLabel_);
-        planetFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
-                                 planetPerihelionArgumentLabel_);
-        planetFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
+        auto *planetLeftFormLayout = new QFormLayout();
+        planetLeftFormLayout->addRow(QStringLiteral("Планета:"), planetSelectorLayout);
+        planetLeftFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
+        planetLeftFormLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), planetDayLengthLabel_);
+        planetLeftFormLayout->addRow(QStringLiteral("Масса (M⊕):"), planetMassLabel_);
+        planetLeftFormLayout->addRow(QStringLiteral("Радиус (км):"), planetRadiusLabel_);
+        planetLeftFormLayout->addRow(QStringLiteral("G на поверхности (м/с²):"),
+                                     planetSurfaceGravityLabel_);
+        planetLeftFormLayout->addRow(QStringLiteral("Площадь поверхности (км²):"),
+                                     planetSurfaceAreaLabel_);
+
+        auto *planetRightFormLayout = new QFormLayout();
+        planetRightFormLayout->addRow(QStringLiteral("Эксцентриситет орбиты:"), planetEccentricityLabel_);
+        planetRightFormLayout->addRow(QStringLiteral("Наклон оси (°):"), planetObliquityLabel_);
+        planetRightFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
+                                      planetPerihelionArgumentLabel_);
+        planetRightFormLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         auto *rotationModeLayout = new QHBoxLayout();
         rotationModeLayout->addWidget(rotationModeComboBox_);
         auto *rotationModeWidget = new QWidget(this);
         rotationModeWidget->setLayout(rotationModeLayout);
-        planetFormLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
+        planetRightFormLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
         auto *latitudeStepLayout = new QHBoxLayout();
         latitudeStepLayout->addWidget(latitudeStepFastRadio_);
         latitudeStepLayout->addWidget(latitudeStepSlowRadio_);
         auto *latitudeStepWidget = new QWidget(this);
         latitudeStepWidget->setLayout(latitudeStepLayout);
-        planetFormLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
-        planetFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
-        planetFormLayout->addRow(QString(), addPlanetButton_);
+        planetRightFormLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
+        planetRightFormLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
+
+        auto *planetColumnsLayout = new QHBoxLayout();
+        planetColumnsLayout->addLayout(planetLeftFormLayout);
+        planetColumnsLayout->addLayout(planetRightFormLayout);
+
+        auto *planetActionsLayout = new QHBoxLayout();
+        planetActionsLayout->addStretch();
+        planetActionsLayout->addWidget(addPlanetButton_);
+
+        auto *planetFormLayout = new QVBoxLayout();
+        planetFormLayout->addLayout(planetColumnsLayout);
+        planetFormLayout->addLayout(planetActionsLayout);
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
         planetGroupBox->setLayout(planetFormLayout);
 
@@ -363,6 +385,7 @@ public:
             updatePlanetDayLengthLabel();
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
+            updatePlanetDerivedLabels();
             updateAtmospherePlanetParameters();
             updateAtmosphereComposition();
             updatePlanetOrbitLabels();
@@ -398,6 +421,7 @@ public:
             updatePlanetDayLengthLabel();
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
+            updatePlanetDerivedLabels();
             updateAtmospherePlanetParameters();
             updateAtmosphereComposition();
             updatePlanetActions();
@@ -567,6 +591,8 @@ private:
     QLabel *planetDayLengthLabel_ = nullptr;
     QLabel *planetMassLabel_ = nullptr;
     QLabel *planetRadiusLabel_ = nullptr;
+    QLabel *planetSurfaceGravityLabel_ = nullptr;
+    QLabel *planetSurfaceAreaLabel_ = nullptr;
     QLabel *planetEccentricityLabel_ = nullptr;
     QLabel *planetObliquityLabel_ = nullptr;
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
@@ -622,6 +648,7 @@ private:
         updatePlanetDayLengthLabel();
         updatePlanetMassLabel();
         updatePlanetRadiusLabel();
+        updatePlanetDerivedLabels();
         updateAtmospherePlanetParameters();
         updateAtmosphereComposition();
         updatePlanetOrbitLabels();
@@ -640,6 +667,8 @@ private:
         planetDayLengthLabel_->setText(QStringLiteral("—"));
         planetMassLabel_->setText(QStringLiteral("—"));
         planetRadiusLabel_->setText(QStringLiteral("—"));
+        planetSurfaceGravityLabel_->setText(QStringLiteral("—"));
+        planetSurfaceAreaLabel_->setText(QStringLiteral("—"));
         planetEccentricityLabel_->setText(QStringLiteral("—"));
         planetObliquityLabel_->setText(QStringLiteral("—"));
         planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
@@ -677,6 +706,14 @@ private:
 
     QString formatRadius(double value) const {
         return QLocale().toString(value, 'f', 1);
+    }
+
+    QString formatSurfaceGravity(double value) const {
+        return QLocale().toString(value, 'f', 2);
+    }
+
+    QString formatSurfaceArea(double value) const {
+        return QLocale().toString(value, 'f', 0);
     }
 
     QString formatEccentricity(double value) const {
@@ -729,6 +766,48 @@ private:
             return;
         }
         planetRadiusLabel_->setText(formatRadius(value.toDouble()));
+    }
+
+    void updatePlanetDerivedLabels() {
+        updatePlanetSurfaceGravityLabel();
+        updatePlanetSurfaceAreaLabel();
+    }
+
+    void updatePlanetSurfaceGravityLabel() {
+        const QVariant massValue = planetComboBox_->currentData(kRoleMassEarths);
+        const QVariant radiusValue = planetComboBox_->currentData(kRoleRadiusKm);
+        if (!massValue.isValid() || !radiusValue.isValid()) {
+            planetSurfaceGravityLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        const double massEarths = massValue.toDouble();
+        const double radiusKm = radiusValue.toDouble();
+        if (massEarths <= 0.0 || radiusKm <= 0.0) {
+            planetSurfaceGravityLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        // Ускорение свободного падения: g = G * M / R².
+        const double massKg = massEarths * kEarthMassKg;
+        const double radiusMeters = radiusKm * kMetersPerKm;
+        const double surfaceGravity =
+            kGravitationalConstant * massKg / (radiusMeters * radiusMeters);
+        planetSurfaceGravityLabel_->setText(formatSurfaceGravity(surfaceGravity));
+    }
+
+    void updatePlanetSurfaceAreaLabel() {
+        const QVariant radiusValue = planetComboBox_->currentData(kRoleRadiusKm);
+        if (!radiusValue.isValid()) {
+            planetSurfaceAreaLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        const double radiusKm = radiusValue.toDouble();
+        if (radiusKm <= 0.0) {
+            planetSurfaceAreaLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        // Площадь поверхности сферы: S = 4πR².
+        const double surfaceArea = 4.0 * M_PI * radiusKm * radiusKm;
+        planetSurfaceAreaLabel_->setText(formatSurfaceArea(surfaceArea));
     }
 
     void updateAtmospherePlanetParameters() {
@@ -1051,6 +1130,7 @@ private:
             updatePlanetDayLengthLabel();
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
+            updatePlanetDerivedLabels();
             updateAtmosphereComposition();
             updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
