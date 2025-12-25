@@ -333,13 +333,17 @@ public:
         leftLayout->addLayout(presetsLayout);
         leftLayout->addWidget(starsPanel);
         leftLayout->addWidget(planetGroupBox);
-        leftLayout->addWidget(atmosphereWidget_);
         leftLayout->addWidget(calculateButton);
         leftLayout->addStretch();
 
+        auto *rightLayout = new QVBoxLayout();
+        rightLayout->addWidget(plotGroupBox, 1);
+        rightLayout->addWidget(atmosphereWidget_);
+        rightLayout->addStretch();
+
         auto *layout = new QHBoxLayout(this);
         layout->addLayout(leftLayout, 0);
-        layout->addWidget(plotGroupBox, 1);
+        layout->addLayout(rightLayout, 1);
 
         setLayout(layout);
         resize(480, 360);
@@ -889,7 +893,7 @@ private:
         perihelionValidator->setLocale(QLocale::C);
         perihelionArgumentInput->setValidator(perihelionValidator);
 
-        auto *formLayout = new QFormLayout(&dialog);
+        auto *formLayout = new QFormLayout();
         formLayout->addRow(QStringLiteral("Имя:"), nameInput);
         formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
         formLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), dayLengthInput);
@@ -910,10 +914,18 @@ private:
                                    static_cast<int>(RotationMode::Normal));
         rotationModeInput->addItem(QStringLiteral("Приливная синхронизация (угол от подсолнечной точки)"),
                                    static_cast<int>(RotationMode::TidalLocked));
+        auto *atmosphereInput = new AtmosphereWidget(&dialog, true);
         formLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeInput);
 
-        auto *atmosphereInput = new AtmosphereWidget(&dialog, true);
-        formLayout->addRow(atmosphereInput);
+        auto *formWidget = new QWidget(&dialog);
+        formWidget->setLayout(formLayout);
+
+        auto *contentLayout = new QHBoxLayout();
+        contentLayout->addWidget(atmosphereInput, 1);
+        contentLayout->addWidget(formWidget, 0);
+
+        auto *dialogLayout = new QVBoxLayout(&dialog);
+        dialogLayout->addLayout(contentLayout);
 
         const auto updateAtmosphereParameters = [massInput, radiusInput, atmosphereInput]() {
             bool massOk = false;
@@ -932,7 +944,7 @@ private:
         updateAtmosphereParameters();
 
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-        formLayout->addWidget(buttons);
+        dialogLayout->addWidget(buttons);
 
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
