@@ -110,6 +110,7 @@ double calculateAtmosphereMassKgFromPressureAtm(double pressureAtm,
     const double surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
 
     // m_atm = (P * 4 * π * R^2) / g, где P задано в Па.
+    // Единицы: P [Па], m_atm [кг], R [м], g [м/с^2].
     const double surfaceArea = 4.0 * M_PI * radiusMeters * radiusMeters;
     const double pressurePascal = pressureAtm * kPascalPerAtm;
     return (pressurePascal * surfaceArea) / surfaceGravity;

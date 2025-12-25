@@ -19,9 +19,12 @@ public:
 private:
     void populateTable();
     void updateAllShares();
+    void updateAllPressures();
     void updateSummary();
     void normalizeMassItem(int row);
+    void normalizePressureItem(int row);
     double parseMassText(const QString &text) const;
+    double parsePressureText(const QString &text) const;
     double rowMassGigatons(int row) const;
 
     QTableWidget *table_ = nullptr;
