@@ -94,3 +94,19 @@ double calculatePressureAtmFromKg(double massKg, double planetMassEarths, double
 
     return pressurePascal / kPascalPerAtm;
 }
+
+double calculateMassKgFromPressureAtm(double pressureAtm, double planetMassEarths, double radiusKm) {
+    const double radiusMeters = radiusKm * 1000.0;
+    const double planetMassKg = planetMassEarths * kEarthMassKg;
+
+    // g = G * M / R^2
+    const double surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
+
+    // Обратная формула для массы атмосферы:
+    // m_atm = (P * 4 * π * R^2) / g,
+    // где P в Паскалях (1 атм = 101325 Па), R в метрах, g в м/с^2.
+    const double surfaceArea = 4.0 * M_PI * radiusMeters * radiusMeters;
+    const double pressurePascal = pressureAtm * kPascalPerAtm;
+
+    return surfaceGravity > 0.0 ? (pressurePascal * surfaceArea) / surfaceGravity : 0.0;
+}

@@ -16,13 +16,14 @@
 namespace {
 constexpr int kColumnGas = 0;
 constexpr int kColumnMass = 1;
-constexpr int kColumnShare = 2;
+constexpr int kColumnPressure = 2;
+constexpr int kColumnShare = 3;
 constexpr double kKgPerGigaton = 1.0e12;
 constexpr double kGramsPerKg = 1000.0;
 
-class MassColumnDelegate : public QStyledItemDelegate {
+class NumericColumnDelegate : public QStyledItemDelegate {
 public:
-    explicit MassColumnDelegate(QObject *parent = nullptr)
+    explicit NumericColumnDelegate(QObject *parent = nullptr)
         : QStyledItemDelegate(parent) {}
 
     QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
@@ -48,15 +49,18 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent)
     gases_ = availableGases();
 
     table_ = new QTableWidget(this);
-    table_->setColumnCount(3);
+    table_->setColumnCount(4);
     table_->setHorizontalHeaderLabels({
         QStringLiteral("Газ"),
         QStringLiteral("Масса (Гт)"),
+        QStringLiteral("Давление (атм)"),
         QStringLiteral("Доля (%)")
     });
-    table_->setItemDelegateForColumn(kColumnMass, new MassColumnDelegate(table_));
+    table_->setItemDelegateForColumn(kColumnMass, new NumericColumnDelegate(table_));
+    table_->setItemDelegateForColumn(kColumnPressure, new NumericColumnDelegate(table_));
     table_->horizontalHeader()->setSectionResizeMode(kColumnGas, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(kColumnMass, QHeaderView::ResizeToContents);
+    table_->horizontalHeader()->setSectionResizeMode(kColumnPressure, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(kColumnShare, QHeaderView::ResizeToContents);
     table_->verticalHeader()->setVisible(false);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -79,16 +83,36 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent)
     setLayout(layout);
 
     connect(table_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem *item) {
-        if (!item || item->column() != kColumnMass) {
+        if (!item) {
             return;
         }
-        normalizeMassItem(item->row());
-        updateAllShares();
-        updateSummary();
+        const int column = item->column();
+        if (column == kColumnMass) {
+            normalizeMassItem(item->row());
+            updateAllPressures();
+            updateAllShares();
+            updateSummary();
+        } else if (column == kColumnPressure) {
+            normalizePressureItem(item->row());
+            const int row = item->row();
+            if (hasPlanetParameters_) {
+                const double pressureAtm = parsePressureText(item->text());
+                const double massKg = calculateMassKgFromPressureAtm(pressureAtm, planetMassEarths_, planetRadiusKm_);
+                const double massGigatons = massKg / kKgPerGigaton;
+                if (auto *massItem = table_->item(row, kColumnMass)) {
+                    const QSignalBlocker blocker(table_);
+                    massItem->setText(formatNumber(massGigatons, 3));
+                }
+            }
+            updateAllShares();
+            updateSummary();
+        }
     });
 
     updateAllShares();
+    updateAllPressures();
     updateSummary();
+    table_->setEnabled(false);
 }
 
 void AtmosphereWidget::setPlanetParameters(double massEarths, double radiusKm) {
@@ -99,6 +123,8 @@ void AtmosphereWidget::setPlanetParameters(double massEarths, double radiusKm) {
     planetMassEarths_ = massEarths;
     planetRadiusKm_ = radiusKm;
     hasPlanetParameters_ = true;
+    table_->setEnabled(true);
+    updateAllPressures();
     updateSummary();
 }
 
@@ -106,6 +132,8 @@ void AtmosphereWidget::clearPlanetParameters() {
     planetMassEarths_ = 0.0;
     planetRadiusKm_ = 0.0;
     hasPlanetParameters_ = false;
+    table_->setEnabled(false);
+    updateAllPressures();
     updateSummary();
 }
 
@@ -121,6 +149,9 @@ void AtmosphereWidget::populateTable() {
 
         auto *massItem = new QTableWidgetItem(QStringLiteral("0"));
         table_->setItem(row, kColumnMass, massItem);
+
+        auto *pressureItem = new QTableWidgetItem(QStringLiteral("—"));
+        table_->setItem(row, kColumnPressure, pressureItem);
 
         auto *shareItem = new QTableWidgetItem(QStringLiteral("0"));
         shareItem->setFlags(shareItem->flags() & ~Qt::ItemIsEditable);
@@ -140,6 +171,21 @@ void AtmosphereWidget::updateAllShares() {
         const double share = totalMassGigatons > 0.0 ? (massGigatons / totalMassGigatons) * 100.0 : 0.0;
         if (auto *item = table_->item(row, kColumnShare)) {
             item->setText(formatNumber(share, 2));
+        }
+    }
+}
+
+void AtmosphereWidget::updateAllPressures() {
+    const QSignalBlocker blocker(table_);
+    for (int row = 0; row < table_->rowCount(); ++row) {
+        if (auto *item = table_->item(row, kColumnPressure)) {
+            if (!hasPlanetParameters_) {
+                item->setText(QStringLiteral("—"));
+                continue;
+            }
+            const double massKg = rowMassGigatons(row) * kKgPerGigaton;
+            const double pressureAtm = calculatePressureAtmFromKg(massKg, planetMassEarths_, planetRadiusKm_);
+            item->setText(formatNumber(pressureAtm, 4));
         }
     }
 }
@@ -201,9 +247,33 @@ void AtmosphereWidget::normalizeMassItem(int row) {
     item->setText(formatNumber(value, 3));
 }
 
+void AtmosphereWidget::normalizePressureItem(int row) {
+    auto *item = table_->item(row, kColumnPressure);
+    if (!item) {
+        return;
+    }
+
+    const double value = parsePressureText(item->text());
+    const QSignalBlocker blocker(table_);
+    item->setText(formatNumber(value, 4));
+}
+
 double AtmosphereWidget::parseMassText(const QString &text) const {
     const QString trimmed = text.trimmed();
     if (trimmed.isEmpty()) {
+        return 0.0;
+    }
+    bool ok = false;
+    const double value = QLocale().toDouble(trimmed, &ok);
+    if (!ok || value < 0.0) {
+        return 0.0;
+    }
+    return value;
+}
+
+double AtmosphereWidget::parsePressureText(const QString &text) const {
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty() || trimmed == QStringLiteral("—")) {
         return 0.0;
     }
     bool ok = false;

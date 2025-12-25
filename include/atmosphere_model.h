@@ -53,3 +53,16 @@ QVector<GasSpec> availableGases();
 double calculatePressureAtm(double massTons, double planetMassEarths, double radiusKm);
 
 double calculatePressureAtmFromKg(double massKg, double planetMassEarths, double radiusKm);
+
+// Рассчитать массу атмосферы по давлению в атм.
+// pressureAtm: давление атмосферы в атм.
+// planetMassEarths: масса планеты в массах Земли (M⊕).
+// radiusKm: радиус планеты в километрах.
+// Формулы:
+//  g = G * M / R^2
+//  P = (m_atm * g) / (4 * π * R^2)
+//  m_atm = (P * 4 * π * R^2) / g
+//  1 атм = 101325 Па
+// Единицы:
+//  m_atm [кг], M [кг], R [м], g [м/с^2], P [Па].
+double calculateMassKgFromPressureAtm(double pressureAtm, double planetMassEarths, double radiusKm);
