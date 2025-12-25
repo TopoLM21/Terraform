@@ -4,6 +4,7 @@
 #include "segment_selector_widget.h"
 #include "solar_calculator.h"
 #include "solar_display.h"
+#include "atmosphere_widget.h"
 #include "surface_temperature_calculator.h"
 #include "surface_temperature_plot.h"
 
@@ -303,6 +304,8 @@ public:
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
         planetGroupBox->setLayout(planetFormLayout);
 
+        atmosphereWidget_ = new AtmosphereWidget(this);
+
         auto *starsPanelLayout = new QVBoxLayout();
         starsPanelLayout->addWidget(primaryGroupBox_);
         starsPanelLayout->addWidget(secondStarCheckBox_);
@@ -329,6 +332,7 @@ public:
         leftLayout->addLayout(presetsLayout);
         leftLayout->addWidget(starsPanel);
         leftLayout->addWidget(planetGroupBox);
+        leftLayout->addWidget(atmosphereWidget_);
         leftLayout->addWidget(calculateButton);
         leftLayout->addStretch();
 
@@ -348,6 +352,7 @@ public:
             updatePlanetDayLengthLabel();
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
+            updateAtmospherePlanetParameters();
             updatePlanetOrbitLabels();
             updateLatitudePointsDefault();
             syncMaterialWithPlanet();
@@ -381,6 +386,7 @@ public:
             updatePlanetDayLengthLabel();
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
+            updateAtmospherePlanetParameters();
             updatePlanetActions();
             clearTemperatureCache();
             updateTemperaturePlot();
@@ -559,6 +565,7 @@ private:
     QButtonGroup *latitudeStepGroup_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
+    AtmosphereWidget *atmosphereWidget_ = nullptr;
 
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
@@ -602,6 +609,7 @@ private:
         updatePlanetDayLengthLabel();
         updatePlanetMassLabel();
         updatePlanetRadiusLabel();
+        updateAtmospherePlanetParameters();
         updatePlanetOrbitLabels();
         updateLatitudePointsDefault();
         syncMaterialWithPlanet();
@@ -621,6 +629,7 @@ private:
         planetEccentricityLabel_->setText(QStringLiteral("—"));
         planetObliquityLabel_->setText(QStringLiteral("—"));
         planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
+        updateAtmospherePlanetParameters();
         {
             const QSignalBlocker rotationBlocker(rotationModeComboBox_);
             rotationModeComboBox_->setCurrentIndex(-1);
@@ -705,6 +714,19 @@ private:
             return;
         }
         planetRadiusLabel_->setText(formatRadius(value.toDouble()));
+    }
+
+    void updateAtmospherePlanetParameters() {
+        if (!atmosphereWidget_) {
+            return;
+        }
+        const QVariant massValue = planetComboBox_->currentData(kRoleMassEarths);
+        const QVariant radiusValue = planetComboBox_->currentData(kRoleRadiusKm);
+        if (!massValue.isValid() || !radiusValue.isValid()) {
+            atmosphereWidget_->clearPlanetParameters();
+            return;
+        }
+        atmosphereWidget_->setPlanetParameters(massValue.toDouble(), radiusValue.toDouble());
     }
 
     int latitudeStepDegrees() const {

@@ -10,8 +10,10 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent)
 # target_link_libraries()
 add_executable(solar_constant
     include/atmosphere_model.h
+    include/atmosphere_widget.h
     include/segment_selector_widget.h
     src/atmosphere_model.cpp
+    src/atmosphere_widget.cpp
     src/mode_illustration_widget.cpp
     src/mode_illustration_widget.h
     src/orbit_segment_calculator.cpp
