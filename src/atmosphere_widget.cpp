@@ -1,5 +1,7 @@
 #include "atmosphere_widget.h"
 
+#include "atmosphere_chart_widget.h"
+
 #include <QtCore/QLocale>
 #include <QtCore/QSignalBlocker>
 #include <QtGui/QDoubleValidator>
@@ -44,7 +46,7 @@ QString formatNumber(double value, int decimals = 3) {
 }
 } // namespace
 
-AtmosphereWidget::AtmosphereWidget(QWidget *parent)
+AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     : QGroupBox(QStringLiteral("Атмосфера"), parent) {
     gases_ = availableGases();
 
@@ -65,8 +67,13 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent)
     table_->verticalHeader()->setVisible(false);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->setEnabled(false);
+    if (!showTable) {
+        table_->setVisible(false);
+    }
 
     populateTable();
+
+    chartWidget_ = new AtmosphereChartWidget(gases_, this);
 
     totalMassLabel_ = new QLabel(QStringLiteral("—"), this);
     pressureLabel_ = new QLabel(QStringLiteral("—"), this);
@@ -80,6 +87,7 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent)
 
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(table_);
+    layout->addWidget(chartWidget_, 1);
     layout->addLayout(summaryLayout);
     setLayout(layout);
 
@@ -92,18 +100,27 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent)
             updateAllPressures();
             updateAllShares();
             updateSummary();
+            if (chartWidget_) {
+                chartWidget_->setComposition(composition(true));
+            }
             return;
         }
         if (item->column() == kColumnPressure) {
             normalizePressureItem(item->row());
             updateAllShares();
             updateSummary();
+            if (chartWidget_) {
+                chartWidget_->setComposition(composition(true));
+            }
         }
     });
 
     updateAllShares();
     updateAllPressures();
     updateSummary();
+    if (chartWidget_) {
+        chartWidget_->setComposition(composition(true));
+    }
 }
 
 void AtmosphereWidget::setPlanetParameters(double massEarths, double radiusKm) {
@@ -117,6 +134,9 @@ void AtmosphereWidget::setPlanetParameters(double massEarths, double radiusKm) {
     table_->setEnabled(true);
     updateAllPressures();
     updateSummary();
+    if (chartWidget_) {
+        chartWidget_->setPlanetParameters(massEarths, radiusKm);
+    }
 }
 
 void AtmosphereWidget::setComposition(const AtmosphereComposition &composition) {
@@ -131,6 +151,9 @@ void AtmosphereWidget::setComposition(const AtmosphereComposition &composition) 
     updateAllShares();
     updateAllPressures();
     updateSummary();
+    if (chartWidget_) {
+        chartWidget_->setComposition(composition(true));
+    }
 }
 
 void AtmosphereWidget::clearPlanetParameters() {
@@ -140,6 +163,9 @@ void AtmosphereWidget::clearPlanetParameters() {
     table_->setEnabled(false);
     updateAllPressures();
     updateSummary();
+    if (chartWidget_) {
+        chartWidget_->clearPlanetParameters();
+    }
 }
 
 AtmosphereComposition AtmosphereWidget::composition(bool includeZeroes) const {

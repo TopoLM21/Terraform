@@ -7,10 +7,11 @@
 
 class QLabel;
 class QTableWidget;
+class AtmosphereChartWidget;
 
 class AtmosphereWidget : public QGroupBox {
 public:
-    explicit AtmosphereWidget(QWidget *parent = nullptr);
+    explicit AtmosphereWidget(QWidget *parent = nullptr, bool showTable = true);
 
     void setPlanetParameters(double massEarths, double radiusKm);
     void setComposition(const AtmosphereComposition &composition);
@@ -29,6 +30,7 @@ private:
     double rowMassGigatons(int row) const;
 
     QTableWidget *table_ = nullptr;
+    AtmosphereChartWidget *chartWidget_ = nullptr;
     QLabel *totalMassLabel_ = nullptr;
     QLabel *pressureLabel_ = nullptr;
     QLabel *meanMolarMassLabel_ = nullptr;
