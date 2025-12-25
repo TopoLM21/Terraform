@@ -648,6 +648,7 @@ private:
     QVector<OrbitSegment> lastOrbitSegments_;
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
     QVector<TemperatureSummaryPoint> temperatureSummary_;
+    bool lastTemperatureUsesAtmosphere_ = false;
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
@@ -1329,13 +1330,16 @@ private:
         temperaturePlot_->setTemperatureSeries(lastTemperatureSegments_.at(index),
                                                temperatureSummary_,
                                                label,
-                                               rotationMode);
+                                               rotationMode,
+                                               lastTemperatureUsesAtmosphere_);
     }
 
     void clearTemperatureSegments() {
         lastOrbitSegments_.clear();
         lastTemperatureSegments_.clear();
+        lastTemperatureUsesAtmosphere_ = hasAtmosphere;
         temperatureSummary_.clear();
+        lastTemperatureUsesAtmosphere_ = false;
         segmentSelectorWidget_->setSegments({});
         segmentSelectorWidget_->setEnabled(false);
         temperaturePlot_->clearSeries();
@@ -1417,6 +1421,10 @@ private:
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
         }
+        // Атмосферу считаем присутствующей, если есть масса газов или ненулевое давление:
+        // это позволяет явно переключать формулы поверхности/атмосферы.
+        const bool hasAtmosphere =
+            atmosphere.totalMassGigatons() > 0.0 || atmospherePressureAtm > 0.0;
         const int segmentCount = 12;
         const TemperatureCacheKey cacheKey{lastSolarConstant_,
                                             material->id,
@@ -1435,6 +1443,7 @@ private:
             // Кэш нужен для быстрого переключения сегментов/планет без повторного расчёта.
             lastOrbitSegments_ = cached->orbitSegments;
             lastTemperatureSegments_ = cached->temperatureSegments;
+            lastTemperatureUsesAtmosphere_ = hasAtmosphere;
             rebuildTemperatureSummary();
             updateSegmentComboBox();
             updateTemperaturePlotForSelectedSegment();
@@ -1474,8 +1483,10 @@ private:
                 Qt::QueuedConnection);
         };
 
+        // При наличии атмосферы включаем расширенную модель с парниковым слоем и циркуляцией.
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength,
-                                                rotationMode, atmosphere, atmospherePressureAtm);
+                                                rotationMode, atmosphere, atmospherePressureAtm,
+                                                hasAtmosphere);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
                 [this, watcher, requestId, cancelFlag, cacheKey]() {

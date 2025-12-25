@@ -38,6 +38,12 @@ QString plotTitleForMode(RotationMode mode) {
                : QStringLiteral("Температура поверхности по углу от подсолнечной точки");
 }
 
+QString temperatureContextLabel(bool hasAtmosphere) {
+    return hasAtmosphere
+               ? QStringLiteral("с учетом атмосферы")
+               : QStringLiteral("поверхность");
+}
+
 QPair<double, double> axisRangeForMode(RotationMode mode) {
     return (mode == RotationMode::Normal)
                ? QPair<double, double>{-90.0, 90.0}
@@ -117,6 +123,17 @@ SurfaceTemperaturePlot::SurfaceTemperaturePlot(QWidget *parent)
     meanAnnualNightCurve_->setRenderHint(QwtPlotItem::RenderAntialiased, true);
     meanAnnualNightCurve_->setPen(QPen(QColor(70, 110, 200), 1.6, Qt::DashLine));
     meanAnnualNightCurve_->attach(this);
+
+    updateCurveTitles();
+}
+
+void SurfaceTemperaturePlot::updateCurveTitles() {
+    const QString context = temperatureContextLabel(hasAtmosphere_);
+    minimumCurve_->setTitle(QStringLiteral("Минимум за сутки (%1)").arg(context));
+    maximumCurve_->setTitle(QStringLiteral("Максимум за сутки (%1)").arg(context));
+    meanAnnualCurve_->setTitle(QStringLiteral("Средняя за год (%1)").arg(context));
+    meanAnnualDayCurve_->setTitle(QStringLiteral("Средняя за год (день) (%1)").arg(context));
+    meanAnnualNightCurve_->setTitle(QStringLiteral("Средняя за год (ночь) (%1)").arg(context));
 }
 
 void SurfaceTemperaturePlot::setSmoothingEnabled(bool enabled) {
@@ -141,11 +158,14 @@ void SurfaceTemperaturePlot::setSmoothingEnabled(bool enabled) {
 void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
                                                   const QVector<TemperatureSummaryPoint> &summaryPoints,
                                                   const QString &segmentLabel,
-                                                  RotationMode rotationMode) {
+                                                  RotationMode rotationMode,
+                                                  bool hasAtmosphere) {
     points_ = points;
     summaryPoints_ = summaryPoints;
     segmentLabel_ = segmentLabel;
     rotationMode_ = rotationMode;
+    hasAtmosphere_ = hasAtmosphere;
+    updateCurveTitles();
     tracker_->setTemperatureSeries(points_, summaryPoints_, segmentLabel_, rotationMode_);
 
     const auto axisRange = axisRangeForMode(rotationMode_);
@@ -153,9 +173,14 @@ void SurfaceTemperaturePlot::setTemperatureSeries(const QVector<TemperatureRange
     setAxisScale(QwtPlot::xBottom, axisRange.first, axisRange.second,
                  axisStepForMode(rotationMode_));
     if (!segmentLabel_.isEmpty()) {
-        setTitle(QStringLiteral("%1 — %2").arg(plotTitleForMode(rotationMode_), segmentLabel_));
+        setTitle(QStringLiteral("%1 (%2) — %3")
+                     .arg(plotTitleForMode(rotationMode_),
+                          temperatureContextLabel(hasAtmosphere_),
+                          segmentLabel_));
     } else {
-        setTitle(plotTitleForMode(rotationMode_));
+        setTitle(QStringLiteral("%1 (%2)")
+                     .arg(plotTitleForMode(rotationMode_),
+                          temperatureContextLabel(hasAtmosphere_)));
     }
 
     QVector<QPointF> minimumSeries;
@@ -194,8 +219,12 @@ void SurfaceTemperaturePlot::clearSeries() {
     points_.clear();
     summaryPoints_.clear();
     segmentLabel_.clear();
+    hasAtmosphere_ = false;
     tracker_->clearSeries();
-    setTitle(plotTitleForMode(rotationMode_));
+    updateCurveTitles();
+    setTitle(QStringLiteral("%1 (%2)")
+                 .arg(plotTitleForMode(rotationMode_),
+                      temperatureContextLabel(hasAtmosphere_)));
     minimumCurve_->setSamples(QVector<QPointF>{});
     maximumCurve_->setSamples(QVector<QPointF>{});
     meanAnnualCurve_->setSamples(QVector<QPointF>{});
