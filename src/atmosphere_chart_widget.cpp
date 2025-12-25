@@ -26,6 +26,8 @@ AtmosphereChartWidget::AtmosphereChartWidget(const QVector<GasSpec> &gases, QWid
 
     chartView_ = new QtCharts::QChartView(chart_, this);
     chartView_->setRenderHint(QPainter::Antialiasing);
+    // Минимальная высота нужна, чтобы график не сжимался в диалоге добавления планеты.
+    chartView_->setMinimumHeight(200);
 
     axisX_ = new QtCharts::QBarCategoryAxis();
     axisY_ = new QtCharts::QValueAxis();
