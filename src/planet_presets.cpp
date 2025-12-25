@@ -38,11 +38,11 @@ QVector<PlanetPreset> solarSystemPresets() {
 
 QVector<PlanetPreset> sweetSkyPresets() {
     return {
-        {QStringLiteral("Планета 1"), 0.30, 0.7, 0.02, 5.0, 0.0,
-         QStringLiteral("rocky"), true},
-        {QStringLiteral("Планета 2"), 0.40, 1.4, 0.0, 12.0, 45.0,
-         QStringLiteral("forest"), false},
-        {QStringLiteral("Планета 3"), 0.51, 2.2, 0.1, 20.0, 90.0,
-         QStringLiteral("ocean"), false},
+        {QStringLiteral("Планета 1"), 0.30, 84.9, 0.0003, -10.5, 190.51,
+         QStringLiteral("desert"), true},
+        {QStringLiteral("Планета 2"), 0.40, 2.4, 0.003, 11.94, 21.12,
+         QStringLiteral("desert"), false},
+        {QStringLiteral("Планета 3"), 0.51, 1.4, 0.0001, -8.84, 343.60,
+         QStringLiteral("desert"), false},
     };
 }
