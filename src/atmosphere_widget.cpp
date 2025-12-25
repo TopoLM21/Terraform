@@ -139,11 +139,11 @@ void AtmosphereWidget::setPlanetParameters(double massEarths, double radiusKm) {
     }
 }
 
-void AtmosphereWidget::setComposition(const AtmosphereComposition &composition) {
+void AtmosphereWidget::setComposition(const AtmosphereComposition &newComposition) {
     const QSignalBlocker blocker(table_);
     for (int row = 0; row < gases_.size(); ++row) {
         const auto &gas = gases_.at(row);
-        const double massGigatons = composition.massGigatons(gas.id);
+        const double massGigatons = newComposition.massGigatons(gas.id);
         if (auto *item = table_->item(row, kColumnMass)) {
             item->setText(formatNumber(massGigatons, 3));
         }
@@ -152,7 +152,7 @@ void AtmosphereWidget::setComposition(const AtmosphereComposition &composition) 
     updateAllPressures();
     updateSummary();
     if (chartWidget_) {
-        chartWidget_->setComposition(composition(true));
+        chartWidget_->setComposition(newComposition);
     }
 }
 
