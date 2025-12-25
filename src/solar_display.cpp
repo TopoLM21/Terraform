@@ -59,7 +59,9 @@ constexpr int kRoleDayLength = Qt::UserRole + 4;
 constexpr int kRoleEccentricity = Qt::UserRole + 5;
 constexpr int kRoleObliquity = Qt::UserRole + 6;
 constexpr int kRolePerihelionArgument = Qt::UserRole + 7;
-constexpr int kRoleRotationMode = Qt::UserRole + 8;
+constexpr int kRoleMassEarths = Qt::UserRole + 8;
+constexpr int kRoleRadiusKm = Qt::UserRole + 9;
+constexpr int kRoleRotationMode = Qt::UserRole + 10;
 constexpr double kKelvinOffset = 273.15;
 
 struct TemperatureCacheKey {
@@ -242,6 +244,8 @@ public:
         planetComboBox_ = new QComboBox(this);
         planetSemiMajorAxisLabel_ = new QLabel(QStringLiteral("—"), this);
         planetDayLengthLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetMassLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetRadiusLabel_ = new QLabel(QStringLiteral("—"), this);
         planetEccentricityLabel_ = new QLabel(QStringLiteral("—"), this);
         planetObliquityLabel_ = new QLabel(QStringLiteral("—"), this);
         planetPerihelionArgumentLabel_ = new QLabel(QStringLiteral("—"), this);
@@ -276,6 +280,8 @@ public:
         planetFormLayout->addRow(QStringLiteral("Планета:"), planetSelectorLayout);
         planetFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
         planetFormLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), planetDayLengthLabel_);
+        planetFormLayout->addRow(QStringLiteral("Масса (M⊕):"), planetMassLabel_);
+        planetFormLayout->addRow(QStringLiteral("Радиус (км):"), planetRadiusLabel_);
         planetFormLayout->addRow(QStringLiteral("Эксцентриситет орбиты:"), planetEccentricityLabel_);
         planetFormLayout->addRow(QStringLiteral("Наклон оси (°):"), planetObliquityLabel_);
         planetFormLayout->addRow(QStringLiteral("Аргумент перицентра (°):"),
@@ -340,6 +346,8 @@ public:
             cancelTemperatureCalculation();
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
+            updatePlanetMassLabel();
+            updatePlanetRadiusLabel();
             updatePlanetOrbitLabels();
             updateLatitudePointsDefault();
             syncMaterialWithPlanet();
@@ -371,6 +379,8 @@ public:
             planetComboBox_->removeItem(index);
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
+            updatePlanetMassLabel();
+            updatePlanetRadiusLabel();
             updatePlanetActions();
             clearTemperatureCache();
             updateTemperaturePlot();
@@ -536,6 +546,8 @@ private:
     QComboBox *planetComboBox_ = nullptr;
     QLabel *planetSemiMajorAxisLabel_ = nullptr;
     QLabel *planetDayLengthLabel_ = nullptr;
+    QLabel *planetMassLabel_ = nullptr;
+    QLabel *planetRadiusLabel_ = nullptr;
     QLabel *planetEccentricityLabel_ = nullptr;
     QLabel *planetObliquityLabel_ = nullptr;
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
@@ -588,6 +600,8 @@ private:
         }
         updatePlanetSemiMajorAxisLabel();
         updatePlanetDayLengthLabel();
+        updatePlanetMassLabel();
+        updatePlanetRadiusLabel();
         updatePlanetOrbitLabels();
         updateLatitudePointsDefault();
         syncMaterialWithPlanet();
@@ -602,6 +616,8 @@ private:
         clearTemperatureCache();
         planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
         planetDayLengthLabel_->setText(QStringLiteral("—"));
+        planetMassLabel_->setText(QStringLiteral("—"));
+        planetRadiusLabel_->setText(QStringLiteral("—"));
         planetEccentricityLabel_->setText(QStringLiteral("—"));
         planetObliquityLabel_->setText(QStringLiteral("—"));
         planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
@@ -629,6 +645,14 @@ private:
 
     QString formatDayLength(double value) const {
         return QLocale().toString(value, 'f', 2);
+    }
+
+    QString formatMass(double value) const {
+        return QLocale().toString(value, 'f', 3);
+    }
+
+    QString formatRadius(double value) const {
+        return QLocale().toString(value, 'f', 1);
     }
 
     QString formatEccentricity(double value) const {
@@ -663,6 +687,24 @@ private:
             return;
         }
         planetDayLengthLabel_->setText(formatDayLength(value.toDouble()));
+    }
+
+    void updatePlanetMassLabel() {
+        const QVariant value = planetComboBox_->currentData(kRoleMassEarths);
+        if (!value.isValid()) {
+            planetMassLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        planetMassLabel_->setText(formatMass(value.toDouble()));
+    }
+
+    void updatePlanetRadiusLabel() {
+        const QVariant value = planetComboBox_->currentData(kRoleRadiusKm);
+        if (!value.isValid()) {
+            planetRadiusLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        planetRadiusLabel_->setText(formatRadius(value.toDouble()));
     }
 
     int latitudeStepDegrees() const {
@@ -732,6 +774,8 @@ private:
         planetComboBox_->setItemData(index, planet.eccentricity, kRoleEccentricity);
         planetComboBox_->setItemData(index, planet.obliquityDegrees, kRoleObliquity);
         planetComboBox_->setItemData(index, planet.perihelionArgumentDegrees, kRolePerihelionArgument);
+        planetComboBox_->setItemData(index, planet.massEarths, kRoleMassEarths);
+        planetComboBox_->setItemData(index, planet.radiusKm, kRoleRadiusKm);
         const RotationMode rotationMode =
             planet.tidallyLocked ? RotationMode::TidalLocked : RotationMode::Normal;
         planetComboBox_->setItemData(index, static_cast<int>(rotationMode), kRoleRotationMode);
@@ -776,6 +820,14 @@ private:
         dayLengthInput->setPlaceholderText(QStringLiteral("Например, 1.0"));
         dayLengthInput->setValidator(validator);
 
+        auto *massInput = new QLineEdit(&dialog);
+        massInput->setPlaceholderText(QStringLiteral("Например, 1.0"));
+        massInput->setValidator(validator);
+
+        auto *radiusInput = new QLineEdit(&dialog);
+        radiusInput->setPlaceholderText(QStringLiteral("Например, 6371"));
+        radiusInput->setValidator(validator);
+
         auto *eccentricityInput = new QLineEdit(&dialog);
         eccentricityInput->setPlaceholderText(QStringLiteral("Например, 0.0167"));
         auto *eccentricityValidator = new QDoubleValidator(0.0, 0.999, 6, &dialog);
@@ -801,6 +853,8 @@ private:
         formLayout->addRow(QStringLiteral("Имя:"), nameInput);
         formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
         formLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), dayLengthInput);
+        formLayout->addRow(QStringLiteral("Масса (в массах Земли):"), massInput);
+        formLayout->addRow(QStringLiteral("Радиус (км):"), radiusInput);
         formLayout->addRow(QStringLiteral("Эксцентриситет:"), eccentricityInput);
         formLayout->addRow(QStringLiteral("Наклон оси (°):"), obliquityInput);
         formLayout->addRow(QStringLiteral("Аргумент перицентра (°):"), perihelionArgumentInput);
@@ -823,8 +877,9 @@ private:
 
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
-                [&dialog, nameInput, axisInput, dayLengthInput, eccentricityInput,
-                 obliquityInput, perihelionArgumentInput, materialInput, rotationModeInput, this]() {
+                [&dialog, nameInput, axisInput, dayLengthInput, massInput, radiusInput,
+                 eccentricityInput, obliquityInput, perihelionArgumentInput, materialInput,
+                 rotationModeInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -846,6 +901,18 @@ private:
             const double dayLength = dayLengthInput->text().toDouble(&ok);
             if (!ok || dayLength <= 0.0) {
                 showInputError(QStringLiteral("Укажите положительную длину суток планеты."));
+                return;
+            }
+
+            const double massEarths = massInput->text().toDouble(&ok);
+            if (!ok || massEarths <= 0.0) {
+                showInputError(QStringLiteral("Укажите положительную массу планеты в массах Земли."));
+                return;
+            }
+
+            const double radiusKm = radiusInput->text().toDouble(&ok);
+            if (!ok || radiusKm <= 0.0) {
+                showInputError(QStringLiteral("Укажите положительный радиус планеты в километрах."));
                 return;
             }
 
@@ -873,7 +940,7 @@ private:
                 static_cast<RotationMode>(rotationModeInput->currentData().toInt());
             const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
-                                perihelionArgument, materialId, tidallyLocked};
+                                perihelionArgument, massEarths, radiusKm, materialId, tidallyLocked};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -886,6 +953,8 @@ private:
                 planetComboBox_->setItemData(existingIndex, obliquity, kRoleObliquity);
                 planetComboBox_->setItemData(existingIndex, perihelionArgument,
                                              kRolePerihelionArgument);
+                planetComboBox_->setItemData(existingIndex, massEarths, kRoleMassEarths);
+                planetComboBox_->setItemData(existingIndex, radiusKm, kRoleRadiusKm);
                 planetComboBox_->setItemData(existingIndex, static_cast<int>(rotationMode),
                                              kRoleRotationMode);
                 planetComboBox_->setItemData(existingIndex, true, kRoleIsCustom);
@@ -899,6 +968,8 @@ private:
 
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
+            updatePlanetMassLabel();
+            updatePlanetRadiusLabel();
             updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
             syncRotationModeWithPlanet();

@@ -22,6 +22,10 @@ struct PlanetPreset {
     double eccentricity;
     double obliquityDegrees;
     double perihelionArgumentDegrees;
+    // Масса в массах Земли (M⊕).
+    double massEarths;
+    // Радиус в километрах.
+    double radiusKm;
     QString surfaceMaterialId;
     // Приливная синхронизация задается отдельно: длина суток может совпадать
     // с резонансом вращения (например, 3:2) и не означает жесткую блокировку.
