@@ -1,5 +1,6 @@
 #include "surface_temperature_calculator.h"
 
+#include "atmospheric_circulation_model.h"
 #include "atmospheric_radiation_model.h"
 
 #include <QtCore/QtMath>
@@ -386,5 +387,8 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         }
     }
 
-    return points;
+    AtmosphericCirculationModel circulationModel(dayLengthDays_, rotationMode_,
+                                                  atmospherePressureAtm_);
+    circulationModel.setAtmosphereMassKg(atmosphere_.totalMassKg());
+    return circulationModel.applyHeatTransport(points);
 }
