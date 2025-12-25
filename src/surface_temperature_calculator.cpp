@@ -175,6 +175,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         return {};
     }
 
+    const bool hasAtmosphere = useAtmosphericModel_;
     points.reserve(latitudePoints);
 
     int processedLatitudes = 0;
@@ -221,7 +222,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         const double spaceTemperaturePower = std::pow(kSpaceTemperatureKelvin, 4.0);
         const double maxSolarFlux = segmentSolarConstant * (1.0 - material_.albedo);
         // Если атмосфера отсутствует, используем чистую поверхность без радиации/циркуляции.
-        const bool hasAtmosphere = useAtmosphericModel_;
         const double meanSolarFlux =
             segmentSolarConstant * averageCosine * (1.0 - material_.albedo);
         const double baseMeanFlux = meanSolarFlux + kInternalHeatFlux;
