@@ -1337,7 +1337,6 @@ private:
     void clearTemperatureSegments() {
         lastOrbitSegments_.clear();
         lastTemperatureSegments_.clear();
-        lastTemperatureUsesAtmosphere_ = hasAtmosphere;
         temperatureSummary_.clear();
         lastTemperatureUsesAtmosphere_ = false;
         segmentSelectorWidget_->setSegments({});
