@@ -912,6 +912,25 @@ private:
                                    static_cast<int>(RotationMode::TidalLocked));
         formLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeInput);
 
+        auto *atmosphereInput = new AtmosphereWidget(&dialog);
+        formLayout->addRow(atmosphereInput);
+
+        const auto updateAtmosphereParameters = [massInput, radiusInput, atmosphereInput]() {
+            bool massOk = false;
+            bool radiusOk = false;
+            const double massEarths = massInput->text().toDouble(&massOk);
+            const double radiusKm = radiusInput->text().toDouble(&radiusOk);
+            if (massOk && radiusOk && massEarths > 0.0 && radiusKm > 0.0) {
+                atmosphereInput->setPlanetParameters(massEarths, radiusKm);
+            } else {
+                atmosphereInput->clearPlanetParameters();
+            }
+        };
+
+        connect(massInput, &QLineEdit::textChanged, &dialog, updateAtmosphereParameters);
+        connect(radiusInput, &QLineEdit::textChanged, &dialog, updateAtmosphereParameters);
+        updateAtmosphereParameters();
+
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         formLayout->addWidget(buttons);
 
@@ -919,7 +938,7 @@ private:
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
                 [&dialog, nameInput, axisInput, dayLengthInput, massInput, radiusInput,
                  eccentricityInput, obliquityInput, perihelionArgumentInput, materialInput,
-                 rotationModeInput, this]() {
+                 rotationModeInput, atmosphereInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -979,16 +998,16 @@ private:
             const RotationMode rotationMode =
                 static_cast<RotationMode>(rotationModeInput->currentData().toInt());
             const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
+            const AtmosphereComposition composition = atmosphereInput->composition(false);
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
-                                AtmosphereComposition{}, tidallyLocked};
+                                composition, tidallyLocked};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
                     return;
                 }
-                const QVariant atmosphereValue =
-                    planetComboBox_->itemData(existingIndex, kRoleAtmosphere);
+                const QVariant atmosphereValue = QVariant::fromValue(composition);
                 planetComboBox_->setItemText(existingIndex, formatPlanetName(preset));
                 planetComboBox_->setItemData(existingIndex, axis, kRoleSemiMajorAxis);
                 planetComboBox_->setItemData(existingIndex, dayLength, kRoleDayLength);
