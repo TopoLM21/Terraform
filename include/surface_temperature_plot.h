@@ -18,11 +18,14 @@ public:
     void setTemperatureSeries(const QVector<TemperatureRangePoint> &points,
                               const QVector<TemperatureSummaryPoint> &summaryPoints,
                               const QString &segmentLabel,
-                              RotationMode rotationMode);
+                              RotationMode rotationMode,
+                              bool hasAtmosphere);
     void setSmoothingEnabled(bool enabled);
     void clearSeries();
 
 private:
+    void updateCurveTitles();
+
     QwtPlotCurve *minimumCurve_;
     QwtPlotCurve *maximumCurve_;
     QwtPlotCurve *meanAnnualCurve_;
@@ -36,4 +39,5 @@ private:
     QString segmentLabel_;
     bool smoothingEnabled_ = false;
     RotationMode rotationMode_ = RotationMode::Normal;
+    bool hasAtmosphere_ = false;
 };
