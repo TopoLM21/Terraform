@@ -1,5 +1,6 @@
 #pragma once
 
+#include "atmosphere_model.h"
 #include "orbit_segment_calculator.h"
 #include "planet_presets.h"
 #include "rotation_mode.h"
@@ -40,7 +41,9 @@ struct TemperatureSummaryPoint {
 class SurfaceTemperatureCalculator {
 public:
     SurfaceTemperatureCalculator(double solarConstant, const SurfaceMaterial &material,
-                                 double dayLengthDays, RotationMode rotationMode);
+                                 double dayLengthDays, RotationMode rotationMode,
+                                 const AtmosphereComposition &atmosphere = AtmosphereComposition{},
+                                 double atmospherePressureAtm = 0.0);
 
     using ProgressCallback = std::function<void(int processed, int total)>;
 
@@ -79,4 +82,6 @@ private:
     SurfaceMaterial material_;
     double dayLengthDays_;
     RotationMode rotationMode_ = RotationMode::Normal;
+    AtmosphereComposition atmosphere_;
+    double atmospherePressureAtm_ = 0.0;
 };

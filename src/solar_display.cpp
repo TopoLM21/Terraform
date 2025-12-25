@@ -23,6 +23,7 @@
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QHash>
 #include <QtCore/QHashFunctions>
+#include <QtCore/QStringList>
 #include <QtEndian>
 #include <QtGui/QDoubleValidator>
 #include <QtConcurrent/QtConcurrent>
@@ -38,6 +39,7 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressDialog>
+#include <algorithm>
 #include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QRadioButton>
@@ -71,6 +73,8 @@ constexpr double kEarthRadiusKm = 6371.0;
 struct TemperatureCacheKey {
     double solarConstant = 0.0;
     QString materialId;
+    QString atmosphereSignature;
+    double atmospherePressureAtm = 0.0;
     double dayLength = 0.0;
     double semiMajorAxis = 0.0;
     double eccentricity = 0.0;
@@ -83,6 +87,8 @@ struct TemperatureCacheKey {
     bool operator==(const TemperatureCacheKey &other) const {
         return solarConstant == other.solarConstant &&
                materialId == other.materialId &&
+               atmosphereSignature == other.atmosphereSignature &&
+               atmospherePressureAtm == other.atmospherePressureAtm &&
                dayLength == other.dayLength &&
                semiMajorAxis == other.semiMajorAxis &&
                eccentricity == other.eccentricity &&
@@ -109,6 +115,8 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
 
     seed = qHash(hashDoubleBits(key.solarConstant), seed);
     seed = qHash(key.materialId, seed);
+    seed = qHash(key.atmosphereSignature, seed);
+    seed = qHash(hashDoubleBits(key.atmospherePressureAtm), seed);
     seed = qHash(hashDoubleBits(key.dayLength), seed);
     seed = qHash(hashDoubleBits(key.semiMajorAxis), seed);
     seed = qHash(hashDoubleBits(key.eccentricity), seed);
@@ -118,6 +126,23 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(key.segmentCount, seed);
     seed = qHash(static_cast<int>(key.rotationMode), seed);
     return seed;
+}
+
+static QString atmosphereSignature(const AtmosphereComposition &composition) {
+    auto fractions = composition.fractions();
+    std::sort(fractions.begin(), fractions.end(),
+              [](const GasFraction &left, const GasFraction &right) {
+                  return left.id < right.id;
+              });
+    QStringList parts;
+    for (const auto &fraction : fractions) {
+        if (fraction.massGigatons <= 0.0) {
+            continue;
+        }
+        parts << QStringLiteral("%1:%2").arg(fraction.id,
+                                             QString::number(fraction.massGigatons, 'g', 10));
+    }
+    return parts.isEmpty() ? QStringLiteral("none") : parts.join('|');
 }
 
 struct TemperatureCacheEntry {
@@ -1381,9 +1406,22 @@ private:
         const int latitudePointCount = latitudePoints();
         const RotationMode rotationMode =
             static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
+        AtmosphereComposition atmosphere;
+        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
+        if (atmosphereValue.isValid()) {
+            atmosphere = atmosphereValue.value<AtmosphereComposition>();
+        }
+        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
+        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        double atmospherePressureAtm = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+        }
         const int segmentCount = 12;
         const TemperatureCacheKey cacheKey{lastSolarConstant_,
                                             material->id,
+                                            atmosphereSignature(atmosphere),
+                                            atmospherePressureAtm,
                                             dayLength,
                                             semiMajorAxis,
                                             eccentricity,
@@ -1437,7 +1475,7 @@ private:
         };
 
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength,
-                                                rotationMode);
+                                                rotationMode, atmosphere, atmospherePressureAtm);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
                 [this, watcher, requestId, cancelFlag, cacheKey]() {

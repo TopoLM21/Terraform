@@ -1,5 +1,7 @@
 #include "surface_temperature_calculator.h"
 
+#include "atmospheric_radiation_model.h"
+
 #include <QtCore/QtMath>
 
 #include <cmath>
@@ -43,11 +45,15 @@ double meanDailyCosine(double latitudeRadians, double declinationRadians) {
 SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            const SurfaceMaterial &material,
                                                            double dayLengthDays,
-                                                           RotationMode rotationMode)
+                                                           RotationMode rotationMode,
+                                                           const AtmosphereComposition &atmosphere,
+                                                           double atmospherePressureAtm)
     : solarConstant_(solarConstant),
       material_(material),
       dayLengthDays_(dayLengthDays),
-      rotationMode_(rotationMode) {}
+      rotationMode_(rotationMode),
+      atmosphere_(atmosphere),
+      atmospherePressureAtm_(atmospherePressureAtm) {}
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitude(
     int latitudePoints) const {
@@ -190,6 +196,12 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
             // мгновенную высоту звезды над горизонтом, а деклинация смещает подсолнечную точку.
             subsolarAngleRadians = std::acos(qBound(-1.0, cosZenith, 1.0));
         }
+        const double averageCosine =
+            (rotationMode_ == RotationMode::Normal)
+                ? meanDailyCosine(latitudeRadians, declinationRadians)
+                // В приливной синхронизации угол от подсолнечной точки равен зенитному углу,
+                // поэтому cos(угол) задает локальную среднюю инсоляцию без суточного вращения.
+                : qMax(0.0, std::cos(subsolarAngleRadians));
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double layerThickness = kSurfaceDepthMeters / kLayerCount;
         const double density = qMax(1.0, material_.density);
@@ -204,19 +216,45 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         const double emissivity = qMax(0.0001, material_.emissivity);
         const double spaceTemperaturePower = std::pow(kSpaceTemperatureKelvin, 4.0);
         const double maxSolarFlux = segmentSolarConstant * (1.0 - material_.albedo);
+        const bool hasAtmosphere =
+            atmospherePressureAtm_ > 0.0 && atmosphere_.totalMassGigatons() > 0.0;
+        const double meanSolarFlux =
+            segmentSolarConstant * averageCosine * (1.0 - material_.albedo);
+        const double baseMeanFlux = meanSolarFlux + kInternalHeatFlux;
+        double initialTemperature = std::pow(spaceTemperaturePower +
+                                                 baseMeanFlux /
+                                                     (emissivity * kStefanBoltzmannConstant),
+                                             0.25);
+        // Атмосферный парниковый слой моделируется через эффективную оптическую толщину:
+        // входящий поток ослабляется exp(-tau_sw), исходящий — exp(-tau_lw).
+        AtmosphericRadiationModel radiationModel(atmosphere_, atmospherePressureAtm_,
+                                                 initialTemperature);
+        const double outgoingTransmission =
+            hasAtmosphere ? radiationModel.outgoingTransmission() : 1.0;
+        const double adjustedMeanFlux = (hasAtmosphere ? radiationModel.applyIncomingFlux(meanSolarFlux)
+                                                       : meanSolarFlux) +
+                                        kInternalHeatFlux;
+        initialTemperature = std::pow(spaceTemperaturePower +
+                                          adjustedMeanFlux /
+                                              (emissivity * kStefanBoltzmannConstant *
+                                               outgoingTransmission),
+                                      0.25);
+        const double adjustedMaxSolarFlux =
+            hasAtmosphere ? radiationModel.applyIncomingFlux(maxSolarFlux) : maxSolarFlux;
         const double maxRadiativeTemperature =
-            std::pow((maxSolarFlux + kInternalHeatFlux) /
-                         (emissivity * kStefanBoltzmannConstant) +
-                     spaceTemperaturePower,
+            std::pow(spaceTemperaturePower +
+                         (adjustedMaxSolarFlux + kInternalHeatFlux) /
+                             (emissivity * kStefanBoltzmannConstant * outgoingTransmission),
                      0.25);
         // Ограничиваем шаг по времени по условиям устойчивости явной схемы:
         // Δt_cond ~ (rho * c * dz^2) / (2 * k), Δt_rad ~ (rho * c * dz) / (4 * εσT^3).
         // thermalInertia влияет на выбор Δt_cond через k, rho и c.
         (void)thermalInertia;
         const double conductionTimeStep = heatCapacity / (2.0 * conductionFactor);
+        const double effectiveEmissivity = emissivity * outgoingTransmission;
         const double radiativeTimeStep =
             heatCapacity /
-            (4.0 * emissivity * kStefanBoltzmannConstant *
+            (4.0 * effectiveEmissivity * kStefanBoltzmannConstant *
              std::pow(qMax(1.0, maxRadiativeTemperature), 3.0));
         const double stableTimeStep = qMin(kBaseStepSeconds, qMin(conductionTimeStep, radiativeTimeStep));
         const int stepsPerDay = qBound(
@@ -224,18 +262,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
             static_cast<int>(std::ceil(dayLengthSeconds / stableTimeStep)),
             kMaxStepsPerDay);
         const double timeStepSeconds = dayLengthSeconds / stepsPerDay;
-        const double averageCosine =
-            (rotationMode_ == RotationMode::Normal)
-                ? meanDailyCosine(latitudeRadians, declinationRadians)
-                // В приливной синхронизации угол от подсолнечной точки равен зенитному углу,
-                // поэтому cos(угол) задает локальную среднюю инсоляцию без суточного вращения.
-                : qMax(0.0, std::cos(subsolarAngleRadians));
-        const double meanSolarFlux =
-            segmentSolarConstant * averageCosine * (1.0 - material_.albedo);
-        const double meanFlux = meanSolarFlux + kInternalHeatFlux +
-                                emissivity * kStefanBoltzmannConstant * spaceTemperaturePower;
-        const double initialTemperature = std::pow(meanFlux / (emissivity * kStefanBoltzmannConstant),
-                                                   0.25);
 
         QVector<double> layers(kLayerCount, initialTemperature);
         double minimumTemperature = std::numeric_limits<double>::max();
@@ -264,8 +290,11 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                                   std::cos(latitudeRadians) * std::cos(declinationRadians) *
                                       std::cos(hourAngle);
                 }
-                const double solarFlux = segmentSolarConstant * qMax(0.0, solarFactor) *
-                                         (1.0 - material_.albedo);
+                double solarFlux = segmentSolarConstant * qMax(0.0, solarFactor) *
+                                   (1.0 - material_.albedo);
+                if (hasAtmosphere) {
+                    solarFlux = radiationModel.applyIncomingFlux(solarFlux);
+                }
 
                 QVector<double> nextLayers = layers;
                 for (int layer = 0; layer < kLayerCount; ++layer) {
@@ -281,9 +310,12 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                     if (layer == 0) {
                         const double surfaceTemperature = qMax(1.0, layers[layer]);
                         const double surfacePower = std::pow(surfaceTemperature, 4.0);
-                        const double radiationLoss =
+                        double radiationLoss =
                             emissivity * kStefanBoltzmannConstant *
                             (surfacePower - spaceTemperaturePower);
+                        if (hasAtmosphere) {
+                            radiationLoss = radiationModel.applyOutgoingFlux(radiationLoss);
+                        }
                         // Радиационный баланс: излучение в холодный космос не дает остыть до 0 K.
                         netFlux += solarFlux - radiationLoss;
                     }
