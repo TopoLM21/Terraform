@@ -182,7 +182,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         // угловое удаление от подсолнечной точки (0..180) для приливной синхронизации.
         const double latitudeRadians = qDegreesToRadians(axisDegrees);
         double subsolarAngleRadians = latitudeRadians;
-        if (rotationMode_ == RotationMode::Tidal) {
+        if (rotationMode_ == RotationMode::TidalLocked) {
             const double cosZenith =
                 std::sin(latitudeRadians) * std::sin(declinationRadians) +
                 std::cos(latitudeRadians) * std::cos(declinationRadians);
