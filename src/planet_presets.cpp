@@ -78,11 +78,41 @@ QVector<PlanetPreset> solarSystemPresets() {
 
 QVector<PlanetPreset> sweetSkyPresets() {
     return {
-        {QStringLiteral("Планета 1"), 0.30, 84.9, 0.0003, -10.5, 190.51, 0.7, 5200.0,
-         QStringLiteral("desert"), AtmosphereComposition{}, true},
-        {QStringLiteral("Планета 2"), 0.40, 2.4, 0.003, 11.94, 21.12, 1.1, 6800.0,
-         QStringLiteral("desert"), AtmosphereComposition{}, false},
-        {QStringLiteral("Планета 3"), 0.51, 1.4, 0.0001, -8.84, 343.60, 0.9, 6000.0,
-         QStringLiteral("desert"), AtmosphereComposition{}, false},
+        {QStringLiteral("Планета 1"), 0.30, 84.9, 0.0003, -10.5, 190.51, 0.578, 5151.0,
+         QStringLiteral("desert"),
+         atmosphereByPressureAtm(
+             1.03,
+             0.578,
+             5151.0,
+             {
+                 {QStringLiteral("n2"), 0.66},
+                 {QStringLiteral("o2"), 0.234},
+                 {QStringLiteral("co2"), 0.093},
+             }),
+         true},
+        {QStringLiteral("Планета 2"), 0.40, 2.4, 0.003, 11.94, 21.12, 0.4317, 4710.0,
+         QStringLiteral("desert"),
+         atmosphereByPressureAtm(
+             0.77,
+             0.4317,
+             4710.0,
+             {
+                 {QStringLiteral("n2"), 0.785},
+                 {QStringLiteral("o2"), 0.202},
+                 {QStringLiteral("co2"), 0.012},
+             }),
+         false},
+        {QStringLiteral("Планета 3"), 0.51, 1.4, 0.0001, -8.84, 343.60, 0.5173, 4979.0,
+         QStringLiteral("desert"),
+         atmosphereByPressureAtm(
+             0.74,
+             0.5173,
+             4979.0,
+             {
+                 {QStringLiteral("n2"), 0.788},
+                 {QStringLiteral("o2"), 0.201},
+                 {QStringLiteral("co2"), 0.011},
+             }),
+         false},
     };
 }
