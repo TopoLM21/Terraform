@@ -23,7 +23,9 @@ struct PlanetPreset {
     double obliquityDegrees;
     double perihelionArgumentDegrees;
     QString surfaceMaterialId;
-    RotationMode rotationMode = RotationMode::Normal;
+    // Приливная синхронизация задается отдельно: длина суток может совпадать
+    // с резонансом вращения (например, 3:2) и не означает жесткую блокировку.
+    bool tidallyLocked = false;
 };
 
 QVector<SurfaceMaterial> surfaceMaterials();
