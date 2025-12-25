@@ -181,7 +181,15 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         // Ось X: широта (-90..90) для обычного вращения или
         // угловое удаление от подсолнечной точки (0..180) для приливной синхронизации.
         const double latitudeRadians = qDegreesToRadians(axisDegrees);
-        const double subsolarAngleRadians = latitudeRadians;
+        double subsolarAngleRadians = latitudeRadians;
+        if (rotationMode_ == RotationMode::Tidal) {
+            const double cosZenith =
+                std::sin(latitudeRadians) * std::sin(declinationRadians) +
+                std::cos(latitudeRadians) * std::cos(declinationRadians);
+            // Поправка на наклон оси: при приливной синхронизации зенитный угол задаёт
+            // мгновенную высоту звезды над горизонтом, а деклинация смещает подсолнечную точку.
+            subsolarAngleRadians = std::acos(qBound(-1.0, cosZenith, 1.0));
+        }
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double layerThickness = kSurfaceDepthMeters / kLayerCount;
         const double density = qMax(1.0, material_.density);
