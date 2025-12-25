@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QtCore/QMetaType>
 #include <QtCore/QString>
 #include <QtCore/QVector>
 
@@ -36,6 +37,8 @@ private:
     QVector<GasFraction> m_gases;
 };
 
+Q_DECLARE_METATYPE(AtmosphereComposition)
+
 QVector<GasSpec> availableGases();
 
 // Рассчитать давление атмосферы в атм.
@@ -53,3 +56,9 @@ QVector<GasSpec> availableGases();
 double calculatePressureAtm(double massTons, double planetMassEarths, double radiusKm);
 
 double calculatePressureAtmFromKg(double massKg, double planetMassEarths, double radiusKm);
+
+// Рассчитать массу атмосферы в кг по давлению в атм (обратная формула).
+// Формула выводится из P = (m_atm * g) / (4 * π * R^2).
+double calculateAtmosphereMassKgFromPressureAtm(double pressureAtm,
+                                                double planetMassEarths,
+                                                double radiusKm);

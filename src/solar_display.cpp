@@ -63,6 +63,7 @@ constexpr int kRolePerihelionArgument = Qt::UserRole + 7;
 constexpr int kRoleMassEarths = Qt::UserRole + 8;
 constexpr int kRoleRadiusKm = Qt::UserRole + 9;
 constexpr int kRoleRotationMode = Qt::UserRole + 10;
+constexpr int kRoleAtmosphere = Qt::UserRole + 11;
 constexpr double kKelvinOffset = 273.15;
 
 struct TemperatureCacheKey {
@@ -353,6 +354,7 @@ public:
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
             updateAtmospherePlanetParameters();
+            updateAtmosphereComposition();
             updatePlanetOrbitLabels();
             updateLatitudePointsDefault();
             syncMaterialWithPlanet();
@@ -387,6 +389,7 @@ public:
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
             updateAtmospherePlanetParameters();
+            updateAtmosphereComposition();
             updatePlanetActions();
             clearTemperatureCache();
             updateTemperaturePlot();
@@ -610,6 +613,7 @@ private:
         updatePlanetMassLabel();
         updatePlanetRadiusLabel();
         updateAtmospherePlanetParameters();
+        updateAtmosphereComposition();
         updatePlanetOrbitLabels();
         updateLatitudePointsDefault();
         syncMaterialWithPlanet();
@@ -630,6 +634,7 @@ private:
         planetObliquityLabel_->setText(QStringLiteral("—"));
         planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
         updateAtmospherePlanetParameters();
+        updateAtmosphereComposition();
         {
             const QSignalBlocker rotationBlocker(rotationModeComboBox_);
             rotationModeComboBox_->setCurrentIndex(-1);
@@ -729,6 +734,18 @@ private:
         atmosphereWidget_->setPlanetParameters(massValue.toDouble(), radiusValue.toDouble());
     }
 
+    void updateAtmosphereComposition() {
+        if (!atmosphereWidget_) {
+            return;
+        }
+        const QVariant compositionValue = planetComboBox_->currentData(kRoleAtmosphere);
+        if (!compositionValue.isValid()) {
+            atmosphereWidget_->setComposition(AtmosphereComposition{});
+            return;
+        }
+        atmosphereWidget_->setComposition(compositionValue.value<AtmosphereComposition>());
+    }
+
     int latitudeStepDegrees() const {
         if (latitudeStepSlowRadio_ && latitudeStepSlowRadio_->isChecked()) {
             return 10;
@@ -804,6 +821,7 @@ private:
         planetComboBox_->setItemData(index, isCustom, kRoleIsCustom);
         planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
+        planetComboBox_->setItemData(index, QVariant::fromValue(planet.atmosphere), kRoleAtmosphere);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -962,12 +980,15 @@ private:
                 static_cast<RotationMode>(rotationModeInput->currentData().toInt());
             const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
-                                perihelionArgument, massEarths, radiusKm, materialId, tidallyLocked};
+                                perihelionArgument, massEarths, radiusKm, materialId,
+                                AtmosphereComposition{}, tidallyLocked};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
                     return;
                 }
+                const QVariant atmosphereValue =
+                    planetComboBox_->itemData(existingIndex, kRoleAtmosphere);
                 planetComboBox_->setItemText(existingIndex, formatPlanetName(preset));
                 planetComboBox_->setItemData(existingIndex, axis, kRoleSemiMajorAxis);
                 planetComboBox_->setItemData(existingIndex, dayLength, kRoleDayLength);
@@ -982,6 +1003,7 @@ private:
                 planetComboBox_->setItemData(existingIndex, true, kRoleIsCustom);
                 planetComboBox_->setItemData(existingIndex, name, kRolePlanetName);
                 planetComboBox_->setItemData(existingIndex, materialId, kRoleMaterialId);
+                planetComboBox_->setItemData(existingIndex, atmosphereValue, kRoleAtmosphere);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
@@ -992,6 +1014,7 @@ private:
             updatePlanetDayLengthLabel();
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
+            updateAtmosphereComposition();
             updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
             syncRotationModeWithPlanet();

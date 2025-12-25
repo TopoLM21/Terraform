@@ -72,6 +72,7 @@ QVector<GasSpec> availableGases() {
         {QStringLiteral("nh3"), QStringLiteral("Аммиак (NH₃)"), 17.031, true},
         {QStringLiteral("sf6"), QStringLiteral("SF₆"), 146.06, true},
         {QStringLiteral("nf3"), QStringLiteral("NF₃"), 71.003, true},
+        {QStringLiteral("ar"), QStringLiteral("Ar"), 39.948, false},
         {QStringLiteral("he"), QStringLiteral("He"), 4.0026, false},
         {QStringLiteral("h2"), QStringLiteral("H₂"), 2.01588, false},
     };
@@ -93,4 +94,23 @@ double calculatePressureAtmFromKg(double massKg, double planetMassEarths, double
     const double pressurePascal = (massKg * surfaceGravity) / surfaceArea;
 
     return pressurePascal / kPascalPerAtm;
+}
+
+double calculateAtmosphereMassKgFromPressureAtm(double pressureAtm,
+                                                double planetMassEarths,
+                                                double radiusKm) {
+    if (pressureAtm <= 0.0 || planetMassEarths <= 0.0 || radiusKm <= 0.0) {
+        return 0.0;
+    }
+
+    const double radiusMeters = radiusKm * 1000.0;
+    const double planetMassKg = planetMassEarths * kEarthMassKg;
+
+    // g = G * M / R^2
+    const double surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
+
+    // m_atm = (P * 4 * π * R^2) / g, где P задано в Па.
+    const double surfaceArea = 4.0 * M_PI * radiusMeters * radiusMeters;
+    const double pressurePascal = pressureAtm * kPascalPerAtm;
+    return (pressurePascal * surfaceArea) / surfaceGravity;
 }

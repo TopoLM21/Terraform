@@ -102,6 +102,19 @@ void AtmosphereWidget::setPlanetParameters(double massEarths, double radiusKm) {
     updateSummary();
 }
 
+void AtmosphereWidget::setComposition(const AtmosphereComposition &composition) {
+    const QSignalBlocker blocker(table_);
+    for (int row = 0; row < gases_.size(); ++row) {
+        const auto &gas = gases_.at(row);
+        const double massGigatons = composition.massGigatons(gas.id);
+        if (auto *item = table_->item(row, kColumnMass)) {
+            item->setText(formatNumber(massGigatons, 3));
+        }
+    }
+    updateAllShares();
+    updateSummary();
+}
+
 void AtmosphereWidget::clearPlanetParameters() {
     planetMassEarths_ = 0.0;
     planetRadiusKm_ = 0.0;
