@@ -305,7 +305,7 @@ public:
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
         planetGroupBox->setLayout(planetFormLayout);
 
-        atmosphereWidget_ = new AtmosphereWidget(this);
+        atmosphereWidget_ = new AtmosphereWidget(this, false);
 
         auto *starsPanelLayout = new QVBoxLayout();
         starsPanelLayout->addWidget(primaryGroupBox_);
@@ -912,7 +912,7 @@ private:
                                    static_cast<int>(RotationMode::TidalLocked));
         formLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeInput);
 
-        auto *atmosphereInput = new AtmosphereWidget(&dialog);
+        auto *atmosphereInput = new AtmosphereWidget(&dialog, true);
         formLayout->addRow(atmosphereInput);
 
         const auto updateAtmosphereParameters = [massInput, radiusInput, atmosphereInput]() {
