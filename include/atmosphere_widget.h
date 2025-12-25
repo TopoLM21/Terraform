@@ -15,6 +15,7 @@ public:
     void setPlanetParameters(double massEarths, double radiusKm);
     void setComposition(const AtmosphereComposition &composition);
     void clearPlanetParameters();
+    AtmosphereComposition composition(bool includeZeroes = false) const;
 
 private:
     void populateTable();

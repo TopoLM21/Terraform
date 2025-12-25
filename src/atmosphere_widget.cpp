@@ -142,6 +142,18 @@ void AtmosphereWidget::clearPlanetParameters() {
     updateSummary();
 }
 
+AtmosphereComposition AtmosphereWidget::composition(bool includeZeroes) const {
+    AtmosphereComposition composition;
+    for (int row = 0; row < table_->rowCount(); ++row) {
+        const double massGigatons = rowMassGigatons(row);
+        if (!includeZeroes && massGigatons <= 0.0) {
+            continue;
+        }
+        composition.setMassGigatons(gases_.at(row).id, massGigatons);
+    }
+    return composition;
+}
+
 void AtmosphereWidget::populateTable() {
     const QSignalBlocker blocker(table_);
     table_->setRowCount(gases_.size());
