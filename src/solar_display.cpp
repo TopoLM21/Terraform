@@ -42,6 +42,7 @@
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QRadioButton>
 #include <QtWidgets/QStyle>
+#include <QtWidgets/QTabWidget>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
 
@@ -306,6 +307,7 @@ public:
         planetGroupBox->setLayout(planetFormLayout);
 
         atmosphereWidget_ = new AtmosphereWidget(this, false);
+        atmosphereWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
         auto *starsPanelLayout = new QVBoxLayout();
         starsPanelLayout->addWidget(primaryGroupBox_);
@@ -328,6 +330,7 @@ public:
         plotLayout->addWidget(temperaturePlot_);
         plotLayout->addWidget(modeIllustrationWidget_, 0, Qt::AlignHCenter);
         plotGroupBox->setLayout(plotLayout);
+        plotGroupBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
         auto *leftLayout = new QVBoxLayout();
         leftLayout->addLayout(presetsLayout);
@@ -336,10 +339,13 @@ public:
         leftLayout->addWidget(calculateButton);
         leftLayout->addStretch();
 
+        auto *rightTabs = new QTabWidget(this);
+        rightTabs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        rightTabs->addTab(plotGroupBox, tr("Температура"));
+        rightTabs->addTab(atmosphereWidget_, tr("Атмосфера"));
+
         auto *rightLayout = new QVBoxLayout();
-        rightLayout->addWidget(plotGroupBox, 1);
-        rightLayout->addWidget(atmosphereWidget_);
-        rightLayout->addStretch();
+        rightLayout->addWidget(rightTabs, 1);
 
         auto *layout = new QHBoxLayout(this);
         layout->addLayout(leftLayout, 0);
