@@ -324,23 +324,37 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         std::optional<AtmosphericRadiationModel> radiationModel;
         double outgoingTransmission = 1.0;
         double greenhouseOpacity = 0.0;
+        double adjustedMeanFlux = meanSolarFlux;
+        double absorbedMeanFlux = qMax(0.0, adjustedMeanFlux * (1.0 - albedo));
+        auto updateRadiativeTemperature = [&](double absorbedFlux, double outgoing) {
+            const double greenhouseFactor = qMax(1e-6, outgoing);
+            if (absorbedFlux > 0.0) {
+                return std::pow(absorbedFlux / (kStefanBoltzmannConstant * greenhouseFactor), 0.25);
+            }
+            return kSpaceTemperatureKelvin;
+        };
+
+        // Сначала оцениваем радиационное равновесие без температурно-зависимой оптики.
+        initialTemperature = updateRadiativeTemperature(absorbedMeanFlux, outgoingTransmission);
+
         if (hasAtmosphere) {
-            radiationModel.emplace(atmosphere_, atmospherePressureAtm_, initialTemperature);
-            // Преобразуем эффективную оптическую толщину в прозрачность для излучения:
-            // применяем ту же формулу, что и при расчёте исходящего потока.
-            outgoingTransmission = radiationModel->applyOutgoingFlux(1.0);
-            greenhouseOpacity = 1.0 - outgoingTransmission;
+            // Делаем 1–2 итерации: температура -> оптика -> обновлённая температура.
+            for (int iteration = 0; iteration < 2; ++iteration) {
+                radiationModel.emplace(atmosphere_, atmospherePressureAtm_, initialTemperature);
+                // Преобразуем эффективную оптическую толщину в прозрачность для излучения:
+                // применяем ту же формулу, что и при расчёте исходящего потока.
+                outgoingTransmission = radiationModel->applyOutgoingFlux(1.0);
+                greenhouseOpacity = 1.0 - outgoingTransmission;
+                adjustedMeanFlux = radiationModel->applyIncomingFlux(meanSolarFlux);
+                absorbedMeanFlux = qMax(0.0, adjustedMeanFlux * (1.0 - albedo));
+                initialTemperature =
+                    updateRadiativeTemperature(absorbedMeanFlux, outgoingTransmission);
+            }
         } else {
             greenhouseOpacity = qBound(0.0, greenhouseOpacity_, 0.999);
             outgoingTransmission = 1.0 - greenhouseOpacity;
-        }
-        const double greenhouseFactor = qMax(1e-6, outgoingTransmission);
-        const double adjustedMeanFlux =
-            hasAtmosphere ? radiationModel->applyIncomingFlux(meanSolarFlux) : meanSolarFlux;
-        const double absorbedMeanFlux = qMax(0.0, adjustedMeanFlux * (1.0 - albedo));
-        if (absorbedMeanFlux > 0.0) {
             initialTemperature =
-                std::pow(absorbedMeanFlux / (kStefanBoltzmannConstant * greenhouseFactor), 0.25);
+                updateRadiativeTemperature(absorbedMeanFlux, outgoingTransmission);
         }
         const double stableTimeStep = kBaseStepSeconds;
         const int stepsPerDay = qBound(
