@@ -38,20 +38,32 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
         meanDaily.push_back(point.meanDailyKelvin);
     }
 
-    const double mixingCoefficient = meridionalMixingCoefficient();
+    QVector<double> mixingCoefficients;
+    mixingCoefficients.reserve(points.size());
+    double maxMixingCoefficient = 0.0;
+    for (const auto &point : points) {
+        const double coefficient = meridionalMixingCoefficient(point.latitudeDegrees);
+        mixingCoefficients.push_back(coefficient);
+        maxMixingCoefficient = qMax(maxMixingCoefficient, coefficient);
+    }
     const int transportSteps = qMax(1, meridionalTransportSteps_);
     const double cellSizeDegrees = kCellSizeDegrees;
     // Условие устойчивости явной схемы диффузии: dt <= dx^2 / (2K).
     // Физически это означает, что перенос за один шаг не должен "перепрыгивать"
     // через соседнюю ячейку широт, иначе профиль температур начнет колебаться.
     const double transportTimeStep =
-        (mixingCoefficient > 0.0)
-            ? (0.9 * cellSizeDegrees * cellSizeDegrees / (2.0 * mixingCoefficient))
+        (maxMixingCoefficient > 0.0)
+            ? (0.9 * cellSizeDegrees * cellSizeDegrees / (2.0 * maxMixingCoefficient))
             : 0.0;
-    const double diffusionFactor =
-        (mixingCoefficient > 0.0)
-            ? (mixingCoefficient * transportTimeStep / (cellSizeDegrees * cellSizeDegrees))
-            : 0.0;
+    QVector<double> diffusionFactors;
+    diffusionFactors.reserve(mixingCoefficients.size());
+    for (const double coefficient : mixingCoefficients) {
+        const double diffusionFactor =
+            (maxMixingCoefficient > 0.0)
+                ? (coefficient * transportTimeStep / (cellSizeDegrees * cellSizeDegrees))
+                : 0.0;
+        diffusionFactors.push_back(diffusionFactor);
+    }
     QVector<double> mixed = meanDaily;
     QVector<double> next = meanDaily;
     for (int step = 0; step < transportSteps; ++step) {
@@ -68,7 +80,7 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
                 const double coupling = cellCouplingFactor(currentCell, rightCell);
                 diffusionTerm += coupling * (mixed.at(i + 1) - mixed.at(i));
             }
-            next[i] = mixed.at(i) + diffusionFactor * diffusionTerm;
+            next[i] = mixed.at(i) + diffusionFactors.at(i) * diffusionTerm;
         }
         mixed.swap(next);
     }
@@ -118,7 +130,7 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
     return adjusted;
 }
 
-double AtmosphericCirculationModel::meridionalMixingCoefficient() const {
+double AtmosphericCirculationModel::baseMeridionalMixingCoefficient() const {
     if (atmospherePressureAtm_ <= 0.0) {
         return 0.0;
     }
@@ -130,6 +142,20 @@ double AtmosphericCirculationModel::meridionalMixingCoefficient() const {
     const double pressureFactor = std::sqrt(qMax(0.01, atmospherePressureAtm_));
     const double rawCoefficient = 0.06 * rotationFactor * pressureFactor;
     return qBound(0.0, rawCoefficient, 0.35);
+}
+
+double AtmosphericCirculationModel::meridionalMixingCoefficient(double latitudeDegrees) const {
+    const double baseCoefficient = baseMeridionalMixingCoefficient();
+    if (baseCoefficient <= 0.0) {
+        return 0.0;
+    }
+    const double latitudeRadians = qDegreesToRadians(latitudeDegrees);
+    // Параметризация циркуляционных ячеек (Хэдли/Ферреля): перенос максимален
+    // в средних широтах и минимален у экватора и полюсов.
+    // Профиль: K(φ) = K0 * (0.25 + 0.75 * |sin(2φ)|), максимум при φ≈45°.
+    const double profileFactor =
+        0.25 + 0.75 * std::abs(std::sin(2.0 * latitudeRadians));
+    return baseCoefficient * profileFactor;
 }
 
 double AtmosphericCirculationModel::dayNightExchangeCoefficient() const {
