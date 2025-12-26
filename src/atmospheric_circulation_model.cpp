@@ -5,10 +5,19 @@
 #include <cmath>
 
 namespace {
-constexpr int kCellsPerHemisphere = 3;
 constexpr double kDegreesPerHemisphere = 90.0;
-constexpr double kCellSizeDegrees =
-    (kDegreesPerHemisphere / static_cast<double>(kCellsPerHemisphere));
+constexpr int kMinCellsPerHemisphere = 1;
+constexpr int kMaxCellsPerHemisphere = 6;
+
+int calculateCellsPerHemisphere(double dayLengthDays) {
+    const double clampedDayLength = qBound(0.1, dayLengthDays, 50.0);
+    // Параметризация разделения циркуляции на ячейки при изменении вращения:
+    // чем быстрее ротация, тем больше ячеек; при медленной — меньше.
+    const double rotationScale = std::sqrt(1.0 / clampedDayLength);
+    const double rawCells = 3.0 * rotationScale;
+    const int cells = static_cast<int>(std::round(rawCells));
+    return qBound(kMinCellsPerHemisphere, cells, kMaxCellsPerHemisphere);
+}
 }  // namespace
 
 AtmosphericCirculationModel::AtmosphericCirculationModel(double dayLengthDays,
@@ -16,7 +25,10 @@ AtmosphericCirculationModel::AtmosphericCirculationModel(double dayLengthDays,
                                                          double atmospherePressureAtm)
     : dayLengthDays_(dayLengthDays),
       rotationMode_(rotationMode),
-      atmospherePressureAtm_(atmospherePressureAtm) {}
+      atmospherePressureAtm_(atmospherePressureAtm),
+      cellsPerHemisphere_(calculateCellsPerHemisphere(dayLengthDays_)),
+      cellSizeDegrees_(kDegreesPerHemisphere /
+                       static_cast<double>(cellsPerHemisphere_)) {}
 
 void AtmosphericCirculationModel::setAtmosphereMassKg(double atmosphereMassKg) {
     atmosphereMassKg_ = atmosphereMassKg;
@@ -44,7 +56,7 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
         mixingCoefficients.push_back(meridionalMixingCoefficient(point.latitudeDegrees));
     }
     const int transportSteps = qMax(1, meridionalTransportSteps_);
-    const double cellSizeDegrees = kCellSizeDegrees;
+    const double cellSizeDegrees = cellSizeDegrees_;
     const double dayLengthSeconds = qMax(0.1, dayLengthDays_) * 86400.0;
     const double rotationOmega = 2.0 * M_PI / dayLengthSeconds;
     const double windScalingAlpha = 0.12;
@@ -206,8 +218,8 @@ int AtmosphericCirculationModel::cellIndexForAxis(double axisDegrees) const {
     const double normalized =
         (rotationMode_ == RotationMode::Normal) ? (axisDegrees + kDegreesPerHemisphere)
                                                 : axisDegrees;
-    const int cellIndex = static_cast<int>(std::floor(normalized / kCellSizeDegrees));
-    return qBound(0, cellIndex, kCellsPerHemisphere * 2 - 1);
+    const int cellIndex = static_cast<int>(std::floor(normalized / cellSizeDegrees_));
+    return qBound(0, cellIndex, cellsPerHemisphere_ * 2 - 1);
 }
 
 double AtmosphericCirculationModel::cellCouplingFactor(int leftCell, int rightCell) const {
@@ -215,5 +227,6 @@ double AtmosphericCirculationModel::cellCouplingFactor(int leftCell, int rightCe
         return 1.0;
     }
     // Между соседними ячейками перенос ослаблен: границы ячеек тормозят обмен.
-    return 0.6;
+    const double adjustment = 0.04 * (3.0 - static_cast<double>(cellsPerHemisphere_));
+    return qBound(0.4, 0.6 + adjustment, 0.8);
 }

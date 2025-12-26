@@ -23,6 +23,8 @@ private:
     double atmospherePressureAtm_ = 0.0;
     double atmosphereMassKg_ = 0.0;
     int meridionalTransportSteps_ = 8;
+    int cellsPerHemisphere_ = 3;
+    double cellSizeDegrees_ = 30.0;
 
     double baseMeridionalMixingCoefficient() const;
     double meridionalMixingCoefficient(double latitudeDegrees) const;
