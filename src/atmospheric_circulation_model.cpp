@@ -58,7 +58,7 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
         int dayCount = 0;
         int nightCount = 0;
         for (int i = 0; i < mixed.size(); ++i) {
-            if (points.at(i).latitudeDegrees <= kDegreesPerHemisphere) {
+            if (points.at(i).hasInsolation) {
                 daySum += mixed.at(i);
                 ++dayCount;
             } else {
@@ -70,7 +70,7 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
         const double nightMean = (nightCount > 0) ? (nightSum / nightCount) : 0.0;
         const double exchangeCoefficient = dayNightExchangeCoefficient();
         for (int i = 0; i < mixed.size(); ++i) {
-            if (points.at(i).latitudeDegrees <= kDegreesPerHemisphere) {
+            if (points.at(i).hasInsolation) {
                 mixed[i] += exchangeCoefficient * (nightMean - mixed.at(i));
             } else {
                 mixed[i] += exchangeCoefficient * (dayMean - mixed.at(i));
