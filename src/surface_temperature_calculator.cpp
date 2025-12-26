@@ -7,6 +7,7 @@
 
 #include <QtCore/QtMath>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -20,6 +21,9 @@ constexpr double kSecondsPerEarthDay = 86400.0;
 constexpr double kBaseStepSeconds = 900.0;
 constexpr int kMinStepsPerDay = 48;
 constexpr int kMaxStepsPerDay = 20000;
+constexpr double kPascalPerAtm = 101325.0;
+constexpr double kReferenceCpDry = 1004.0;
+constexpr double kReferenceCpWet = 1850.0;
 
 double meanDailyCosine(double latitudeRadians, double declinationRadians) {
     const double tanProduct = std::tan(latitudeRadians) * std::tan(declinationRadians);
@@ -39,6 +43,58 @@ double meanDailyCosine(double latitudeRadians, double declinationRadians) {
         (hourAngleLimit * std::sin(latitudeRadians) * std::sin(declinationRadians) +
          std::cos(latitudeRadians) * std::cos(declinationRadians) * std::sin(hourAngleLimit)) / kPi;
     return qMax(0.0, meanCosine);
+}
+
+double estimateAtmosphereSpecificHeatCp(const AtmosphereComposition &atmosphere) {
+    const auto fractions = atmosphere.fractions();
+    if (fractions.isEmpty()) {
+        return kReferenceCpDry;
+    }
+
+    double greenhouseShare = 0.0;
+    double totalShare = 0.0;
+    const auto gases = availableGases();
+    for (const auto &fraction : fractions) {
+        if (fraction.share <= 0.0) {
+            continue;
+        }
+        const auto it = std::find_if(gases.begin(), gases.end(),
+                                     [&fraction](const GasSpec &spec) {
+                                         return spec.id == fraction.id;
+                                     });
+        if (it == gases.end()) {
+            continue;
+        }
+        totalShare += fraction.share;
+        if (it->isGreenhouse) {
+            greenhouseShare += fraction.share;
+        }
+    }
+
+    if (totalShare <= 0.0) {
+        return kReferenceCpDry;
+    }
+
+    // Cp оцениваем как смесь сухого воздуха и более "влажных" компонент:
+    // парниковые газы повышают теплоёмкость, поэтому смещаем Cp к верхней границе.
+    const double wetShare = qBound(0.0, greenhouseShare / totalShare, 1.0);
+    return kReferenceCpDry + wetShare * (kReferenceCpWet - kReferenceCpDry);
+}
+
+double atmosphereHeatCapacityPerArea(double pressureAtm,
+                                     double surfaceGravity,
+                                     const AtmosphereComposition &atmosphere) {
+    if (pressureAtm <= 0.0 || surfaceGravity <= 0.0) {
+        return 0.0;
+    }
+
+    // Используем столб атмосферы как добавочную теплоёмкость поверхности:
+    // m_atm / A = P / g, поэтому C_atm = (P / g) * c_p.
+    // Предполагаем, что атмосфера теплообменно связана с поверхностью
+    // и эффективно участвует в суточном балансе.
+    const double massPerArea = pressureAtm * kPascalPerAtm / surfaceGravity;
+    const double cp = estimateAtmosphereSpecificHeatCp(atmosphere);
+    return qMax(0.0, massPerArea * cp);
 }
 }  // namespace
 
@@ -251,7 +307,15 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const bool hasInsolation = averageCosine > 0.0;
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double albedo = qBound(0.0, material_.albedo, 1.0);
-        const double heatCapacity = qMax(1.0, material_.heatCapacity);
+        const double surfaceHeatCapacity = qMax(1.0, material_.heatCapacity);
+        const double atmosphereHeatCapacity =
+            hasAtmosphere
+                ? atmosphereHeatCapacityPerArea(atmospherePressureAtm_, surfaceGravity_,
+                                                atmosphere_)
+                : 0.0;
+        // Полная теплоёмкость слоя: поверхность + эффективно вовлечённая атмосфера.
+        // C_total = C_surface + C_atm, где C_atm = (P / g) * c_p.
+        const double heatCapacity = qMax(1.0, surfaceHeatCapacity + atmosphereHeatCapacity);
         // Если атмосфера отсутствует, используем чистую поверхность без радиации/циркуляции.
         const double meanSolarFlux = segmentSolarConstant * averageCosine;
         double initialTemperature = kSpaceTemperatureKelvin;
