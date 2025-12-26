@@ -16,6 +16,7 @@ add_executable(solar_constant
     include/atmospheric_lapse_rate_model.h
     include/atmosphere_widget.h
     include/segment_selector_widget.h
+    include/surface_temperature_state.h
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
     src/atmospheric_radiation_model.cpp
@@ -30,6 +31,7 @@ add_executable(solar_constant
     src/solar_calculator.cpp
     src/solar_display.cpp
     src/surface_temperature_calculator.cpp
+    src/surface_temperature_state.cpp
     src/surface_temperature_plot.cpp
     src/temperature_plot_tracker.cpp
 )

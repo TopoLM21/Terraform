@@ -1016,6 +1016,13 @@ private:
         perihelionValidator->setLocale(QLocale::C);
         perihelionArgumentInput->setValidator(perihelionValidator);
 
+        auto *greenhouseOpacityInput = new QLineEdit(&dialog);
+        greenhouseOpacityInput->setPlaceholderText(QStringLiteral("Например, 0.0"));
+        auto *greenhouseValidator = new QDoubleValidator(0.0, 0.999, 4, &dialog);
+        greenhouseValidator->setNotation(QDoubleValidator::StandardNotation);
+        greenhouseValidator->setLocale(QLocale::C);
+        greenhouseOpacityInput->setValidator(greenhouseValidator);
+
         auto *formLayout = new QFormLayout();
         formLayout->addRow(QStringLiteral("Имя:"), nameInput);
         formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
@@ -1025,6 +1032,8 @@ private:
         formLayout->addRow(QStringLiteral("Эксцентриситет:"), eccentricityInput);
         formLayout->addRow(QStringLiteral("Наклон оси (°):"), obliquityInput);
         formLayout->addRow(QStringLiteral("Аргумент перицентра (°):"), perihelionArgumentInput);
+        formLayout->addRow(QStringLiteral("Парниковая непрозрачность (0..1):"),
+                           greenhouseOpacityInput);
 
         auto *materialInput = new QComboBox(&dialog);
         for (const auto &material : surfaceMaterials()) {
@@ -1072,8 +1081,9 @@ private:
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
                 [&dialog, nameInput, axisInput, dayLengthInput, massInput, radiusInput,
-                 eccentricityInput, obliquityInput, perihelionArgumentInput, materialInput,
-                 rotationModeInput, atmosphereInput, this]() {
+                 eccentricityInput, obliquityInput, perihelionArgumentInput,
+                 greenhouseOpacityInput, materialInput, rotationModeInput, atmosphereInput,
+                 this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -1128,6 +1138,16 @@ private:
                 return;
             }
 
+            double greenhouseOpacity = 0.0;
+            const QString greenhouseText = greenhouseOpacityInput->text().trimmed();
+            if (!greenhouseText.isEmpty()) {
+                greenhouseOpacity = greenhouseText.toDouble(&ok);
+                if (!ok || greenhouseOpacity < 0.0 || greenhouseOpacity >= 1.0) {
+                    showInputError(QStringLiteral("Укажите непрозрачность парникового слоя от 0 до 1."));
+                    return;
+                }
+            }
+
             const int existingIndex = findPlanetIndexByName(name);
             const QString materialId = materialInput->currentData().toString();
             const RotationMode rotationMode =
@@ -1136,7 +1156,7 @@ private:
             const AtmosphereComposition composition = atmosphereInput->composition(false);
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
-                                composition, 0.0, tidallyLocked};
+                                composition, greenhouseOpacity, tidallyLocked};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
