@@ -46,7 +46,10 @@ public:
                                  const AtmosphereComposition &atmosphere = AtmosphereComposition{},
                                  double atmospherePressureAtm = 0.0,
                                  double surfaceGravity = 0.0,
-                                 bool useAtmosphericModel = false);
+                                 bool useAtmosphericModel = false,
+                                 int meridionalTransportSteps = 8);
+
+    void setMeridionalTransportSteps(int steps);
 
     using ProgressCallback = std::function<void(int processed, int total)>;
 
@@ -98,4 +101,5 @@ private:
     double atmospherePressureAtm_ = 0.0;
     double surfaceGravity_ = 0.0;
     bool useAtmosphericModel_ = false;
+    int meridionalTransportSteps_ = 8;
 };

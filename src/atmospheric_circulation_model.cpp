@@ -22,6 +22,10 @@ void AtmosphericCirculationModel::setAtmosphereMassKg(double atmosphereMassKg) {
     atmosphereMassKg_ = atmosphereMassKg;
 }
 
+void AtmosphericCirculationModel::setMeridionalTransportSteps(int steps) {
+    meridionalTransportSteps_ = qMax(1, steps);
+}
+
 QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
     const QVector<TemperatureRangePoint> &points) const {
     if (points.size() < 2) {
@@ -35,21 +39,38 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
     }
 
     const double mixingCoefficient = meridionalMixingCoefficient();
+    const int transportSteps = qMax(1, meridionalTransportSteps_);
+    const double cellSizeDegrees = kCellSizeDegrees;
+    // Условие устойчивости явной схемы диффузии: dt <= dx^2 / (2K).
+    // Физически это означает, что перенос за один шаг не должен "перепрыгивать"
+    // через соседнюю ячейку широт, иначе профиль температур начнет колебаться.
+    const double transportTimeStep =
+        (mixingCoefficient > 0.0)
+            ? (0.9 * cellSizeDegrees * cellSizeDegrees / (2.0 * mixingCoefficient))
+            : 0.0;
+    const double diffusionFactor =
+        (mixingCoefficient > 0.0)
+            ? (mixingCoefficient * transportTimeStep / (cellSizeDegrees * cellSizeDegrees))
+            : 0.0;
     QVector<double> mixed = meanDaily;
-    for (int i = 0; i < meanDaily.size(); ++i) {
-        double diffusionTerm = 0.0;
-        const int currentCell = cellIndexForAxis(points.at(i).latitudeDegrees);
-        if (i > 0) {
-            const int leftCell = cellIndexForAxis(points.at(i - 1).latitudeDegrees);
-            const double coupling = cellCouplingFactor(leftCell, currentCell);
-            diffusionTerm += mixingCoefficient * coupling * (meanDaily.at(i - 1) - meanDaily.at(i));
+    QVector<double> next = meanDaily;
+    for (int step = 0; step < transportSteps; ++step) {
+        for (int i = 0; i < mixed.size(); ++i) {
+            double diffusionTerm = 0.0;
+            const int currentCell = cellIndexForAxis(points.at(i).latitudeDegrees);
+            if (i > 0) {
+                const int leftCell = cellIndexForAxis(points.at(i - 1).latitudeDegrees);
+                const double coupling = cellCouplingFactor(leftCell, currentCell);
+                diffusionTerm += coupling * (mixed.at(i - 1) - mixed.at(i));
+            }
+            if (i + 1 < mixed.size()) {
+                const int rightCell = cellIndexForAxis(points.at(i + 1).latitudeDegrees);
+                const double coupling = cellCouplingFactor(currentCell, rightCell);
+                diffusionTerm += coupling * (mixed.at(i + 1) - mixed.at(i));
+            }
+            next[i] = mixed.at(i) + diffusionFactor * diffusionTerm;
         }
-        if (i + 1 < meanDaily.size()) {
-            const int rightCell = cellIndexForAxis(points.at(i + 1).latitudeDegrees);
-            const double coupling = cellCouplingFactor(currentCell, rightCell);
-            diffusionTerm += mixingCoefficient * coupling * (meanDaily.at(i + 1) - meanDaily.at(i));
-        }
-        mixed[i] = meanDaily.at(i) + diffusionTerm;
+        mixed.swap(next);
     }
 
     if (rotationMode_ == RotationMode::TidalLocked) {

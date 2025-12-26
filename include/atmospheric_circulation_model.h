@@ -12,6 +12,7 @@ public:
                                 double atmospherePressureAtm);
 
     void setAtmosphereMassKg(double atmosphereMassKg);
+    void setMeridionalTransportSteps(int steps);
 
     QVector<TemperatureRangePoint> applyHeatTransport(
         const QVector<TemperatureRangePoint> &points) const;
@@ -21,6 +22,7 @@ private:
     RotationMode rotationMode_ = RotationMode::Normal;
     double atmospherePressureAtm_ = 0.0;
     double atmosphereMassKg_ = 0.0;
+    int meridionalTransportSteps_ = 8;
 
     double meridionalMixingCoefficient() const;
     double dayNightExchangeCoefficient() const;
