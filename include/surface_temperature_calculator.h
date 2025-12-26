@@ -47,6 +47,7 @@ public:
                                  double greenhouseOpacity = 0.0,
                                  double atmospherePressureAtm = 0.0,
                                  double surfaceGravity = 0.0,
+                                 double planetRadiusKm = 6371.0,
                                  bool useAtmosphericModel = false,
                                  int meridionalTransportSteps = 8);
 
@@ -102,6 +103,7 @@ private:
     double greenhouseOpacity_ = 0.0;
     double atmospherePressureAtm_ = 0.0;
     double surfaceGravity_ = 0.0;
+    double planetRadiusKm_ = 6371.0;
     bool useAtmosphericModel_ = false;
     int meridionalTransportSteps_ = 8;
 };
