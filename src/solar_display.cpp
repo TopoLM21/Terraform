@@ -69,12 +69,15 @@ constexpr int kRoleRotationMode = Qt::UserRole + 10;
 constexpr int kRoleAtmosphere = Qt::UserRole + 11;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
+constexpr double kEarthMassKg = 5.9722e24;
+constexpr double kGravitationalConstant = 6.67430e-11;
 
 struct TemperatureCacheKey {
     double solarConstant = 0.0;
     QString materialId;
     QString atmosphereSignature;
     double atmospherePressureAtm = 0.0;
+    double surfaceGravity = 0.0;
     double dayLength = 0.0;
     double semiMajorAxis = 0.0;
     double eccentricity = 0.0;
@@ -89,6 +92,7 @@ struct TemperatureCacheKey {
                materialId == other.materialId &&
                atmosphereSignature == other.atmosphereSignature &&
                atmospherePressureAtm == other.atmospherePressureAtm &&
+               surfaceGravity == other.surfaceGravity &&
                dayLength == other.dayLength &&
                semiMajorAxis == other.semiMajorAxis &&
                eccentricity == other.eccentricity &&
@@ -117,6 +121,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(key.materialId, seed);
     seed = qHash(key.atmosphereSignature, seed);
     seed = qHash(hashDoubleBits(key.atmospherePressureAtm), seed);
+    seed = qHash(hashDoubleBits(key.surfaceGravity), seed);
     seed = qHash(hashDoubleBits(key.dayLength), seed);
     seed = qHash(hashDoubleBits(key.semiMajorAxis), seed);
     seed = qHash(hashDoubleBits(key.eccentricity), seed);
@@ -1417,8 +1422,14 @@ private:
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         double atmospherePressureAtm = 0.0;
+        double surfaceGravity = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+            const double radiusMeters = radiusKm * 1000.0;
+            const double planetMassKg = massEarths * kEarthMassKg;
+            // g = G * M / R^2.
+            surfaceGravity =
+                kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
         // Атмосферу считаем присутствующей, если есть масса газов или ненулевое давление:
         // это позволяет явно переключать формулы поверхности/атмосферы.
@@ -1429,6 +1440,7 @@ private:
                                             material->id,
                                             atmosphereSignature(atmosphere),
                                             atmospherePressureAtm,
+                                            surfaceGravity,
                                             dayLength,
                                             semiMajorAxis,
                                             eccentricity,
@@ -1485,6 +1497,7 @@ private:
         // При наличии атмосферы включаем расширенную модель с парниковым слоем и циркуляцией.
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength,
                                                 rotationMode, atmosphere, atmospherePressureAtm,
+                                                surfaceGravity,
                                                 hasAtmosphere);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,

@@ -1,6 +1,7 @@
 #include "surface_temperature_calculator.h"
 
 #include "atmospheric_circulation_model.h"
+#include "atmospheric_lapse_rate_model.h"
 #include "atmospheric_radiation_model.h"
 
 #include <QtCore/QtMath>
@@ -50,6 +51,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            RotationMode rotationMode,
                                                            const AtmosphereComposition &atmosphere,
                                                            double atmospherePressureAtm,
+                                                           double surfaceGravity,
                                                            bool useAtmosphericModel)
     : solarConstant_(solarConstant),
       material_(material),
@@ -57,6 +59,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       rotationMode_(rotationMode),
       atmosphere_(atmosphere),
       atmospherePressureAtm_(atmospherePressureAtm),
+      surfaceGravity_(surfaceGravity),
       useAtmosphericModel_(useAtmosphericModel) {}
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitude(
@@ -160,6 +163,43 @@ QVector<QVector<TemperatureRangePoint>> SurfaceTemperatureCalculator::temperatur
 }
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitudeForSegment(
+    int latitudePoints,
+    double segmentSolarConstant,
+    double declinationDegrees,
+    const ProgressCallback &progressCallback,
+    const std::atomic_bool *cancelFlag,
+    int progressOffset,
+    int totalProgress) const {
+    QVector<TemperatureRangePoint> points =
+        radiativeBalanceByLatitudeForSegment(latitudePoints,
+                                             segmentSolarConstant,
+                                             declinationDegrees,
+                                             progressCallback,
+                                             cancelFlag,
+                                             progressOffset,
+                                             totalProgress);
+    if (!useAtmosphericModel_ || points.isEmpty()) {
+        // Для безатмосферного режима возвращаем чисто радиационно-кондуктивный баланс.
+        return points;
+    }
+
+    // Вертикальная поправка: корректируем температуру по адиабатическому градиенту
+    // сразу после радиационного баланса, перед горизонтальной циркуляцией.
+    AtmosphericLapseRateModel lapseRateModel(atmospherePressureAtm_, atmosphere_,
+                                             surfaceGravity_);
+    QVector<TemperatureRangePoint> adjusted;
+    adjusted.reserve(points.size());
+    for (const auto &point : points) {
+        adjusted.push_back(lapseRateModel.applyLapseRate(point));
+    }
+
+    AtmosphericCirculationModel circulationModel(dayLengthDays_, rotationMode_,
+                                                  atmospherePressureAtm_);
+    circulationModel.setAtmosphereMassKg(atmosphere_.totalMassKg());
+    return circulationModel.applyHeatTransport(adjusted);
+}
+
+QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByLatitudeForSegment(
     int latitudePoints,
     double segmentSolarConstant,
     double declinationDegrees,
@@ -392,13 +432,5 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
         }
     }
 
-    if (!hasAtmosphere) {
-        // Для безатмосферного режима возвращаем чисто радиационно-кондуктивный баланс.
-        return points;
-    }
-
-    AtmosphericCirculationModel circulationModel(dayLengthDays_, rotationMode_,
-                                                  atmospherePressureAtm_);
-    circulationModel.setAtmosphereMassKg(atmosphere_.totalMassKg());
-    return circulationModel.applyHeatTransport(points);
+    return points;
 }

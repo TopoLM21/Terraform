@@ -13,12 +13,14 @@ add_executable(solar_constant
     include/atmosphere_model.h
     include/atmospheric_radiation_model.h
     include/atmospheric_circulation_model.h
+    include/atmospheric_lapse_rate_model.h
     include/atmosphere_widget.h
     include/segment_selector_widget.h
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
     src/atmospheric_radiation_model.cpp
     src/atmospheric_circulation_model.cpp
+    src/atmospheric_lapse_rate_model.cpp
     src/atmosphere_widget.cpp
     src/mode_illustration_widget.cpp
     src/mode_illustration_widget.h

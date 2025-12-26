@@ -44,6 +44,7 @@ public:
                                  double dayLengthDays, RotationMode rotationMode,
                                  const AtmosphereComposition &atmosphere = AtmosphereComposition{},
                                  double atmospherePressureAtm = 0.0,
+                                 double surfaceGravity = 0.0,
                                  bool useAtmosphericModel = false);
 
     using ProgressCallback = std::function<void(int processed, int total)>;
@@ -79,11 +80,21 @@ private:
         int progressOffset,
         int totalProgress) const;
 
+    QVector<TemperatureRangePoint> radiativeBalanceByLatitudeForSegment(
+        int latitudePoints,
+        double segmentSolarConstant,
+        double declinationDegrees,
+        const ProgressCallback &progressCallback,
+        const std::atomic_bool *cancelFlag,
+        int progressOffset,
+        int totalProgress) const;
+
     double solarConstant_;
     SurfaceMaterial material_;
     double dayLengthDays_;
     RotationMode rotationMode_ = RotationMode::Normal;
     AtmosphereComposition atmosphere_;
     double atmospherePressureAtm_ = 0.0;
+    double surfaceGravity_ = 0.0;
     bool useAtmosphericModel_ = false;
 };
