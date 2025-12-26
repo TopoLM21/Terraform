@@ -52,7 +52,8 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            const AtmosphereComposition &atmosphere,
                                                            double atmospherePressureAtm,
                                                            double surfaceGravity,
-                                                           bool useAtmosphericModel)
+                                                           bool useAtmosphericModel,
+                                                           int meridionalTransportSteps)
     : solarConstant_(solarConstant),
       material_(material),
       dayLengthDays_(dayLengthDays),
@@ -60,7 +61,12 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       atmosphere_(atmosphere),
       atmospherePressureAtm_(atmospherePressureAtm),
       surfaceGravity_(surfaceGravity),
-      useAtmosphericModel_(useAtmosphericModel) {}
+      useAtmosphericModel_(useAtmosphericModel),
+      meridionalTransportSteps_(qMax(1, meridionalTransportSteps)) {}
+
+void SurfaceTemperatureCalculator::setMeridionalTransportSteps(int steps) {
+    meridionalTransportSteps_ = qMax(1, steps);
+}
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesByLatitude(
     int latitudePoints) const {
@@ -196,6 +202,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     AtmosphericCirculationModel circulationModel(dayLengthDays_, rotationMode_,
                                                   atmospherePressureAtm_);
     circulationModel.setAtmosphereMassKg(atmosphere_.totalMassKg());
+    circulationModel.setMeridionalTransportSteps(meridionalTransportSteps_);
     return circulationModel.applyHeatTransport(adjusted);
 }
 
