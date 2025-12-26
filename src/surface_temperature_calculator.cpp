@@ -230,17 +230,11 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                                        ? (-90.0 + stepDegrees * static_cast<double>(i))
                                        : (stepDegrees * static_cast<double>(i));
         // Ось X: широта (-90..90) для обычного вращения или
-        // угловое удаление от подсолнечной точки (0..180) для приливной синхронизации.
+        // угловое расстояние от подсолнечной точки (0..180) для приливной синхронизации.
         const double latitudeRadians = qDegreesToRadians(axisDegrees);
-        double subsolarAngleRadians = latitudeRadians;
-        if (rotationMode_ == RotationMode::TidalLocked) {
-            const double cosZenith =
-                std::sin(latitudeRadians) * std::sin(declinationRadians) +
-                std::cos(latitudeRadians) * std::cos(declinationRadians);
-            // Поправка на наклон оси: при приливной синхронизации зенитный угол задаёт
-            // мгновенную высоту звезды над горизонтом, а деклинация смещает подсолнечную точку.
-            subsolarAngleRadians = std::acos(qBound(-1.0, cosZenith, 1.0));
-        }
+        // Для tidal-locked режима геометрия задается через угол от подсолнечной точки:
+        // это и есть зенитный угол падения лучей, поэтому не применяем деклинацию.
+        const double subsolarAngleRadians = latitudeRadians;
         const double averageCosine =
             (rotationMode_ == RotationMode::Normal)
                 ? meanDailyCosine(latitudeRadians, declinationRadians)
