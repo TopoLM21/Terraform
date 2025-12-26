@@ -38,14 +38,23 @@ TemperatureRangePoint AtmosphericLapseRateModel::applyLapseRate(
     const double meanTemperature = qMax(1.0, point.meanDailyKelvin);
     const double lapseRate = moistAdiabaticLapseRate(meanTemperature);
     const double adjustmentHeight = surfaceAdjustmentHeightMeters(meanTemperature);
+    // Температуры из SurfaceTemperatureCalculator::radiativeBalanceByLatitudeForSegment
+    // относятся к поверхности (слой layers[0]), поэтому вертикальную поправку не применяем.
+    // Если бы это была эффективная температура излучения на высоте, к поверхности надо
+    // прибавлять delta = Γ * Δz (положительный знак, потому что температура растет вниз).
     const double delta = lapseRate * adjustmentHeight;
+    const bool applyVerticalCorrection = false;
+
+    if (!applyVerticalCorrection) {
+        return point;
+    }
 
     TemperatureRangePoint adjusted = point;
-    adjusted.meanDailyKelvin = qMax(1.0, adjusted.meanDailyKelvin - delta);
-    adjusted.meanDayKelvin = qMax(1.0, adjusted.meanDayKelvin - delta);
-    adjusted.meanNightKelvin = qMax(1.0, adjusted.meanNightKelvin - delta);
-    adjusted.minimumKelvin = qMax(1.0, adjusted.minimumKelvin - delta);
-    adjusted.maximumKelvin = qMax(1.0, adjusted.maximumKelvin - delta);
+    adjusted.meanDailyKelvin = qMax(1.0, adjusted.meanDailyKelvin + delta);
+    adjusted.meanDayKelvin = qMax(1.0, adjusted.meanDayKelvin + delta);
+    adjusted.meanNightKelvin = qMax(1.0, adjusted.meanNightKelvin + delta);
+    adjusted.minimumKelvin = qMax(1.0, adjusted.minimumKelvin + delta);
+    adjusted.maximumKelvin = qMax(1.0, adjusted.maximumKelvin + delta);
     adjusted.minimumCelsius = adjusted.minimumKelvin - kKelvinOffset;
     adjusted.maximumCelsius = adjusted.maximumKelvin - kKelvinOffset;
     adjusted.meanDailyCelsius = adjusted.meanDailyKelvin - kKelvinOffset;
