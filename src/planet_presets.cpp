@@ -47,10 +47,11 @@ QVector<SurfaceMaterial> surfaceMaterials() {
 
 QVector<PlanetPreset> solarSystemPresets() {
     return {
-        // dayLengthDays: солнечные сутки (длительность солнечного дня), не сидерический период
+        // dayLengthDays: солнечные сутки (длительность солнечного дня), не сидерический период.
+        // Например, у Венеры солнечные сутки ~116.75, а 243 дня — сидерическое вращение.
         {QStringLiteral("Меркурий"), 0.39, 176.0, 0.2056, 0.03, 29.12, 0.0553, 2439.7,
          QStringLiteral("regolith_mercury"), AtmosphereComposition{}, false},
-        {QStringLiteral("Венера"), 0.72, 243.0, 0.0068, 177.36, 54.88, 0.815, 6051.8,
+        {QStringLiteral("Венера"), 0.72, 116.75, 0.0068, 177.36, 54.88, 0.815, 6051.8,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(92.0, 0.815, 6051.8, {{QStringLiteral("co2"), 1.0}}), false},
         {QStringLiteral("Земля"), 1.00, 1.0, 0.0167, 23.44, 102.94, 1.0, 6371.0,
