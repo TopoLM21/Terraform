@@ -252,17 +252,25 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double albedo = qBound(0.0, material_.albedo, 1.0);
         const double heatCapacity = qMax(1.0, material_.heatCapacity);
-        const double greenhouseOpacity = qBound(0.0, greenhouseOpacity_, 0.999);
         // Если атмосфера отсутствует, используем чистую поверхность без радиации/циркуляции.
         const double meanSolarFlux = segmentSolarConstant * averageCosine;
         double initialTemperature = kSpaceTemperatureKelvin;
         // Атмосферный парниковый слой моделируется через эффективную оптическую толщину:
         // входящий поток ослабляется exp(-tau_sw), исходящий — exp(-tau_lw).
         std::optional<AtmosphericRadiationModel> radiationModel;
+        double outgoingTransmission = 1.0;
+        double greenhouseOpacity = 0.0;
         if (hasAtmosphere) {
             radiationModel.emplace(atmosphere_, atmospherePressureAtm_, initialTemperature);
+            // Преобразуем эффективную оптическую толщину в прозрачность для излучения:
+            // применяем ту же формулу, что и при расчёте исходящего потока.
+            outgoingTransmission = radiationModel->applyOutgoingFlux(1.0);
+            greenhouseOpacity = 1.0 - outgoingTransmission;
+        } else {
+            greenhouseOpacity = qBound(0.0, greenhouseOpacity_, 0.999);
+            outgoingTransmission = 1.0 - greenhouseOpacity;
         }
-        const double greenhouseFactor = qMax(1e-6, 1.0 - greenhouseOpacity);
+        const double greenhouseFactor = qMax(1e-6, outgoingTransmission);
         const double adjustedMeanFlux =
             hasAtmosphere ? radiationModel->applyIncomingFlux(meanSolarFlux) : meanSolarFlux;
         const double absorbedMeanFlux = qMax(0.0, adjustedMeanFlux * (1.0 - albedo));
