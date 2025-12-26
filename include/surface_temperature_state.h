@@ -5,7 +5,8 @@ public:
     SurfaceTemperatureState(double initialTemperatureKelvin,
                             double albedo,
                             double heatCapacity,
-                            double greenhouseOpacity);
+                            double greenhouseOpacity,
+                            double minTemperatureKelvin);
 
     double temperatureKelvin() const;
     void setTemperatureKelvin(double temperatureKelvin);
@@ -17,4 +18,5 @@ private:
     double albedo_ = 0.0;
     double heatCapacity_ = 1.0;
     double greenhouseOpacity_ = 0.0;
+    double minTemperatureKelvin_ = 3.0;
 };
