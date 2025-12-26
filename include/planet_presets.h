@@ -29,6 +29,8 @@ struct PlanetPreset {
     double radiusKm;
     QString surfaceMaterialId;
     AtmosphereComposition atmosphere;
+    // Прозрачность парникового слоя (0..1), где 0.99 соответствует плотной атмосфере Венеры.
+    double greenhouseOpacity = 0.0;
     // Приливная синхронизация задается отдельно: длина суток может совпадать
     // с резонансом вращения (например, 3:2) и не означает жесткую блокировку.
     bool tidallyLocked = false;

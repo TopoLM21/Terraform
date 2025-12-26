@@ -44,6 +44,7 @@ public:
     SurfaceTemperatureCalculator(double solarConstant, const SurfaceMaterial &material,
                                  double dayLengthDays, RotationMode rotationMode,
                                  const AtmosphereComposition &atmosphere = AtmosphereComposition{},
+                                 double greenhouseOpacity = 0.0,
                                  double atmospherePressureAtm = 0.0,
                                  double surfaceGravity = 0.0,
                                  bool useAtmosphericModel = false,
@@ -98,6 +99,7 @@ private:
     double dayLengthDays_;
     RotationMode rotationMode_ = RotationMode::Normal;
     AtmosphereComposition atmosphere_;
+    double greenhouseOpacity_ = 0.0;
     double atmospherePressureAtm_ = 0.0;
     double surfaceGravity_ = 0.0;
     bool useAtmosphericModel_ = false;

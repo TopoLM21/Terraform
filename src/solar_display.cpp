@@ -67,6 +67,7 @@ constexpr int kRoleMassEarths = Qt::UserRole + 8;
 constexpr int kRoleRadiusKm = Qt::UserRole + 9;
 constexpr int kRoleRotationMode = Qt::UserRole + 10;
 constexpr int kRoleAtmosphere = Qt::UserRole + 11;
+constexpr int kRoleGreenhouseOpacity = Qt::UserRole + 12;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -78,6 +79,7 @@ struct TemperatureCacheKey {
     QString atmosphereSignature;
     double atmospherePressureAtm = 0.0;
     double surfaceGravity = 0.0;
+    double greenhouseOpacity = 0.0;
     double dayLength = 0.0;
     double semiMajorAxis = 0.0;
     double eccentricity = 0.0;
@@ -93,6 +95,7 @@ struct TemperatureCacheKey {
                atmosphereSignature == other.atmosphereSignature &&
                atmospherePressureAtm == other.atmospherePressureAtm &&
                surfaceGravity == other.surfaceGravity &&
+               greenhouseOpacity == other.greenhouseOpacity &&
                dayLength == other.dayLength &&
                semiMajorAxis == other.semiMajorAxis &&
                eccentricity == other.eccentricity &&
@@ -122,6 +125,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(key.atmosphereSignature, seed);
     seed = qHash(hashDoubleBits(key.atmospherePressureAtm), seed);
     seed = qHash(hashDoubleBits(key.surfaceGravity), seed);
+    seed = qHash(hashDoubleBits(key.greenhouseOpacity), seed);
     seed = qHash(hashDoubleBits(key.dayLength), seed);
     seed = qHash(hashDoubleBits(key.semiMajorAxis), seed);
     seed = qHash(hashDoubleBits(key.eccentricity), seed);
@@ -944,6 +948,7 @@ private:
         planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
         planetComboBox_->setItemData(index, QVariant::fromValue(planet.atmosphere), kRoleAtmosphere);
+        planetComboBox_->setItemData(index, planet.greenhouseOpacity, kRoleGreenhouseOpacity);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -1131,7 +1136,7 @@ private:
             const AtmosphereComposition composition = atmosphereInput->composition(false);
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
-                                composition, tidallyLocked};
+                                composition, 0.0, tidallyLocked};
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -1153,6 +1158,8 @@ private:
                 planetComboBox_->setItemData(existingIndex, name, kRolePlanetName);
                 planetComboBox_->setItemData(existingIndex, materialId, kRoleMaterialId);
                 planetComboBox_->setItemData(existingIndex, atmosphereValue, kRoleAtmosphere);
+                planetComboBox_->setItemData(existingIndex, preset.greenhouseOpacity,
+                                             kRoleGreenhouseOpacity);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
@@ -1421,6 +1428,8 @@ private:
         }
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        const double greenhouseOpacity =
+            planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
         double atmospherePressureAtm = 0.0;
         double surfaceGravity = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
@@ -1441,6 +1450,7 @@ private:
                                             atmosphereSignature(atmosphere),
                                             atmospherePressureAtm,
                                             surfaceGravity,
+                                            greenhouseOpacity,
                                             dayLength,
                                             semiMajorAxis,
                                             eccentricity,
@@ -1496,7 +1506,8 @@ private:
 
         // При наличии атмосферы включаем расширенную модель с парниковым слоем и циркуляцией.
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength,
-                                                rotationMode, atmosphere, atmospherePressureAtm,
+                                                rotationMode, atmosphere, greenhouseOpacity,
+                                                atmospherePressureAtm,
                                                 surfaceGravity,
                                                 hasAtmosphere);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
