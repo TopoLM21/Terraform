@@ -50,6 +50,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            double dayLengthDays,
                                                            RotationMode rotationMode,
                                                            const AtmosphereComposition &atmosphere,
+                                                           double greenhouseOpacity,
                                                            double atmospherePressureAtm,
                                                            double surfaceGravity,
                                                            bool useAtmosphericModel,
@@ -59,6 +60,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       dayLengthDays_(dayLengthDays),
       rotationMode_(rotationMode),
       atmosphere_(atmosphere),
+      greenhouseOpacity_(qBound(0.0, greenhouseOpacity, 0.999)),
       atmospherePressureAtm_(atmospherePressureAtm),
       surfaceGravity_(surfaceGravity),
       useAtmosphericModel_(useAtmosphericModel),
@@ -280,27 +282,30 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         }
         const double outgoingTransmission =
             hasAtmosphere ? radiationModel->outgoingTransmission() : 1.0;
+        const double greenhouseFactor = 1.0 - greenhouseOpacity_;
         const double adjustedMeanFlux = (hasAtmosphere ? radiationModel->applyIncomingFlux(meanSolarFlux)
                                                        : meanSolarFlux) +
                                         kInternalHeatFlux;
-        initialTemperature = std::pow(spaceTemperaturePower +
-                                          adjustedMeanFlux /
-                                              (emissivity * kStefanBoltzmannConstant *
-                                               outgoingTransmission),
+        initialTemperature = std::pow((spaceTemperaturePower +
+                                           adjustedMeanFlux /
+                                               (emissivity * kStefanBoltzmannConstant *
+                                                outgoingTransmission)) /
+                                          qMax(1e-6, greenhouseFactor),
                                       0.25);
         const double adjustedMaxSolarFlux =
             hasAtmosphere ? radiationModel->applyIncomingFlux(maxSolarFlux) : maxSolarFlux;
         const double maxRadiativeTemperature =
-            std::pow(spaceTemperaturePower +
-                         (adjustedMaxSolarFlux + kInternalHeatFlux) /
-                             (emissivity * kStefanBoltzmannConstant * outgoingTransmission),
+            std::pow((spaceTemperaturePower +
+                          (adjustedMaxSolarFlux + kInternalHeatFlux) /
+                              (emissivity * kStefanBoltzmannConstant * outgoingTransmission)) /
+                         qMax(1e-6, greenhouseFactor),
                      0.25);
         // Ограничиваем шаг по времени по условиям устойчивости явной схемы:
         // Δt_cond ~ (rho * c * dz^2) / (2 * k), Δt_rad ~ (rho * c * dz) / (4 * εσT^3).
         // thermalInertia влияет на выбор Δt_cond через k, rho и c.
         (void)thermalInertia;
         const double conductionTimeStep = heatCapacity / (2.0 * conductionFactor);
-        const double effectiveEmissivity = emissivity * outgoingTransmission;
+        const double effectiveEmissivity = emissivity * outgoingTransmission * greenhouseFactor;
         const double radiativeTimeStep =
             heatCapacity /
             (4.0 * effectiveEmissivity * kStefanBoltzmannConstant *
@@ -359,9 +364,11 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                     if (layer == 0) {
                         const double surfaceTemperature = qMax(1.0, layers[layer]);
                         const double surfacePower = std::pow(surfaceTemperature, 4.0);
+                        // Парниковая непрозрачность отражает долю ИК-излучения,
+                        // которую атмосфера возвращает обратно к поверхности.
                         double radiationLoss =
                             emissivity * kStefanBoltzmannConstant *
-                            (surfacePower - spaceTemperaturePower);
+                            (surfacePower * greenhouseFactor - spaceTemperaturePower);
                         if (hasAtmosphere) {
                             radiationLoss = radiationModel->applyOutgoingFlux(radiationLoss);
                         }
