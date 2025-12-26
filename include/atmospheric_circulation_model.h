@@ -24,7 +24,8 @@ private:
     double atmosphereMassKg_ = 0.0;
     int meridionalTransportSteps_ = 8;
 
-    double meridionalMixingCoefficient() const;
+    double baseMeridionalMixingCoefficient() const;
+    double meridionalMixingCoefficient(double latitudeDegrees) const;
     double dayNightExchangeCoefficient() const;
     int cellIndexForAxis(double axisDegrees) const;
     double cellCouplingFactor(int leftCell, int rightCell) const;
