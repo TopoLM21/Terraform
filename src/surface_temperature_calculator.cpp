@@ -1,101 +1,46 @@
 #include "surface_temperature_calculator.h"
 
-#include "atmospheric_circulation_model.h"
-#include "atmospheric_lapse_rate_model.h"
-#include "atmospheric_radiation_model.h"
-#include "surface_temperature_state.h"
-
 #include <QtCore/QtMath>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <limits>
-#include <optional>
 
 namespace {
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kPi = 3.14159265358979323846;
-// Фоновая температура излучения (CMB) как "пол" для расчётов.
-constexpr double kSpaceTemperatureKelvin = 2.7;
-constexpr double kSecondsPerEarthDay = 86400.0;
-constexpr double kBaseStepSeconds = 900.0;
-constexpr int kMinStepsPerDay = 48;
-constexpr int kMaxStepsPerDay = 20000;
-constexpr double kPascalPerAtm = 101325.0;
-constexpr double kReferenceCpDry = 1004.0;
-constexpr double kReferenceCpWet = 1850.0;
+constexpr double kEarthRadiusKm = 6371.0;
+constexpr double kEarthAreaKm2 = 510072000.0;
+constexpr double kEarthAtmosphereMassGt = 5140000.0;
+constexpr double kDefaultSurfaceRoughness = 20.0;
+constexpr double kDefaultBasinShape = 3.5;
+constexpr double kEarthWaterGigatons = 1.4e9;
 
-double meanDailyCosine(double latitudeRadians, double declinationRadians) {
-    const double tanProduct = std::tan(latitudeRadians) * std::tan(declinationRadians);
-    double hourAngleLimit = 0.0;
+struct TraceGasSpec {
+    const char *id;
+    double greenhousePower;
+};
 
-    if (tanProduct >= 1.0) {
-        // Полярный день: Солнце не заходит, H0 = π.
-        hourAngleLimit = kPi;
-    } else if (tanProduct <= -1.0) {
-        // Полярная ночь: Солнце не восходит, H0 = 0.
-        hourAngleLimit = 0.0;
-    } else {
-        hourAngleLimit = std::acos(-tanProduct);
-    }
+constexpr std::array<TraceGasSpec, 4> kTraceGases = {{
+    {"ch4", 0.5},
+    {"nh3", 1.5},
+    {"sf6", 300.0},
+    {"nf3", 250.0},
+}};
 
-    const double meanCosine =
-        (hourAngleLimit * std::sin(latitudeRadians) * std::sin(declinationRadians) +
-         std::cos(latitudeRadians) * std::cos(declinationRadians) * std::sin(hourAngleLimit)) / kPi;
-    return qMax(0.0, meanCosine);
+
+double gasMassGigatons(const AtmosphereComposition &atmosphere, const QString &gasId) {
+    return qMax(0.0, atmosphere.massGigatons(gasId));
 }
 
-double estimateAtmosphereSpecificHeatCp(const AtmosphereComposition &atmosphere) {
-    const auto fractions = atmosphere.fractions();
-    if (fractions.isEmpty()) {
-        return kReferenceCpDry;
+double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
+    // В текущем UI нет явного управления гидросферой, поэтому применяем мягкую эвристику:
+    // океаническую поверхность считаем водной, остальные материалы — сухими.
+    if (material.id == QLatin1String("ocean")) {
+        return kEarthWaterGigatons;
     }
-
-    double greenhouseShare = 0.0;
-    double totalShare = 0.0;
-    const auto gases = availableGases();
-    for (const auto &fraction : fractions) {
-        if (fraction.share <= 0.0) {
-            continue;
-        }
-        const auto it = std::find_if(gases.begin(), gases.end(),
-                                     [&fraction](const GasSpec &spec) {
-                                         return spec.id == fraction.id;
-                                     });
-        if (it == gases.end()) {
-            continue;
-        }
-        totalShare += fraction.share;
-        if (it->isGreenhouse) {
-            greenhouseShare += fraction.share;
-        }
-    }
-
-    if (totalShare <= 0.0) {
-        return kReferenceCpDry;
-    }
-
-    // Cp оцениваем как смесь сухого воздуха и более "влажных" компонент:
-    // парниковые газы повышают теплоёмкость, поэтому смещаем Cp к верхней границе.
-    const double wetShare = qBound(0.0, greenhouseShare / totalShare, 1.0);
-    return kReferenceCpDry + wetShare * (kReferenceCpWet - kReferenceCpDry);
-}
-
-double atmosphereHeatCapacityPerArea(double pressureAtm,
-                                     double surfaceGravity,
-                                     const AtmosphereComposition &atmosphere) {
-    if (pressureAtm <= 0.0 || surfaceGravity <= 0.0) {
-        return 0.0;
-    }
-
-    // Используем столб атмосферы как добавочную теплоёмкость поверхности:
-    // m_atm / A = P / g, поэтому C_atm = (P / g) * c_p.
-    // Предполагаем, что атмосфера теплообменно связана с поверхностью
-    // и эффективно участвует в суточном балансе.
-    const double massPerArea = pressureAtm * kPascalPerAtm / surfaceGravity;
-    const double cp = estimateAtmosphereSpecificHeatCp(atmosphere);
-    return qMax(0.0, massPerArea * cp);
+    return 0.0;
 }
 }  // namespace
 
@@ -107,6 +52,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            double greenhouseOpacity,
                                                            double atmospherePressureAtm,
                                                            double surfaceGravity,
+                                                           double planetRadiusKm,
                                                            bool useAtmosphericModel,
                                                            int meridionalTransportSteps)
     : solarConstant_(solarConstant),
@@ -117,6 +63,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       greenhouseOpacity_(qBound(0.0, greenhouseOpacity, 0.999)),
       atmospherePressureAtm_(atmospherePressureAtm),
       surfaceGravity_(surfaceGravity),
+      planetRadiusKm_(planetRadiusKm),
       useAtmosphericModel_(useAtmosphericModel),
       meridionalTransportSteps_(qMax(1, meridionalTransportSteps)) {}
 
@@ -240,6 +187,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                                              cancelFlag,
                                              progressOffset,
                                              totalProgress);
+    // Текущий расчёт атмосферной поправки (аэродинамика, адиабатический градиент)
+    // закомментирован по запросу: ниже применяется модель из React-кода.
+#if 0
     if (!useAtmosphericModel_ || points.isEmpty()) {
         // Для безатмосферного режима возвращаем чисто радиационно-кондуктивный баланс.
         return points;
@@ -260,6 +210,8 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     circulationModel.setAtmosphereMassKg(atmosphere_.totalMassKg());
     circulationModel.setMeridionalTransportSteps(meridionalTransportSteps_);
     return circulationModel.applyHeatTransport(adjusted);
+#endif
+    return points;
 }
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByLatitudeForSegment(
@@ -278,172 +230,173 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         return {};
     }
 
-    const bool hasAtmosphere = useAtmosphericModel_;
     points.reserve(latitudePoints);
 
     int processedLatitudes = 0;
     const double declinationRadians = qDegreesToRadians(declinationDegrees);
     const double stepDegrees = 180.0 / static_cast<double>(latitudePoints - 1);
+    const double safeRadiusKm = qMax(0.1, planetRadiusKm_);
+    const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
+    const double surfaceGravity = qMax(0.0, surfaceGravity_);
+    const double totalGas = atmosphere_.totalMassGigatons();
+    const double pressureAtm =
+        (totalGas > 0.0)
+            ? (totalGas / kEarthAtmosphereMassGt) * (surfaceGravity / 9.8) / areaScale
+            : 0.0;
+    const double co2Mass = gasMassGigatons(atmosphere_, QStringLiteral("co2"));
+    const double waterGigatons = estimateSurfaceWaterGigatons(material_);
+    const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
+    const double avgDepth = (planetAreaKm2 > 0.0) ? waterGigatons / planetAreaKm2 : 0.0;
+    double potentialCoverage = 0.0;
+    if (waterGigatons > 0.0) {
+        const double fillFactor = (avgDepth * kDefaultBasinShape) / kDefaultSurfaceRoughness;
+        potentialCoverage = 1.0 - std::exp(-fillFactor * 3.0);
+    }
+    potentialCoverage = qBound(0.0, potentialCoverage, 1.0);
+
+    // Модель оптической толщины повторяет формулы из React-кода:
+    // tau_CO2 = ln(1 + M_CO2 * colDensity * power * 0.001) * broadening,
+    // где broadening учитывает расширение линий при росте давления.
+    const double colDensity = 1.0 / qMax(1.0, areaScale);
+    const double broadening = std::pow(qMax(0.5, pressureAtm * 2.0), 0.32);
+    const double baseTau =
+        std::log(1.0 + co2Mass * colDensity * 0.02 * 0.001) * broadening;
+    double traceTau = 0.0;
+    for (const auto &spec : kTraceGases) {
+        const double traceMass = gasMassGigatons(atmosphere_, QLatin1String(spec.id));
+        traceTau += (traceMass / qMax(1.0, areaScale)) * spec.greenhousePower * 1e-6 *
+                    broadening;
+    }
+
+    const double albedo = qBound(0.0, material_.albedo, 1.0);
+    double pressureClouds = pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
+    const double surfAlbedoPre =
+        (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
+    const double tEffPre =
+        std::pow((segmentSolarConstant * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
+                     (4.0 * kStefanBoltzmannConstant),
+                 0.25);
+    const double tBasePre =
+        tEffPre * std::pow(1.0 + 0.75 * (baseTau + traceTau), 0.25);
+
+    double evaporation = 0.0;
+    if (potentialCoverage > 0.0 && tBasePre > 263.0) {
+        evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
+    }
+    const double waterClouds = qMin(0.5, evaporation * 0.28);
+    const double cloudAlbedo = qMin(0.88, pressureClouds + waterClouds);
+    const double waterTau = qMin(8.0, evaporation * 1.5);
+    double totalTau = baseTau + traceTau + waterTau;
+    if (!useAtmosphericModel_ && greenhouseOpacity_ > 0.0) {
+        // Дополнительная непрозрачность, когда атмосферная модель выключена,
+        // но задана парниковая "шторка" вручную.
+        totalTau += -std::log(qMax(1e-6, 1.0 - greenhouseOpacity_));
+    }
+    const double ghMult = std::pow(1.0 + 0.75 * totalTau, 0.25);
+
+    const double transport =
+        (pressureAtm > 50.0)
+            ? 0.99
+            : (pressureAtm > 0.001
+                   ? qMin(1.0, 0.15 * std::log(pressureAtm * 100.0 + 1.0))
+                   : 0.0);
+    const double rotBlock =
+        (dayLengthDays_ < 2.0 && pressureAtm < 10.0) ? 0.65 : 1.0;
+    const double meridionalTransport = transport * rotBlock;
+
+    double dynamicSurfAlbedo = albedo * (1.0 - potentialCoverage);
+    if (tBasePre < 260.0) {
+        dynamicSurfAlbedo += potentialCoverage * 0.70;
+    } else {
+        dynamicSurfAlbedo += potentialCoverage * 0.06;
+    }
+    const double finalAlbedo = qMax(dynamicSurfAlbedo, cloudAlbedo);
+    const double tEff =
+        std::pow((segmentSolarConstant * (1.0 - finalAlbedo)) /
+                     (4.0 * kStefanBoltzmannConstant),
+                 0.25);
+    const double tGlobalAvg = tEff * ghMult;
+
+    const bool isTidallyLocked = rotationMode_ == RotationMode::TidalLocked;
 
     for (int i = 0; i < latitudePoints; ++i) {
         if (cancelFlag && cancelFlag->load()) {
             return {};
         }
+
         const double axisDegrees = (rotationMode_ == RotationMode::Normal)
                                        ? (-90.0 + stepDegrees * static_cast<double>(i))
                                        : (stepDegrees * static_cast<double>(i));
-        // Ось X: широта (-90..90) для обычного вращения или
-        // угловое расстояние от подсолнечной точки (0..180) для приливной синхронизации.
         const double latitudeRadians = qDegreesToRadians(axisDegrees);
-        // Для tidal-locked режима геометрия задается через угол от подсолнечной точки:
-        // это и есть зенитный угол падения лучей, поэтому не применяем деклинацию.
-        const double subsolarAngleRadians = latitudeRadians;
-        const double averageCosine =
-            (rotationMode_ == RotationMode::Normal)
-                ? meanDailyCosine(latitudeRadians, declinationRadians)
-                // В приливной синхронизации угол от подсолнечной точки равен зенитному углу,
-                // поэтому cos(угол) задает локальную среднюю инсоляцию без суточного вращения.
-                : qMax(0.0, std::cos(subsolarAngleRadians));
-        // Признак освещенности: используем средний косинус, который уже учитывает полярную ночь.
-        const bool hasInsolation = averageCosine > 0.0;
-        const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
-        const double albedo = qBound(0.0, material_.albedo, 1.0);
-        const double surfaceHeatCapacity = qMax(1.0, material_.heatCapacity);
-        const double atmosphereHeatCapacity =
-            hasAtmosphere
-                ? atmosphereHeatCapacityPerArea(atmospherePressureAtm_, surfaceGravity_,
-                                                atmosphere_)
-                : 0.0;
-        // Полная теплоёмкость слоя: поверхность + эффективно вовлечённая атмосфера.
-        // C_total = C_surface + C_atm, где C_atm = (P / g) * c_p.
-        const double heatCapacity = qMax(1.0, surfaceHeatCapacity + atmosphereHeatCapacity);
-        // Если атмосфера отсутствует, используем чистую поверхность без радиации/циркуляции.
-        const double meanSolarFlux = segmentSolarConstant * averageCosine;
-        double initialTemperature = kSpaceTemperatureKelvin;
-        // Атмосферный парниковый слой моделируется через эффективную оптическую толщину:
-        // входящий поток ослабляется exp(-tau_sw), исходящий — exp(-tau_lw).
-        std::optional<AtmosphericRadiationModel> radiationModel;
-        double outgoingTransmission = 1.0;
-        double greenhouseOpacity = 0.0;
-        double adjustedMeanFlux = meanSolarFlux;
-        double absorbedMeanFlux = qMax(0.0, adjustedMeanFlux * (1.0 - albedo));
-        auto updateRadiativeTemperature = [&](double absorbedFlux, double outgoing) {
-            const double greenhouseFactor = qMax(1e-6, outgoing);
-            if (absorbedFlux > 0.0) {
-                return std::pow(absorbedFlux / (kStefanBoltzmannConstant * greenhouseFactor), 0.25);
-            }
-            return kSpaceTemperatureKelvin;
-        };
-
-        // Сначала оцениваем радиационное равновесие без температурно-зависимой оптики.
-        initialTemperature = updateRadiativeTemperature(absorbedMeanFlux, outgoingTransmission);
-
-        if (hasAtmosphere) {
-            // Делаем 1–2 итерации: температура -> оптика -> обновлённая температура.
-            for (int iteration = 0; iteration < 2; ++iteration) {
-                radiationModel.emplace(atmosphere_, atmospherePressureAtm_, initialTemperature);
-                // Преобразуем эффективную оптическую толщину в прозрачность для излучения:
-                // применяем ту же формулу, что и при расчёте исходящего потока.
-                outgoingTransmission = radiationModel->applyOutgoingFlux(1.0);
-                greenhouseOpacity = 1.0 - outgoingTransmission;
-                adjustedMeanFlux = radiationModel->applyIncomingFlux(meanSolarFlux);
-                absorbedMeanFlux = qMax(0.0, adjustedMeanFlux * (1.0 - albedo));
-                initialTemperature =
-                    updateRadiativeTemperature(absorbedMeanFlux, outgoingTransmission);
-            }
+        const double tanVal = -std::tan(latitudeRadians) * std::tan(declinationRadians);
+        double hourAngleLimit = 0.0;
+        if (tanVal >= 1.0) {
+            hourAngleLimit = 0.0;
+        } else if (tanVal <= -1.0) {
+            hourAngleLimit = kPi;
         } else {
-            greenhouseOpacity = qBound(0.0, greenhouseOpacity_, 0.999);
-            outgoingTransmission = 1.0 - greenhouseOpacity;
-            initialTemperature =
-                updateRadiativeTemperature(absorbedMeanFlux, outgoingTransmission);
+            hourAngleLimit = std::acos(tanVal);
         }
-        const double stableTimeStep = kBaseStepSeconds;
-        const int stepsPerDay = qBound(
-            kMinStepsPerDay,
-            static_cast<int>(std::ceil(dayLengthSeconds / stableTimeStep)),
-            kMaxStepsPerDay);
-        const double timeStepSeconds = dayLengthSeconds / stepsPerDay;
+        // Средний дневной поток повторяет реактовскую формулу через H0
+        // (угол захода/восхода) и учитывает полярные дни/ночи.
+        const double dailyFactor =
+            (hourAngleLimit * std::sin(latitudeRadians) * std::sin(declinationRadians) +
+             std::cos(latitudeRadians) * std::cos(declinationRadians) *
+                 std::sin(hourAngleLimit)) /
+            kPi;
+        const bool hasInsolation = dailyFactor > 0.0;
 
-        SurfaceTemperatureState temperatureState(initialTemperature, albedo, heatCapacity,
-                                                  greenhouseOpacity, kSpaceTemperatureKelvin);
-        double minimumTemperature = std::numeric_limits<double>::max();
-        double maximumTemperature = 0.0;
-        double meanDailySum = 0.0;
-        double meanDaySum = 0.0;
-        double meanNightSum = 0.0;
-        int meanDailyCount = 0;
-        int meanDayCount = 0;
-        int meanNightCount = 0;
+        const double tLatRad =
+            std::pow(qMax(0.1,
+                          segmentSolarConstant * (1.0 - finalAlbedo) * dailyFactor) /
+                         kStefanBoltzmannConstant,
+                     0.25) *
+            ghMult;
+        const double tBase =
+            tLatRad * (1.0 - meridionalTransport) + tGlobalAvg * meridionalTransport;
 
-        constexpr int kSpinupCycles = 3;
-        const double tidalSolarFactor = qMax(0.0, std::cos(subsolarAngleRadians));
-        for (int cycle = 0; cycle < kSpinupCycles; ++cycle) {
-            for (int step = 0; step < stepsPerDay; ++step) {
-                if (cancelFlag && cancelFlag->load()) {
-                    return {};
-                }
-                double solarFactor = tidalSolarFactor;
-                if (rotationMode_ == RotationMode::Normal) {
-                    const double phase = static_cast<double>(step) / stepsPerDay;
-                    const double hourAngle = 2.0 * kPi * phase - kPi;
-                    // Солнечный фактор: cos(зенитного угла) с поправкой на сезонную деклинацию,
-                    // где широта задаёт наклон поверхности относительно лучей звезды.
-                    solarFactor = std::sin(latitudeRadians) * std::sin(declinationRadians) +
-                                  std::cos(latitudeRadians) * std::cos(declinationRadians) *
-                                      std::cos(hourAngle);
-                }
-                double solarFlux = segmentSolarConstant * qMax(0.0, solarFactor);
-                if (hasAtmosphere) {
-                    solarFlux = radiationModel->applyIncomingFlux(solarFlux);
-                }
-
-                temperatureState.updateTemperature(solarFlux, timeStepSeconds);
-
-                if (cycle == kSpinupCycles - 1) {
-                    const double surfaceTemperature = temperatureState.temperatureKelvin();
-                    minimumTemperature = qMin(minimumTemperature, surfaceTemperature);
-                    maximumTemperature = qMax(maximumTemperature, surfaceTemperature);
-                    meanDailySum += surfaceTemperature;
-                    ++meanDailyCount;
-                    // Усредняем по шагам, разделяя день/ночь по знаку solarFactor:
-                    // так видны отдельные характеристики нагрева и остывания,
-                    // особенно при длительном полярном дне или ночи.
-                    if (solarFactor > 0.0) {
-                        meanDaySum += surfaceTemperature;
-                        ++meanDayCount;
-                    } else {
-                        meanNightSum += surfaceTemperature;
-                        ++meanNightCount;
-                    }
-                }
-            }
+        // Амплитуда суточного хода переносится из исходного React-кода:
+        // A = sqrt(period) * 140 / sqrt(inertia).
+        const double atmDamping = pressureAtm * 20.0;
+        const double waterInertia = potentialCoverage * 120.0;
+        const double totalInertia =
+            qMax(1.0, material_.heatCapacity + waterInertia + atmDamping);
+        double amplitude = !isTidallyLocked
+                               ? (std::sqrt(qMax(0.01, dayLengthDays_)) * 140.0) /
+                                     std::sqrt(totalInertia)
+                               : 0.0;
+        if (hourAngleLimit == 0.0) {
+            amplitude = 0.0;
+        } else if (hourAngleLimit == kPi) {
+            amplitude *= 0.2;
+        } else {
+            amplitude *= (tBase / 300.0);
         }
 
-        const double meanDayTemperature =
-            (meanDayCount > 0) ? (meanDaySum / meanDayCount)
-                               : ((meanNightCount > 0) ? (meanNightSum / meanNightCount)
-                                                       : initialTemperature);
-        const double meanNightTemperature =
-            (meanNightCount > 0) ? (meanNightSum / meanNightCount)
-                                 : ((meanDayCount > 0) ? (meanDaySum / meanDayCount)
-                                                       : initialTemperature);
-        const double meanDailyTemperature =
-            (meanDailyCount > 0) ? (meanDailySum / meanDailyCount)
-                                 : initialTemperature;
+        double tMax = tBase + amplitude / 2.0;
+        double tMin = tBase - amplitude / 2.0;
+        const double absFloor =
+            (pressureAtm > 0.5 ? 180.0 : 20.0) + 150.0 * (1.0 - std::exp(-pressureAtm * 0.2));
+        if (tMin < absFloor) {
+            tMin = absFloor;
+        }
+        if (tMax < tMin) {
+            tMax = tMin;
+        }
 
         TemperatureRangePoint point;
         point.latitudeDegrees = axisDegrees;
         point.hasInsolation = hasInsolation;
-        point.minimumKelvin = minimumTemperature;
-        point.maximumKelvin = maximumTemperature;
-        point.meanDailyKelvin = meanDailyTemperature;
-        point.meanDayKelvin = meanDayTemperature;
-        point.meanNightKelvin = meanNightTemperature;
-        point.minimumCelsius = minimumTemperature - kKelvinOffset;
-        point.maximumCelsius = maximumTemperature - kKelvinOffset;
-        point.meanDailyCelsius = meanDailyTemperature - kKelvinOffset;
-        point.meanDayCelsius = meanDayTemperature - kKelvinOffset;
-        point.meanNightCelsius = meanNightTemperature - kKelvinOffset;
+        point.minimumKelvin = tMin;
+        point.maximumKelvin = tMax;
+        point.meanDailyKelvin = tBase;
+        point.meanDayKelvin = tMax;
+        point.meanNightKelvin = tMin;
+        point.minimumCelsius = tMin - kKelvinOffset;
+        point.maximumCelsius = tMax - kKelvinOffset;
+        point.meanDailyCelsius = tBase - kKelvinOffset;
+        point.meanDayCelsius = tMax - kKelvinOffset;
+        point.meanNightCelsius = tMin - kKelvinOffset;
         points.push_back(point);
 
         ++processedLatitudes;

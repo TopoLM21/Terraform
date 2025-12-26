@@ -1529,6 +1529,7 @@ private:
                                                 rotationMode, atmosphere, greenhouseOpacity,
                                                 atmospherePressureAtm,
                                                 surfaceGravity,
+                                                radiusKm,
                                                 hasAtmosphere);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
