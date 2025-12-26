@@ -14,6 +14,7 @@ struct SurfaceMaterial {
     double thermalConductivity;
     double density;
     double specificHeat;
+    double heatCapacity;
 };
 
 struct PlanetPreset {

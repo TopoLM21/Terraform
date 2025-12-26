@@ -3,6 +3,7 @@
 #include "atmospheric_circulation_model.h"
 #include "atmospheric_lapse_rate_model.h"
 #include "atmospheric_radiation_model.h"
+#include "surface_temperature_state.h"
 
 #include <QtCore/QtMath>
 
@@ -15,14 +16,10 @@ constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kSpaceTemperatureKelvin = 3.0;
-constexpr double kInternalHeatFlux = 0.05;
 constexpr double kSecondsPerEarthDay = 86400.0;
 constexpr double kBaseStepSeconds = 900.0;
 constexpr int kMinStepsPerDay = 48;
 constexpr int kMaxStepsPerDay = 20000;
-constexpr int kLayerCount = 8;
-constexpr double kSurfaceDepthMeters = 1.0;
-constexpr double kMaxSurfaceTemperature = 4000.0;
 
 double meanDailyCosine(double latitudeRadians, double declinationRadians) {
     const double tanProduct = std::tan(latitudeRadians) * std::tan(declinationRadians);
@@ -253,71 +250,35 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         // Признак освещенности: используем средний косинус, который уже учитывает полярную ночь.
         const bool hasInsolation = averageCosine > 0.0;
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
-        const double layerThickness = kSurfaceDepthMeters / kLayerCount;
-        const double density = qMax(1.0, material_.density);
-        const double specificHeat = qMax(1.0, material_.specificHeat);
-        const double thermalConductivity = qMax(1e-6, material_.thermalConductivity);
-        // Тепловая инерция I = sqrt(k * rho * c) описывает устойчивость поверхности к нагреву.
-        const double thermalInertia =
-            std::sqrt(thermalConductivity * density * specificHeat);
-        const double heatCapacity = density * specificHeat * layerThickness;
-        // Коэффициент теплопереноса между слоями: k / dz.
-        const double conductionFactor = thermalConductivity / layerThickness;
-        const double emissivity = qMax(0.0001, material_.emissivity);
-        const double spaceTemperaturePower = std::pow(kSpaceTemperatureKelvin, 4.0);
-        const double maxSolarFlux = segmentSolarConstant * (1.0 - material_.albedo);
+        const double albedo = qBound(0.0, material_.albedo, 1.0);
+        const double heatCapacity = qMax(1.0, material_.heatCapacity);
+        const double greenhouseOpacity = qBound(0.0, greenhouseOpacity_, 0.999);
         // Если атмосфера отсутствует, используем чистую поверхность без радиации/циркуляции.
-        const double meanSolarFlux =
-            segmentSolarConstant * averageCosine * (1.0 - material_.albedo);
-        const double baseMeanFlux = meanSolarFlux + kInternalHeatFlux;
-        double initialTemperature = std::pow(spaceTemperaturePower +
-                                                 baseMeanFlux /
-                                                     (emissivity * kStefanBoltzmannConstant),
-                                             0.25);
+        const double meanSolarFlux = segmentSolarConstant * averageCosine;
+        double initialTemperature = kSpaceTemperatureKelvin;
         // Атмосферный парниковый слой моделируется через эффективную оптическую толщину:
         // входящий поток ослабляется exp(-tau_sw), исходящий — exp(-tau_lw).
         std::optional<AtmosphericRadiationModel> radiationModel;
         if (hasAtmosphere) {
             radiationModel.emplace(atmosphere_, atmospherePressureAtm_, initialTemperature);
         }
-        const double outgoingTransmission =
-            hasAtmosphere ? radiationModel->outgoingTransmission() : 1.0;
-        const double greenhouseFactor = 1.0 - greenhouseOpacity_;
-        const double adjustedMeanFlux = (hasAtmosphere ? radiationModel->applyIncomingFlux(meanSolarFlux)
-                                                       : meanSolarFlux) +
-                                        kInternalHeatFlux;
-        initialTemperature = std::pow((spaceTemperaturePower +
-                                           adjustedMeanFlux /
-                                               (emissivity * kStefanBoltzmannConstant *
-                                                outgoingTransmission)) /
-                                          qMax(1e-6, greenhouseFactor),
-                                      0.25);
-        const double adjustedMaxSolarFlux =
-            hasAtmosphere ? radiationModel->applyIncomingFlux(maxSolarFlux) : maxSolarFlux;
-        const double maxRadiativeTemperature =
-            std::pow((spaceTemperaturePower +
-                          (adjustedMaxSolarFlux + kInternalHeatFlux) /
-                              (emissivity * kStefanBoltzmannConstant * outgoingTransmission)) /
-                         qMax(1e-6, greenhouseFactor),
-                     0.25);
-        // Ограничиваем шаг по времени по условиям устойчивости явной схемы:
-        // Δt_cond ~ (rho * c * dz^2) / (2 * k), Δt_rad ~ (rho * c * dz) / (4 * εσT^3).
-        // thermalInertia влияет на выбор Δt_cond через k, rho и c.
-        (void)thermalInertia;
-        const double conductionTimeStep = heatCapacity / (2.0 * conductionFactor);
-        const double effectiveEmissivity = emissivity * outgoingTransmission * greenhouseFactor;
-        const double radiativeTimeStep =
-            heatCapacity /
-            (4.0 * effectiveEmissivity * kStefanBoltzmannConstant *
-             std::pow(qMax(1.0, maxRadiativeTemperature), 3.0));
-        const double stableTimeStep = qMin(kBaseStepSeconds, qMin(conductionTimeStep, radiativeTimeStep));
+        const double greenhouseFactor = qMax(1e-6, 1.0 - greenhouseOpacity);
+        const double adjustedMeanFlux =
+            hasAtmosphere ? radiationModel->applyIncomingFlux(meanSolarFlux) : meanSolarFlux;
+        const double absorbedMeanFlux = qMax(0.0, adjustedMeanFlux * (1.0 - albedo));
+        if (absorbedMeanFlux > 0.0) {
+            initialTemperature =
+                std::pow(absorbedMeanFlux / (kStefanBoltzmannConstant * greenhouseFactor), 0.25);
+        }
+        const double stableTimeStep = kBaseStepSeconds;
         const int stepsPerDay = qBound(
             kMinStepsPerDay,
             static_cast<int>(std::ceil(dayLengthSeconds / stableTimeStep)),
             kMaxStepsPerDay);
         const double timeStepSeconds = dayLengthSeconds / stepsPerDay;
 
-        QVector<double> layers(kLayerCount, initialTemperature);
+        SurfaceTemperatureState temperatureState(initialTemperature, albedo, heatCapacity,
+                                                  greenhouseOpacity);
         double minimumTemperature = std::numeric_limits<double>::max();
         double maximumTemperature = 0.0;
         double meanDailySum = 0.0;
@@ -344,54 +305,15 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                                   std::cos(latitudeRadians) * std::cos(declinationRadians) *
                                       std::cos(hourAngle);
                 }
-                double solarFlux = segmentSolarConstant * qMax(0.0, solarFactor) *
-                                   (1.0 - material_.albedo);
+                double solarFlux = segmentSolarConstant * qMax(0.0, solarFactor);
                 if (hasAtmosphere) {
                     solarFlux = radiationModel->applyIncomingFlux(solarFlux);
                 }
 
-                QVector<double> nextLayers = layers;
-                for (int layer = 0; layer < kLayerCount; ++layer) {
-                    double conductionFlux = 0.0;
-                    if (layer > 0) {
-                        conductionFlux += conductionFactor * (layers[layer - 1] - layers[layer]);
-                    }
-                    if (layer + 1 < kLayerCount) {
-                        conductionFlux += conductionFactor * (layers[layer + 1] - layers[layer]);
-                    }
-
-                    double netFlux = conductionFlux;
-                    if (layer == 0) {
-                        const double surfaceTemperature = qMax(1.0, layers[layer]);
-                        const double surfacePower = std::pow(surfaceTemperature, 4.0);
-                        // Парниковая непрозрачность отражает долю ИК-излучения,
-                        // которую атмосфера возвращает обратно к поверхности.
-                        double radiationLoss =
-                            emissivity * kStefanBoltzmannConstant *
-                            (surfacePower * greenhouseFactor - spaceTemperaturePower);
-                        if (hasAtmosphere) {
-                            radiationLoss = radiationModel->applyOutgoingFlux(radiationLoss);
-                        }
-                        // Радиационный баланс: излучение в холодный космос не дает остыть до 0 K.
-                        netFlux += solarFlux - radiationLoss;
-                    }
-
-                    if (layer == kLayerCount - 1) {
-                        // Внутренний тепловой поток подается снизу, чтобы отрабатывать по слоям.
-                        netFlux += kInternalHeatFlux;
-                    }
-
-                    const double nextTemperature =
-                        layers[layer] + (netFlux * timeStepSeconds) / heatCapacity;
-                    // Ограничиваем диапазон, чтобы при очень длинных сутках не было числового переполнения.
-                    nextLayers[layer] = qBound(kSpaceTemperatureKelvin, nextTemperature,
-                                               kMaxSurfaceTemperature);
-                }
-
-                layers = nextLayers;
+                temperatureState.updateTemperature(solarFlux, timeStepSeconds);
 
                 if (cycle == kSpinupCycles - 1) {
-                    const double surfaceTemperature = layers[0];
+                    const double surfaceTemperature = temperatureState.temperatureKelvin();
                     minimumTemperature = qMin(minimumTemperature, surfaceTemperature);
                     maximumTemperature = qMax(maximumTemperature, surfaceTemperature);
                     meanDailySum += surfaceTemperature;
