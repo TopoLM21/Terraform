@@ -16,7 +16,8 @@ namespace {
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kSpaceTemperatureKelvin = 3.0;
+// Фоновая температура излучения (CMB) как "пол" для расчётов.
+constexpr double kSpaceTemperatureKelvin = 2.7;
 constexpr double kSecondsPerEarthDay = 86400.0;
 constexpr double kBaseStepSeconds = 900.0;
 constexpr int kMinStepsPerDay = 48;
@@ -364,7 +365,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const double timeStepSeconds = dayLengthSeconds / stepsPerDay;
 
         SurfaceTemperatureState temperatureState(initialTemperature, albedo, heatCapacity,
-                                                  greenhouseOpacity);
+                                                  greenhouseOpacity, kSpaceTemperatureKelvin);
         double minimumTemperature = std::numeric_limits<double>::max();
         double maximumTemperature = 0.0;
         double meanDailySum = 0.0;
