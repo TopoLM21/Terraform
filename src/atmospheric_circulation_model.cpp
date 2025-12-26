@@ -40,14 +40,42 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
 
     QVector<double> mixingCoefficients;
     mixingCoefficients.reserve(points.size());
-    double maxMixingCoefficient = 0.0;
     for (const auto &point : points) {
-        const double coefficient = meridionalMixingCoefficient(point.latitudeDegrees);
-        mixingCoefficients.push_back(coefficient);
-        maxMixingCoefficient = qMax(maxMixingCoefficient, coefficient);
+        mixingCoefficients.push_back(meridionalMixingCoefficient(point.latitudeDegrees));
     }
     const int transportSteps = qMax(1, meridionalTransportSteps_);
     const double cellSizeDegrees = kCellSizeDegrees;
+    const double dayLengthSeconds = qMax(0.1, dayLengthDays_) * 86400.0;
+    const double rotationOmega = 2.0 * M_PI / dayLengthSeconds;
+    const double windScalingAlpha = 0.12;
+    const double minCoriolis = 1.0e-6;
+    QVector<double> totalMixingCoefficients;
+    totalMixingCoefficients.reserve(mixingCoefficients.size());
+    double maxMixingCoefficient = 0.0;
+    for (int i = 0; i < mixingCoefficients.size(); ++i) {
+        double localGradient = 0.0;
+        if (i > 0 && i + 1 < meanDaily.size()) {
+            localGradient =
+                (meanDaily.at(i + 1) - meanDaily.at(i - 1)) / (2.0 * cellSizeDegrees);
+        } else if (i + 1 < meanDaily.size()) {
+            localGradient = (meanDaily.at(i + 1) - meanDaily.at(i)) / cellSizeDegrees;
+        } else if (i > 0) {
+            localGradient = (meanDaily.at(i) - meanDaily.at(i - 1)) / cellSizeDegrees;
+        }
+        const double latitudeRadians = qDegreesToRadians(points.at(i).latitudeDegrees);
+        const double coriolis = 2.0 * rotationOmega * std::sin(latitudeRadians);
+        // Упрощенная оценка скорости ветра:
+        // U ~ alpha * |dT/dy| / f, где f = 2 * Omega * sin(phi).
+        // Это не динамическая модель, а эвристика связи температурного градиента и переноса.
+        const double windSpeed =
+            windScalingAlpha * std::abs(localGradient) / qMax(minCoriolis, std::abs(coriolis));
+        // Переводим скорость ветра в эффективный коэффициент диффузии K ~ U * L,
+        // где L — характерный масштаб переноса (ширина широтной ячейки).
+        const double windMixingCoefficient = windSpeed * cellSizeDegrees;
+        const double coefficient = mixingCoefficients.at(i) + windMixingCoefficient;
+        totalMixingCoefficients.push_back(coefficient);
+        maxMixingCoefficient = qMax(maxMixingCoefficient, coefficient);
+    }
     // Условие устойчивости явной схемы диффузии: dt <= dx^2 / (2K).
     // Физически это означает, что перенос за один шаг не должен "перепрыгивать"
     // через соседнюю ячейку широт, иначе профиль температур начнет колебаться.
@@ -56,8 +84,8 @@ QVector<TemperatureRangePoint> AtmosphericCirculationModel::applyHeatTransport(
             ? (0.9 * cellSizeDegrees * cellSizeDegrees / (2.0 * maxMixingCoefficient))
             : 0.0;
     QVector<double> diffusionFactors;
-    diffusionFactors.reserve(mixingCoefficients.size());
-    for (const double coefficient : mixingCoefficients) {
+    diffusionFactors.reserve(totalMixingCoefficients.size());
+    for (const double coefficient : totalMixingCoefficients) {
         const double diffusionFactor =
             (maxMixingCoefficient > 0.0)
                 ? (coefficient * transportTimeStep / (cellSizeDegrees * cellSizeDegrees))
