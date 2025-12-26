@@ -12,6 +12,7 @@
 
 struct TemperatureRangePoint {
     double latitudeDegrees;
+    bool hasInsolation = false;
     double minimumKelvin;
     double maximumKelvin;
     double meanDailyKelvin;

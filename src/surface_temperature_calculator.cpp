@@ -247,6 +247,8 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                 // В приливной синхронизации угол от подсолнечной точки равен зенитному углу,
                 // поэтому cos(угол) задает локальную среднюю инсоляцию без суточного вращения.
                 : qMax(0.0, std::cos(subsolarAngleRadians));
+        // Признак освещенности: используем средний косинус, который уже учитывает полярную ночь.
+        const bool hasInsolation = averageCosine > 0.0;
         const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * kSecondsPerEarthDay;
         const double layerThickness = kSurfaceDepthMeters / kLayerCount;
         const double density = qMax(1.0, material_.density);
@@ -414,6 +416,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
 
         TemperatureRangePoint point;
         point.latitudeDegrees = axisDegrees;
+        point.hasInsolation = hasInsolation;
         point.minimumKelvin = minimumTemperature;
         point.maximumKelvin = maximumTemperature;
         point.meanDailyKelvin = meanDailyTemperature;
