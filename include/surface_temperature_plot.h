@@ -3,8 +3,9 @@
 #include "surface_temperature_calculator.h"
 #include "rotation_mode.h"
 
-#include <qwt/qwt_plot.h>
+#include <qwt-qt5/qwt_plot.h>
 #include <QtCore/QString>
+#include <QPen>
 
 class QwtPlotCurve;
 class QwtPlotGrid;
