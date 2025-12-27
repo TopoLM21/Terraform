@@ -363,8 +363,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         // A = sqrt(period) * 140 / sqrt(inertia).
         const double atmDamping = pressureAtm * 20.0;
         const double waterInertia = potentialCoverage * 120.0;
+        // Суточная инерция - это эффективный (не строго физический) параметр
+        // модели, поэтому используем отдельное поле material_.dailyThermalInertia.
         const double totalInertia =
-            qMax(1.0, material_.heatCapacity + waterInertia + atmDamping);
+            qMax(1.0, material_.dailyThermalInertia + waterInertia + atmDamping);
         double amplitude = !isTidallyLocked
                                ? (std::sqrt(qMax(0.01, dayLengthDays_)) * 140.0) /
                                      std::sqrt(totalInertia)
