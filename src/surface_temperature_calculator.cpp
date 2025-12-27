@@ -239,10 +239,14 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
     const double surfaceGravity = qMax(0.0, surfaceGravity_);
     const double totalGas = atmosphere_.totalMassGigatons();
-    const double pressureAtm =
+    const double pressureFromMass =
         (totalGas > 0.0)
             ? (totalGas / kEarthAtmosphereMassGt) * (surfaceGravity / 9.8) / areaScale
             : 0.0;
+    // Если масса газов не задана, берём давление из UI-настройки атмосферы,
+    // чтобы демпфирование и связанные формулы работали даже без явной массы.
+    const double pressureAtm =
+        (totalGas > 0.0) ? pressureFromMass : qMax(0.0, atmospherePressureAtm_);
     const double co2Mass = gasMassGigatons(atmosphere_, QStringLiteral("co2"));
     const double waterGigatons = estimateSurfaceWaterGigatons(material_);
     const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
