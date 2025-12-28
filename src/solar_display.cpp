@@ -1640,6 +1640,49 @@ private:
         }
     }
 
+    void startTemperatureElapsedUi(int requestId, const QPointer<QProgressDialog> &dialogGuard) {
+        if (temperatureUiTimer_ && temperatureUiTimer_->isActive() &&
+            requestId == temperatureRequestId_) {
+            return;
+        }
+
+        temperatureElapsed_.start();
+
+        if (!temperatureUiTimer_) {
+            temperatureUiTimer_ = new QTimer(this);
+            temperatureUiTimer_->setInterval(1000);
+        }
+        temperatureUiTimer_->stop();
+        temperatureUiTimer_->disconnect();
+        auto updateElapsedLabel = [this, dialogGuard, requestId]() {
+            if (requestId != temperatureRequestId_) {
+                return;
+            }
+            const qint64 elapsedSeconds = temperatureElapsed_.elapsed() / 1000;
+            const int minutes = static_cast<int>(elapsedSeconds / 60);
+            const int seconds = static_cast<int>(elapsedSeconds % 60);
+            const QString pauseSuffix =
+                temperaturePauseFlag_.load() ? QStringLiteral(" (пауза)") : QString();
+            if (dialogGuard) {
+                dialogGuard->setLabelText(
+                    QStringLiteral("Вычисление температурного профиля... %1:%2%3")
+                        .arg(minutes, 2, 10, QLatin1Char('0'))
+                        .arg(seconds, 2, 10, QLatin1Char('0'))
+                        .arg(pauseSuffix));
+            }
+            if (temperatureElapsedLabel_) {
+                temperatureElapsedLabel_->setText(
+                    QStringLiteral("Прошло: %1:%2%3")
+                        .arg(minutes, 2, 10, QLatin1Char('0'))
+                        .arg(seconds, 2, 10, QLatin1Char('0'))
+                        .arg(pauseSuffix));
+            }
+        };
+        connect(temperatureUiTimer_, &QTimer::timeout, this, updateElapsedLabel);
+        updateElapsedLabel();
+        temperatureUiTimer_->start();
+    }
+
     void updateTemperaturePlot() {
         cancelTemperatureCalculation();
 
@@ -1766,6 +1809,7 @@ private:
                                                                   surfaceGravity,
                                                                   radiusKm,
                                                                   false);
+                startTemperatureElapsedUi(requestId, QPointer<QProgressDialog>());
                 auto *surfaceWatcher =
                     new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
                 connect(surfaceWatcher,
@@ -1773,6 +1817,13 @@ private:
                         this,
                         [this, surfaceWatcher, requestId, cancelFlag, surfaceOnlyCacheKey]() {
                             surfaceWatcher->deleteLater();
+                            const bool shouldFinalizeElapsed =
+                                requestId == temperatureRequestId_ &&
+                                (!temperatureProgressDialog_ ||
+                                 !temperatureProgressDialog_->isVisible());
+                            if (shouldFinalizeElapsed && temperatureUiTimer_) {
+                                temperatureUiTimer_->stop();
+                            }
                             if (requestId != temperatureRequestId_ || cancelFlag->load()) {
                                 return;
                             }
@@ -1786,6 +1837,20 @@ private:
                                 TemperatureCacheEntry{lastOrbitSegments_, result});
                             rebuildSurfaceOnlyTemperatureSummary();
                             updateSurfaceGridTemperatures();
+                            if (shouldFinalizeElapsed && temperatureElapsedLabel_) {
+                                const qint64 elapsedSeconds =
+                                    temperatureElapsed_.elapsed() / 1000;
+                                const int minutes = static_cast<int>(elapsedSeconds / 60);
+                                const int seconds = static_cast<int>(elapsedSeconds % 60);
+                                const QString pauseSuffix = temperaturePauseFlag_.load()
+                                    ? QStringLiteral(" (пауза)")
+                                    : QString();
+                                temperatureElapsedLabel_->setText(
+                                    QStringLiteral("Прошло: %1:%2%3")
+                                        .arg(minutes, 2, 10, QLatin1Char('0'))
+                                        .arg(seconds, 2, 10, QLatin1Char('0'))
+                                        .arg(pauseSuffix));
+                            }
                         });
 
                 const std::atomic_bool *pauseFlag = &temperaturePauseFlag_;
@@ -1852,6 +1917,7 @@ private:
                     const int requestId = ++temperatureRequestId_;
                     temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
                     const auto cancelFlag = temperatureCancelFlag_;
+                    resetTemperatureUiState();
                     startSurfaceOnlyCalculation(requestId, cancelFlag, lastOrbitSegments_);
                 }
             }
@@ -1870,7 +1936,6 @@ private:
         const int totalProgress = totalLatitudes * segmentCount;
 
         resetTemperatureUiState();
-        temperatureElapsed_.start();
 
         auto *progressDialog = ensureTemperatureProgressDialog();
         progressDialog->setRange(0, totalProgress);
@@ -1879,37 +1944,7 @@ private:
 
         QPointer<QProgressDialog> dialogGuard(progressDialog);
         QPointer<SolarCalculatorWidget> widgetGuard(this);
-        if (!temperatureUiTimer_) {
-            temperatureUiTimer_ = new QTimer(this);
-            temperatureUiTimer_->setInterval(1000);
-        }
-        temperatureUiTimer_->stop();
-        temperatureUiTimer_->disconnect();
-        auto updateElapsedLabel = [this, dialogGuard, requestId]() {
-            if (!dialogGuard || requestId != temperatureRequestId_) {
-                return;
-            }
-            const qint64 elapsedSeconds = temperatureElapsed_.elapsed() / 1000;
-            const int minutes = static_cast<int>(elapsedSeconds / 60);
-            const int seconds = static_cast<int>(elapsedSeconds % 60);
-            const QString pauseSuffix =
-                temperaturePauseFlag_.load() ? QStringLiteral(" (пауза)") : QString();
-            dialogGuard->setLabelText(
-                QStringLiteral("Вычисление температурного профиля... %1:%2%3")
-                    .arg(minutes, 2, 10, QLatin1Char('0'))
-                    .arg(seconds, 2, 10, QLatin1Char('0'))
-                    .arg(pauseSuffix));
-            if (temperatureElapsedLabel_) {
-                temperatureElapsedLabel_->setText(
-                    QStringLiteral("Прошло: %1:%2%3")
-                        .arg(minutes, 2, 10, QLatin1Char('0'))
-                        .arg(seconds, 2, 10, QLatin1Char('0'))
-                        .arg(pauseSuffix));
-            }
-        };
-        connect(temperatureUiTimer_, &QTimer::timeout, this, updateElapsedLabel);
-        updateElapsedLabel();
-        temperatureUiTimer_->start();
+        startTemperatureElapsedUi(requestId, dialogGuard);
         // Вызов из фонового потока: защищаемся от удаления виджета во время вычисления.
         auto progressCallback = [widgetGuard, dialogGuard, requestId](int processed, int total) {
             if (!widgetGuard) {
