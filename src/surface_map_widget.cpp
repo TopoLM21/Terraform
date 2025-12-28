@@ -6,8 +6,8 @@
 #include <QtMath>
 
 namespace {
-constexpr double kMaxX = 2.0 * qSqrt(2.0);
-constexpr double kMaxY = qSqrt(2.0);
+const double kMaxX = 2.0 * qSqrt(2.0);
+const double kMaxY = qSqrt(2.0);
 
 QRgb encodeId(int id) {
     const int value = id + 1;

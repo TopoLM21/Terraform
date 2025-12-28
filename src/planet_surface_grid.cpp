@@ -4,7 +4,7 @@
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kGoldenAngle = kPi * (3.0 - qSqrt(5.0));
+const double kGoldenAngle = kPi * (3.0 - qSqrt(5.0));
 
 double radiansToDegrees(double radians) {
     return radians * 180.0 / kPi;
