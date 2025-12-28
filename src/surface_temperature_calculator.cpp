@@ -326,13 +326,17 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     const double tGlobalAvg = tEff * ghMult;
 
     const bool isTidallyLocked = rotationMode_ == RotationMode::TidalLocked;
-    const int stepsPerDay = isTidallyLocked ? 1 : kDailyTimeSteps;
+    // Подбираем число шагов по длительности суток, чтобы шаг по времени не разрастался
+    // на медленно вращающихся планетах (например, Меркурий).
+    const int scaledStepsPerDay = qRound(dayLengthDays_ * 24.0);
+    const int stepsPerDay = qMax(kDailyTimeSteps, scaledStepsPerDay);
     const int spinUpDays = isTidallyLocked ? 2 : kSpinUpDays;
     const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * 86400.0;
     const double timeStepSeconds =
         (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
-    const double globalAverageInsolation =
-        segmentSolarConstant * (1.0 - finalAlbedo) / 4.0;
+    // Глобальный средний поток перед альбедо: отражение применяется в SurfaceTemperatureState,
+    // чтобы избежать повторного учета в суточной итерации.
+    const double globalAverageInsolation = segmentSolarConstant / 4.0;
 
     for (int i = 0; i < latitudePoints; ++i) {
         if (cancelFlag && cancelFlag->load()) {
@@ -406,8 +410,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                 std::sin(latitudeRadians) * std::sin(declinationRadians) +
                 std::cos(latitudeRadians) * std::cos(declinationRadians) *
                     std::cos(hourAngle);
+            // Суточная инсоляция до учета альбедо: альбедо применяется внутри
+            // SurfaceTemperatureState::updateTemperature().
             const double localInsolation =
-                segmentSolarConstant * qMax(0.0, cosZenith) * (1.0 - finalAlbedo);
+                segmentSolarConstant * qMax(0.0, cosZenith);
             const double blendedInsolation =
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;

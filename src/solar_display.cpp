@@ -81,6 +81,7 @@ struct TemperatureCacheKey {
     double surfaceGravity = 0.0;
     double greenhouseOpacity = 0.0;
     double dayLength = 0.0;
+    double referenceDistanceAU = 0.0;
     double semiMajorAxis = 0.0;
     double eccentricity = 0.0;
     double obliquity = 0.0;
@@ -97,6 +98,7 @@ struct TemperatureCacheKey {
                surfaceGravity == other.surfaceGravity &&
                greenhouseOpacity == other.greenhouseOpacity &&
                dayLength == other.dayLength &&
+               referenceDistanceAU == other.referenceDistanceAU &&
                semiMajorAxis == other.semiMajorAxis &&
                eccentricity == other.eccentricity &&
                obliquity == other.obliquity &&
@@ -127,6 +129,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.surfaceGravity), seed);
     seed = qHash(hashDoubleBits(key.greenhouseOpacity), seed);
     seed = qHash(hashDoubleBits(key.dayLength), seed);
+    seed = qHash(hashDoubleBits(key.referenceDistanceAU), seed);
     seed = qHash(hashDoubleBits(key.semiMajorAxis), seed);
     seed = qHash(hashDoubleBits(key.eccentricity), seed);
     seed = qHash(hashDoubleBits(key.obliquity), seed);
@@ -573,6 +576,7 @@ private:
                 .arg(details));
 
         lastSolarConstant_ = totalFlux;
+        lastSolarConstantDistanceAU_ = semiMajorAxis;
         hasSolarConstant_ = true;
         updateTemperaturePlot();
     }
@@ -653,6 +657,7 @@ private:
     int precision_ = kDefaultPrecision;
     QSet<QString> presetPlanetNames_;
     double lastSolarConstant_ = 0.0;
+    double lastSolarConstantDistanceAU_ = 0.0;
     bool hasSolarConstant_ = false;
     QVector<OrbitSegment> lastOrbitSegments_;
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
@@ -1421,6 +1426,13 @@ private:
             return;
         }
 
+        // referenceDistanceAU — расстояние, на котором была рассчитана lastSolarConstant_.
+        const double referenceDistanceAU = lastSolarConstantDistanceAU_;
+        if (referenceDistanceAU <= 0.0) {
+            clearTemperatureSegments();
+            return;
+        }
+
         const double dayLength = planetComboBox_->currentData(kRoleDayLength).toDouble();
         if (dayLength <= 0.0) {
             clearTemperatureSegments();
@@ -1472,6 +1484,7 @@ private:
                                             surfaceGravity,
                                             greenhouseOpacity,
                                             dayLength,
+                                            referenceDistanceAU,
                                             semiMajorAxis,
                                             eccentricity,
                                             obliquity,
@@ -1570,14 +1583,14 @@ private:
                            latitudePointCount,
                            segmentProgress,
                            cancelFlag,
-                           semiMajorAxis,
+                           referenceDistanceAU,
                            obliquity,
                            perihelionArgument](const OrbitSegment &segment) {
             if (cancelFlag && cancelFlag->load()) {
                 return QVector<TemperatureRangePoint>{};
             }
             return calculator.temperatureRangesForOrbitSegment(segment,
-                                                               semiMajorAxis,
+                                                               referenceDistanceAU,
                                                                obliquity,
                                                                perihelionArgument,
                                                                latitudePointCount,
@@ -1612,6 +1625,7 @@ private:
     void resetSolarConstant() {
         hasSolarConstant_ = false;
         lastSolarConstant_ = 0.0;
+        lastSolarConstantDistanceAU_ = 0.0;
         resultLabel_->setText(
             QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."));
         clearTemperatureCache();
