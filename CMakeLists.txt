@@ -21,6 +21,7 @@ add_executable(solar_constant
     include/planet_surface_point.h
     include/segment_selector_widget.h
     include/surface_temperature_state.h
+    include/surface_temperature_scale_widget.h
     include/surface_map_widget.h
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
@@ -39,6 +40,7 @@ add_executable(solar_constant
     src/solar_display.cpp
     src/surface_map_widget.cpp
     src/surface_temperature_calculator.cpp
+    src/surface_temperature_scale_widget.cpp
     src/surface_temperature_state.cpp
     src/surface_temperature_plot.cpp
     src/temperature_plot_tracker.cpp
