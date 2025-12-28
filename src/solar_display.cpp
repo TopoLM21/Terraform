@@ -8,6 +8,7 @@
 #include "surface_temperature_calculator.h"
 #include "surface_temperature_plot.h"
 #include "surface_map_widget.h"
+#include "surface_temperature_scale_widget.h"
 #include "planet_surface_grid.h"
 
 #include <QtCore/QCommandLineOption>
@@ -387,6 +388,25 @@ public:
         surfaceMapWidget_ = new SurfaceMapWidget(this);
         surfaceMapWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
         surfaceMapWidget_->setGrid(&surfaceGrid_);
+        surfaceMinTemperatureLabel_ = new QLabel(QStringLiteral("Мин: —"), this);
+        surfaceMaxTemperatureLabel_ = new QLabel(QStringLiteral("Макс: —"), this);
+        temperatureScaleWidget_ = new SurfaceTemperatureScaleWidget(this);
+        temperatureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        temperatureScaleWidget_->setMinimumHeight(18);
+        auto *surfaceLegendTopLayout = new QHBoxLayout();
+        surfaceLegendTopLayout->addWidget(surfaceMinTemperatureLabel_);
+        surfaceLegendTopLayout->addStretch();
+        surfaceLegendTopLayout->addWidget(surfaceMaxTemperatureLabel_);
+        auto *surfaceLegendBottomLayout = new QHBoxLayout();
+        surfaceLegendBottomLayout->addStretch();
+        surfaceLegendBottomLayout->addWidget(temperatureScaleWidget_, 1);
+        surfaceLegendBottomLayout->addStretch();
+        auto *surfaceMapLayout = new QVBoxLayout();
+        surfaceMapLayout->addLayout(surfaceLegendTopLayout);
+        surfaceMapLayout->addWidget(surfaceMapWidget_, 1);
+        surfaceMapLayout->addLayout(surfaceLegendBottomLayout);
+        auto *surfaceMapContainer = new QWidget(this);
+        surfaceMapContainer->setLayout(surfaceMapLayout);
         auto *plotGroupBox = new QGroupBox(QStringLiteral("Температурный профиль"), this);
         auto *plotLayout = new QVBoxLayout(plotGroupBox);
         auto *segmentLayout = new QHBoxLayout();
@@ -413,7 +433,7 @@ public:
         rightTabs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
         rightTabs->addTab(plotGroupBox, tr("Температура"));
         rightTabs->addTab(atmosphereWidget_, tr("Атмосфера"));
-        rightTabs->addTab(surfaceMapWidget_, tr("Поверхность"));
+        rightTabs->addTab(surfaceMapContainer, tr("Поверхность"));
 
         auto *rightLayout = new QVBoxLayout();
         rightLayout->addWidget(rightTabs, 1);
@@ -659,6 +679,9 @@ private:
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
     SurfaceMapWidget *surfaceMapWidget_ = nullptr;
+    QLabel *surfaceMinTemperatureLabel_ = nullptr;
+    QLabel *surfaceMaxTemperatureLabel_ = nullptr;
+    SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
     QElapsedTimer temperatureElapsed_;
@@ -676,6 +699,9 @@ private:
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
     QVector<TemperatureSummaryPoint> temperatureSummary_;
     bool lastTemperatureUsesAtmosphere_ = false;
+    double surfaceMinTemperatureK_ = 0.0;
+    double surfaceMaxTemperatureK_ = 0.0;
+    bool hasSurfaceTemperatureRange_ = false;
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
@@ -1416,6 +1442,7 @@ private:
         rebuildSurfaceGrid();
         if (surfaceGrid_.points().isEmpty()) {
             surfaceMapWidget_->setGrid(&surfaceGrid_);
+            updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             return;
         }
 
@@ -1431,6 +1458,7 @@ private:
 
         if (!summarySource && !segmentSource) {
             surfaceMapWidget_->setGrid(&surfaceGrid_);
+            updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             return;
         }
 
@@ -1494,7 +1522,29 @@ private:
         surfaceMapWidget_->setGrid(&surfaceGrid_);
         if (minTemperature <= maxTemperature) {
             surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
+            updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
+        } else {
+            updateSurfaceTemperatureLegend(false, 0.0, 0.0);
         }
+    }
+
+    void updateSurfaceTemperatureLegend(bool hasRange, double minTemperature, double maxTemperature) {
+        hasSurfaceTemperatureRange_ = hasRange;
+        if (!hasRange) {
+            surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+            surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+            temperatureScaleWidget_->clearRange();
+            return;
+        }
+
+        surfaceMinTemperatureK_ = minTemperature;
+        surfaceMaxTemperatureK_ = maxTemperature;
+        const QLocale locale;
+        surfaceMinTemperatureLabel_->setText(
+            QStringLiteral("Мин: %1 K").arg(locale.toString(minTemperature, 'f', 1)));
+        surfaceMaxTemperatureLabel_->setText(
+            QStringLiteral("Макс: %1 K").arg(locale.toString(maxTemperature, 'f', 1)));
+        temperatureScaleWidget_->setTemperatureRange(minTemperature, maxTemperature);
     }
 
     QProgressDialog *ensureTemperatureProgressDialog() {
