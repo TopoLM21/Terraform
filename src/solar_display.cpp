@@ -713,7 +713,9 @@ private:
     bool hasSolarConstant_ = false;
     QVector<OrbitSegment> lastOrbitSegments_;
     QVector<QVector<TemperatureRangePoint>> lastTemperatureSegments_;
+    QVector<QVector<TemperatureRangePoint>> lastTemperatureSegmentsSurfaceOnly_;
     QVector<TemperatureSummaryPoint> temperatureSummary_;
+    QVector<TemperatureSummaryPoint> temperatureSummarySurfaceOnly_;
     bool lastTemperatureUsesAtmosphere_ = false;
     double surfaceMinTemperatureK_ = 0.0;
     double surfaceMaxTemperatureK_ = 0.0;
@@ -721,6 +723,7 @@ private:
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
+    QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCacheSurfaceOnly_;
     std::optional<StellarCacheKey> lastStellarKey_;
 
     void updateTemperaturePauseUi(bool paused) {
@@ -1368,14 +1371,16 @@ private:
         }
     }
 
-    void rebuildTemperatureSummary() {
-        temperatureSummary_.clear();
-        if (lastTemperatureSegments_.isEmpty()) {
+    void rebuildTemperatureSummaryFromSegments(
+        const QVector<QVector<TemperatureRangePoint>> &segments,
+        QVector<TemperatureSummaryPoint> *summary) {
+        summary->clear();
+        if (segments.isEmpty()) {
             return;
         }
 
-        const int latitudeCount = lastTemperatureSegments_.front().size();
-        temperatureSummary_.reserve(latitudeCount);
+        const int latitudeCount = segments.front().size();
+        summary->reserve(latitudeCount);
 
         for (int i = 0; i < latitudeCount; ++i) {
             double minimumOverall = std::numeric_limits<double>::max();
@@ -1386,7 +1391,7 @@ private:
             int samples = 0;
             double latitudeDegrees = 0.0;
 
-            for (const auto &segment : lastTemperatureSegments_) {
+            for (const auto &segment : segments) {
                 if (i >= segment.size()) {
                     continue;
                 }
@@ -1419,8 +1424,17 @@ private:
             summaryPoint.meanAnnualDayCelsius = summaryPoint.meanAnnualDayKelvin - kKelvinOffset;
             summaryPoint.meanAnnualNightCelsius =
                 summaryPoint.meanAnnualNightKelvin - kKelvinOffset;
-            temperatureSummary_.push_back(summaryPoint);
+            summary->push_back(summaryPoint);
         }
+    }
+
+    void rebuildTemperatureSummary() {
+        rebuildTemperatureSummaryFromSegments(lastTemperatureSegments_, &temperatureSummary_);
+    }
+
+    void rebuildSurfaceOnlyTemperatureSummary() {
+        rebuildTemperatureSummaryFromSegments(lastTemperatureSegmentsSurfaceOnly_,
+                                              &temperatureSummarySurfaceOnly_);
     }
 
     void updateTemperaturePlotForSelectedSegment() {
@@ -1444,7 +1458,9 @@ private:
     void clearTemperatureSegments() {
         lastOrbitSegments_.clear();
         lastTemperatureSegments_.clear();
+        lastTemperatureSegmentsSurfaceOnly_.clear();
         temperatureSummary_.clear();
+        temperatureSummarySurfaceOnly_.clear();
         lastTemperatureUsesAtmosphere_ = false;
         segmentSelectorWidget_->setSegments({});
         segmentSelectorWidget_->setEnabled(false);
@@ -1453,6 +1469,7 @@ private:
 
     void clearTemperatureCache() {
         temperatureCache_.clear();
+        temperatureCacheSurfaceOnly_.clear();
     }
 
     void rebuildSurfaceGrid() {
@@ -1477,14 +1494,15 @@ private:
             return;
         }
 
+        // Вкладка «Поверхность» всегда использует модель поверхности без атмосферных поправок.
         const QVector<TemperatureSummaryPoint> *summarySource = nullptr;
-        if (!temperatureSummary_.isEmpty()) {
-            summarySource = &temperatureSummary_;
+        if (!temperatureSummarySurfaceOnly_.isEmpty()) {
+            summarySource = &temperatureSummarySurfaceOnly_;
         }
 
         const QVector<TemperatureRangePoint> *segmentSource = nullptr;
-        if (!summarySource && !lastTemperatureSegments_.isEmpty()) {
-            segmentSource = &lastTemperatureSegments_.first();
+        if (!summarySource && !lastTemperatureSegmentsSurfaceOnly_.isEmpty()) {
+            segmentSource = &lastTemperatureSegmentsSurfaceOnly_.first();
         }
 
         if (!summarySource && !segmentSource) {
@@ -1707,6 +1725,106 @@ private:
                                             latitudePointCount,
                                             segmentCount,
                                             rotationMode};
+        const AtmosphereComposition surfaceOnlyAtmosphere;
+        const TemperatureCacheKey surfaceOnlyCacheKey{lastSolarConstant_,
+                                                      material->id,
+                                                      atmosphereSignature(surfaceOnlyAtmosphere),
+                                                      0.0,
+                                                      surfaceGravity,
+                                                      0.0,
+                                                      dayLength,
+                                                      referenceDistanceAU,
+                                                      semiMajorAxis,
+                                                      eccentricity,
+                                                      obliquity,
+                                                      perihelionArgument,
+                                                      latitudePointCount,
+                                                      segmentCount,
+                                                      rotationMode};
+        auto startSurfaceOnlyCalculation =
+            [this,
+             material,
+             dayLength,
+             rotationMode,
+             surfaceOnlyAtmosphere,
+             surfaceGravity,
+             radiusKm,
+             latitudePointCount,
+             referenceDistanceAU,
+             obliquity,
+             perihelionArgument,
+             surfaceOnlyCacheKey](int requestId,
+                                  const std::shared_ptr<std::atomic_bool> &cancelFlag,
+                                  const QVector<OrbitSegment> &segments) {
+                SurfaceTemperatureCalculator surfaceOnlyCalculator(lastSolarConstant_,
+                                                                  *material,
+                                                                  dayLength,
+                                                                  rotationMode,
+                                                                  surfaceOnlyAtmosphere,
+                                                                  0.0,
+                                                                  0.0,
+                                                                  surfaceGravity,
+                                                                  radiusKm,
+                                                                  false);
+                auto *surfaceWatcher =
+                    new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
+                connect(surfaceWatcher,
+                        &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished,
+                        this,
+                        [this, surfaceWatcher, requestId, cancelFlag, surfaceOnlyCacheKey]() {
+                            surfaceWatcher->deleteLater();
+                            if (requestId != temperatureRequestId_ || cancelFlag->load()) {
+                                return;
+                            }
+                            const auto result = surfaceWatcher->result();
+                            if (result.isEmpty()) {
+                                return;
+                            }
+                            lastTemperatureSegmentsSurfaceOnly_ = result;
+                            temperatureCacheSurfaceOnly_.insert(
+                                surfaceOnlyCacheKey,
+                                TemperatureCacheEntry{lastOrbitSegments_, result});
+                            rebuildSurfaceOnlyTemperatureSummary();
+                            updateSurfaceGridTemperatures();
+                        });
+
+                const std::atomic_bool *pauseFlag = &temperaturePauseFlag_;
+                auto mapSegmentSurfaceOnly =
+                    [surfaceOnlyCalculator,
+                     latitudePointCount,
+                     cancelFlag,
+                     pauseFlag,
+                     referenceDistanceAU,
+                     obliquity,
+                     perihelionArgument](const OrbitSegment &segment) {
+                        if (cancelFlag && cancelFlag->load()) {
+                            return QVector<TemperatureRangePoint>{};
+                        }
+                        auto noopProgress = [](int, int) {};
+                        return surfaceOnlyCalculator.temperatureRangesForOrbitSegment(
+                            segment,
+                            referenceDistanceAU,
+                            obliquity,
+                            perihelionArgument,
+                            latitudePointCount,
+                            noopProgress,
+                            cancelFlag.get(),
+                            pauseFlag);
+                    };
+
+                surfaceWatcher->setFuture(QtConcurrent::run(
+                    [segments, mapSegmentSurfaceOnly, cancelFlag]() {
+                        QVector<QVector<TemperatureRangePoint>> results;
+                        results.reserve(segments.size());
+                        for (const auto &segment : segments) {
+                            if (cancelFlag && cancelFlag->load()) {
+                                break;
+                            }
+                            results.push_back(mapSegmentSurfaceOnly(segment));
+                        }
+                        return results;
+                    }));
+            };
         const auto cached = temperatureCache_.constFind(cacheKey);
         if (cached != temperatureCache_.constEnd()) {
             // Кэш нужен для быстрого переключения сегментов/планет без повторного расчёта.
@@ -1716,11 +1834,34 @@ private:
             rebuildTemperatureSummary();
             updateSegmentComboBox();
             updateTemperaturePlotForSelectedSegment();
+            if (!hasAtmosphere) {
+                lastTemperatureSegmentsSurfaceOnly_ = lastTemperatureSegments_;
+                rebuildSurfaceOnlyTemperatureSummary();
+                temperatureCacheSurfaceOnly_.insert(
+                    surfaceOnlyCacheKey,
+                    TemperatureCacheEntry{lastOrbitSegments_, lastTemperatureSegments_});
+            } else {
+                const auto surfaceCached =
+                    temperatureCacheSurfaceOnly_.constFind(surfaceOnlyCacheKey);
+                if (surfaceCached != temperatureCacheSurfaceOnly_.constEnd()) {
+                    lastTemperatureSegmentsSurfaceOnly_ = surfaceCached->temperatureSegments;
+                    rebuildSurfaceOnlyTemperatureSummary();
+                } else {
+                    lastTemperatureSegmentsSurfaceOnly_.clear();
+                    temperatureSummarySurfaceOnly_.clear();
+                    const int requestId = ++temperatureRequestId_;
+                    temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
+                    const auto cancelFlag = temperatureCancelFlag_;
+                    startSurfaceOnlyCalculation(requestId, cancelFlag, lastOrbitSegments_);
+                }
+            }
             updateSurfaceGridTemperatures();
             return;
         }
 
         lastTemperatureSegments_.clear();
+        lastTemperatureSegmentsSurfaceOnly_.clear();
+        temperatureSummarySurfaceOnly_.clear();
 
         const int requestId = ++temperatureRequestId_;
         temperatureCancelFlag_ = std::make_shared<std::atomic_bool>(false);
@@ -1796,7 +1937,13 @@ private:
                                                 hasAtmosphere);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
-                [this, watcher, requestId, cancelFlag, cacheKey]() {
+                [this,
+                 watcher,
+                 requestId,
+                 cancelFlag,
+                 cacheKey,
+                 surfaceOnlyCacheKey,
+                 hasAtmosphere]() {
             watcher->deleteLater();
             if (requestId == temperatureRequestId_) {
                 resetTemperatureUiState();
@@ -1814,6 +1961,13 @@ private:
             rebuildTemperatureSummary();
             updateSegmentComboBox();
             updateTemperaturePlotForSelectedSegment();
+            if (!hasAtmosphere) {
+                lastTemperatureSegmentsSurfaceOnly_ = result;
+                temperatureCacheSurfaceOnly_.insert(
+                    surfaceOnlyCacheKey,
+                    TemperatureCacheEntry{lastOrbitSegments_, result});
+                rebuildSurfaceOnlyTemperatureSummary();
+            }
             updateSurfaceGridTemperatures();
         });
 
@@ -1852,6 +2006,10 @@ private:
                                                                cancelFlag.get(),
                                                                pauseFlag);
         };
+
+        if (hasAtmosphere) {
+            startSurfaceOnlyCalculation(requestId, cancelFlag, segments);
+        }
 
         // В Qt 5.15 возникают проблемы с выводом типов в mappedReduced для сложных лямбд.
         // Запускаем фоновый расчет вручную, сохраняя порядок сегментов.
