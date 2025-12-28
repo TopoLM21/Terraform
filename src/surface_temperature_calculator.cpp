@@ -2,6 +2,7 @@
 
 #include "surface_temperature_state.h"
 
+#include <QtCore/QThread>
 #include <QtCore/QtMath>
 
 #include <algorithm>
@@ -86,7 +87,8 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     const std::atomic_bool *cancelFlag) const {
     const int totalLatitudes = latitudePoints > 1 ? latitudePoints : 0;
     return temperatureRangesByLatitudeForSegment(latitudePoints, solarConstant_, 0.0,
-                                                 progressCallback, cancelFlag, 0, totalLatitudes);
+                                                 progressCallback, cancelFlag, nullptr, 0,
+                                                 totalLatitudes);
 }
 
 QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesForOrbitSegment(
@@ -96,7 +98,8 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesFo
     double perihelionArgumentDegrees,
     int latitudePoints,
     const ProgressCallback &progressCallback,
-    const std::atomic_bool *cancelFlag) const {
+    const std::atomic_bool *cancelFlag,
+    const std::atomic_bool *pauseFlag) const {
     if (cancelFlag && cancelFlag->load()) {
         return {};
     }
@@ -121,6 +124,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesFo
                                                  declinationDegrees,
                                                  progressCallback,
                                                  cancelFlag,
+                                                 pauseFlag,
                                                  0,
                                                  totalLatitudes);
 }
@@ -168,6 +172,7 @@ QVector<QVector<TemperatureRangePoint>> SurfaceTemperatureCalculator::temperatur
                                                                 declinationDegrees,
                                                                 progressCallback,
                                                                 cancelFlag,
+                                                                nullptr,
                                                                 progressOffset,
                                                                 totalProgress));
     }
@@ -181,6 +186,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
     double declinationDegrees,
     const ProgressCallback &progressCallback,
     const std::atomic_bool *cancelFlag,
+    const std::atomic_bool *pauseFlag,
     int progressOffset,
     int totalProgress) const {
     QVector<TemperatureRangePoint> points =
@@ -189,6 +195,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::temperatureRangesBy
                                              declinationDegrees,
                                              progressCallback,
                                              cancelFlag,
+                                             pauseFlag,
                                              progressOffset,
                                              totalProgress);
     // Текущий расчёт атмосферной поправки (аэродинамика, адиабатический градиент)
@@ -224,6 +231,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     double declinationDegrees,
     const ProgressCallback &progressCallback,
     const std::atomic_bool *cancelFlag,
+    const std::atomic_bool *pauseFlag,
     int progressOffset,
     int totalProgress) const {
     QVector<TemperatureRangePoint> points;
@@ -341,6 +349,15 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     for (int i = 0; i < latitudePoints; ++i) {
         if (cancelFlag && cancelFlag->load()) {
             return {};
+        }
+        if (pauseFlag) {
+            // Пауза из интерфейса: удерживаем вычисления, но проверяем отмену.
+            while (pauseFlag->load()) {
+                if (cancelFlag && cancelFlag->load()) {
+                    return {};
+                }
+                QThread::msleep(50);
+            }
         }
 
         const double axisDegrees = (rotationMode_ == RotationMode::Normal)
