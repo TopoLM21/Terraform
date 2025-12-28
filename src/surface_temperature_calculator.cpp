@@ -326,7 +326,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     const double tGlobalAvg = tEff * ghMult;
 
     const bool isTidallyLocked = rotationMode_ == RotationMode::TidalLocked;
-    const int stepsPerDay = isTidallyLocked ? 1 : kDailyTimeSteps;
+    // Подбираем число шагов по длительности суток, чтобы шаг по времени не разрастался
+    // на медленно вращающихся планетах (например, Меркурий).
+    const int scaledStepsPerDay = qRound(dayLengthDays_ * 24.0);
+    const int stepsPerDay = qMax(kDailyTimeSteps, scaledStepsPerDay);
     const int spinUpDays = isTidallyLocked ? 2 : kSpinUpDays;
     const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * 86400.0;
     const double timeStepSeconds =
