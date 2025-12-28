@@ -1393,6 +1393,105 @@ private:
         temperatureCache_.clear();
     }
 
+    void rebuildSurfaceGrid() {
+        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        surfaceGrid_.setRadiusKm(radiusKm);
+
+        if (radiusKm <= 0.0) {
+            surfaceGrid_.generateFibonacciPoints(0);
+            return;
+        }
+
+        const int latitudePointCount = latitudePoints();
+        const int pointsPerLatitude = 6;
+        surfaceGrid_.generateFibonacciPoints(qMax(1, latitudePointCount * pointsPerLatitude));
+    }
+
+    void updateSurfaceGridTemperatures() {
+        rebuildSurfaceGrid();
+        if (surfaceGrid_.points().isEmpty()) {
+            surfaceMapWidget_->setGrid(&surfaceGrid_);
+            return;
+        }
+
+        const QVector<TemperatureSummaryPoint> *summarySource = nullptr;
+        if (!temperatureSummary_.isEmpty()) {
+            summarySource = &temperatureSummary_;
+        }
+
+        const QVector<TemperatureRangePoint> *segmentSource = nullptr;
+        if (!summarySource && !lastTemperatureSegments_.isEmpty()) {
+            segmentSource = &lastTemperatureSegments_.first();
+        }
+
+        if (!summarySource && !segmentSource) {
+            surfaceMapWidget_->setGrid(&surfaceGrid_);
+            return;
+        }
+
+        auto interpolateTemperatureByLatitude = [summarySource,
+                                                  segmentSource](double latitudeDeg) {
+            // Используем зонально-симметричную аппроксимацию: температура зависит только от широты.
+            // Это физически упрощает модель до средней по долготе, чтобы быстро заполнить карту.
+            if (summarySource) {
+                const auto &points = *summarySource;
+                if (points.size() == 1) {
+                    return points.first().meanAnnualKelvin;
+                }
+                if (latitudeDeg <= points.first().latitudeDegrees) {
+                    return points.first().meanAnnualKelvin;
+                }
+                if (latitudeDeg >= points.last().latitudeDegrees) {
+                    return points.last().meanAnnualKelvin;
+                }
+                for (int i = 1; i < points.size(); ++i) {
+                    if (latitudeDeg <= points[i].latitudeDegrees) {
+                        const auto &lower = points[i - 1];
+                        const auto &upper = points[i];
+                        const double span = upper.latitudeDegrees - lower.latitudeDegrees;
+                        const double t = span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
+                        return lower.meanAnnualKelvin + t * (upper.meanAnnualKelvin - lower.meanAnnualKelvin);
+                    }
+                }
+                return points.last().meanAnnualKelvin;
+            }
+
+            const auto &points = *segmentSource;
+            if (points.size() == 1) {
+                return points.first().meanDailyKelvin;
+            }
+            if (latitudeDeg <= points.first().latitudeDegrees) {
+                return points.first().meanDailyKelvin;
+            }
+            if (latitudeDeg >= points.last().latitudeDegrees) {
+                return points.last().meanDailyKelvin;
+            }
+            for (int i = 1; i < points.size(); ++i) {
+                if (latitudeDeg <= points[i].latitudeDegrees) {
+                    const auto &lower = points[i - 1];
+                    const auto &upper = points[i];
+                    const double span = upper.latitudeDegrees - lower.latitudeDegrees;
+                    const double t = span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
+                    return lower.meanDailyKelvin + t * (upper.meanDailyKelvin - lower.meanDailyKelvin);
+                }
+            }
+            return points.last().meanDailyKelvin;
+        };
+
+        double minTemperature = std::numeric_limits<double>::max();
+        double maxTemperature = std::numeric_limits<double>::lowest();
+        for (auto &point : surfaceGrid_.points()) {
+            point.temperatureK = interpolateTemperatureByLatitude(point.latitudeDeg);
+            minTemperature = qMin(minTemperature, point.temperatureK);
+            maxTemperature = qMax(maxTemperature, point.temperatureK);
+        }
+
+        surfaceMapWidget_->setGrid(&surfaceGrid_);
+        if (minTemperature <= maxTemperature) {
+            surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
+        }
+    }
+
     QProgressDialog *ensureTemperatureProgressDialog() {
         if (temperatureProgressDialog_) {
             return temperatureProgressDialog_;
@@ -1509,6 +1608,7 @@ private:
             rebuildTemperatureSummary();
             updateSegmentComboBox();
             updateTemperaturePlotForSelectedSegment();
+            updateSurfaceGridTemperatures();
             return;
         }
 
@@ -1571,6 +1671,7 @@ private:
             rebuildTemperatureSummary();
             updateSegmentComboBox();
             updateTemperaturePlotForSelectedSegment();
+            updateSurfaceGridTemperatures();
         });
 
         const OrbitSegmentCalculator orbitCalculator(semiMajorAxis, eccentricity);
