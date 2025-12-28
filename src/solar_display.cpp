@@ -390,6 +390,8 @@ public:
         surfaceMapWidget_->setGrid(&surfaceGrid_);
         surfaceMinTemperatureLabel_ = new QLabel(QStringLiteral("Мин: —"), this);
         surfaceMaxTemperatureLabel_ = new QLabel(QStringLiteral("Макс: —"), this);
+        temperaturePauseButton_ = new QPushButton(QStringLiteral("Пауза"), this);
+        temperatureElapsedLabel_ = new QLabel(QStringLiteral("Прошло: 00:00"), this);
         temperatureScaleWidget_ = new SurfaceTemperatureScaleWidget(this);
         temperatureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         temperatureScaleWidget_->setMinimumHeight(18);
@@ -397,12 +399,18 @@ public:
         surfaceLegendTopLayout->addWidget(surfaceMinTemperatureLabel_);
         surfaceLegendTopLayout->addStretch();
         surfaceLegendTopLayout->addWidget(surfaceMaxTemperatureLabel_);
+        auto *surfaceControlLayout = new QHBoxLayout();
+        // Управление дублирует диалог, чтобы расчётом можно было управлять без модального окна.
+        surfaceControlLayout->addWidget(temperaturePauseButton_);
+        surfaceControlLayout->addWidget(temperatureElapsedLabel_);
+        surfaceControlLayout->addStretch();
         auto *surfaceLegendBottomLayout = new QHBoxLayout();
         surfaceLegendBottomLayout->addStretch();
         surfaceLegendBottomLayout->addWidget(temperatureScaleWidget_, 1);
         surfaceLegendBottomLayout->addStretch();
         auto *surfaceMapLayout = new QVBoxLayout();
         surfaceMapLayout->addLayout(surfaceLegendTopLayout);
+        surfaceMapLayout->addLayout(surfaceControlLayout);
         surfaceMapLayout->addWidget(surfaceMapWidget_, 1);
         surfaceMapLayout->addLayout(surfaceLegendBottomLayout);
         auto *surfaceMapContainer = new QWidget(this);
@@ -519,6 +527,12 @@ public:
             latitudePointsManuallySet_ = true;
             clearTemperatureCache();
             updateTemperaturePlot();
+        });
+
+        connect(temperaturePauseButton_, &QPushButton::clicked, this, [this]() {
+            const bool shouldPause = !temperaturePauseFlag_.load();
+            temperaturePauseFlag_.store(shouldPause);
+            updateTemperaturePauseUi(shouldPause);
         });
 
         connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this, [this](bool checked) {
@@ -681,6 +695,8 @@ private:
     SurfaceMapWidget *surfaceMapWidget_ = nullptr;
     QLabel *surfaceMinTemperatureLabel_ = nullptr;
     QLabel *surfaceMaxTemperatureLabel_ = nullptr;
+    QPushButton *temperaturePauseButton_ = nullptr;
+    QLabel *temperatureElapsedLabel_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
@@ -706,6 +722,21 @@ private:
     bool autoCalculateEnabled_ = false;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
     std::optional<StellarCacheKey> lastStellarKey_;
+
+    void updateTemperaturePauseUi(bool paused) {
+        if (temperaturePauseButton_) {
+            temperaturePauseButton_->setText(paused ? QStringLiteral("Продолжить")
+                                                    : QStringLiteral("Пауза"));
+        }
+        if (temperatureProgressDialog_) {
+            auto *pauseButton = temperatureProgressDialog_->findChild<QPushButton *>(
+                QStringLiteral("temperaturePauseButton"));
+            if (pauseButton) {
+                pauseButton->setText(paused ? QStringLiteral("Продолжить")
+                                            : QStringLiteral("Пауза"));
+            }
+        }
+    }
 
     void setInputValue(QLineEdit *input, double value) {
         input->setText(QString::number(value));
@@ -1571,8 +1602,7 @@ private:
         connect(pauseButton, &QPushButton::clicked, this, [this, pauseButton]() {
             const bool shouldPause = !temperaturePauseFlag_.load();
             temperaturePauseFlag_.store(shouldPause);
-            pauseButton->setText(shouldPause ? QStringLiteral("Продолжить")
-                                             : QStringLiteral("Пауза"));
+            updateTemperaturePauseUi(shouldPause);
         });
         if (auto *layout = temperatureProgressDialog_->layout()) {
             layout->addWidget(pauseButton);
@@ -1586,12 +1616,9 @@ private:
         if (temperatureUiTimer_) {
             temperatureUiTimer_->stop();
         }
-        if (temperatureProgressDialog_) {
-            auto *pauseButton = temperatureProgressDialog_->findChild<QPushButton *>(
-                QStringLiteral("temperaturePauseButton"));
-            if (pauseButton) {
-                pauseButton->setText(QStringLiteral("Пауза"));
-            }
+        updateTemperaturePauseUi(false);
+        if (temperatureElapsedLabel_) {
+            temperatureElapsedLabel_->setText(QStringLiteral("Прошло: 00:00"));
         }
     }
 
@@ -1731,6 +1758,13 @@ private:
                     .arg(minutes, 2, 10, QLatin1Char('0'))
                     .arg(seconds, 2, 10, QLatin1Char('0'))
                     .arg(pauseSuffix));
+            if (temperatureElapsedLabel_) {
+                temperatureElapsedLabel_->setText(
+                    QStringLiteral("Прошло: %1:%2%3")
+                        .arg(minutes, 2, 10, QLatin1Char('0'))
+                        .arg(seconds, 2, 10, QLatin1Char('0'))
+                        .arg(pauseSuffix));
+            }
         };
         connect(temperatureUiTimer_, &QTimer::timeout, this, updateElapsedLabel);
         updateElapsedLabel();
