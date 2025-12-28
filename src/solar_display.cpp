@@ -12,12 +12,14 @@
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QLocale>
 #include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QSysInfo>
 #include <QtCore/QThread>
 #include <QtCore/QThreadPool>
+#include <QtCore/QTimer>
 // #include <QtCore/QOverload>
 #include <QtGlobal>
 #include <QtCore/QtMath>
@@ -659,8 +661,11 @@ private:
     SurfaceMapWidget *surfaceMapWidget_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
+    QElapsedTimer temperatureElapsed_;
+    QTimer *temperatureUiTimer_ = nullptr;
     PlanetSurfaceGrid surfaceGrid_;
     std::shared_ptr<std::atomic_bool> temperatureCancelFlag_;
+    std::atomic_bool temperaturePauseFlag_{false};
     int temperatureRequestId_ = 0;
     int precision_ = kDefaultPrecision;
     QSet<QString> presetPlanetNames_;
@@ -1511,7 +1516,33 @@ private:
             cancelTemperatureCalculation();
         });
 
+        auto *pauseButton = new QPushButton(QStringLiteral("Пауза"), temperatureProgressDialog_);
+        pauseButton->setObjectName(QStringLiteral("temperaturePauseButton"));
+        connect(pauseButton, &QPushButton::clicked, this, [this, pauseButton]() {
+            const bool shouldPause = !temperaturePauseFlag_.load();
+            temperaturePauseFlag_.store(shouldPause);
+            pauseButton->setText(shouldPause ? QStringLiteral("Продолжить")
+                                             : QStringLiteral("Пауза"));
+        });
+        if (auto *layout = temperatureProgressDialog_->layout()) {
+            layout->addWidget(pauseButton);
+        }
+
         return temperatureProgressDialog_;
+    }
+
+    void resetTemperatureUiState() {
+        temperaturePauseFlag_.store(false);
+        if (temperatureUiTimer_) {
+            temperatureUiTimer_->stop();
+        }
+        if (temperatureProgressDialog_) {
+            auto *pauseButton = temperatureProgressDialog_->findChild<QPushButton *>(
+                QStringLiteral("temperaturePauseButton"));
+            if (pauseButton) {
+                pauseButton->setText(QStringLiteral("Пауза"));
+            }
+        }
     }
 
     void updateTemperaturePlot() {
@@ -1620,6 +1651,9 @@ private:
         const int totalLatitudes = latitudePointCount;
         const int totalProgress = totalLatitudes * segmentCount;
 
+        resetTemperatureUiState();
+        temperatureElapsed_.start();
+
         auto *progressDialog = ensureTemperatureProgressDialog();
         progressDialog->setRange(0, totalProgress);
         progressDialog->setValue(0);
@@ -1627,6 +1661,30 @@ private:
 
         QPointer<QProgressDialog> dialogGuard(progressDialog);
         QPointer<SolarCalculatorWidget> widgetGuard(this);
+        if (!temperatureUiTimer_) {
+            temperatureUiTimer_ = new QTimer(this);
+            temperatureUiTimer_->setInterval(1000);
+        }
+        temperatureUiTimer_->stop();
+        temperatureUiTimer_->disconnect();
+        auto updateElapsedLabel = [this, dialogGuard, requestId]() {
+            if (!dialogGuard || requestId != temperatureRequestId_) {
+                return;
+            }
+            const qint64 elapsedSeconds = temperatureElapsed_.elapsed() / 1000;
+            const int minutes = static_cast<int>(elapsedSeconds / 60);
+            const int seconds = static_cast<int>(elapsedSeconds % 60);
+            const QString pauseSuffix =
+                temperaturePauseFlag_.load() ? QStringLiteral(" (пауза)") : QString();
+            dialogGuard->setLabelText(
+                QStringLiteral("Вычисление температурного профиля... %1:%2%3")
+                    .arg(minutes, 2, 10, QLatin1Char('0'))
+                    .arg(seconds, 2, 10, QLatin1Char('0'))
+                    .arg(pauseSuffix));
+        };
+        connect(temperatureUiTimer_, &QTimer::timeout, this, updateElapsedLabel);
+        updateElapsedLabel();
+        temperatureUiTimer_->start();
         // Вызов из фонового потока: защищаемся от удаления виджета во время вычисления.
         auto progressCallback = [widgetGuard, dialogGuard, requestId](int processed, int total) {
             if (!widgetGuard) {
@@ -1657,6 +1715,7 @@ private:
                 [this, watcher, requestId, cancelFlag, cacheKey]() {
             watcher->deleteLater();
             if (requestId == temperatureRequestId_) {
+                resetTemperatureUiState();
                 temperatureProgressDialog_->hide();
             }
             if (requestId != temperatureRequestId_ || cancelFlag->load()) {
@@ -1678,6 +1737,7 @@ private:
         lastOrbitSegments_ = orbitCalculator.segments(segmentCount);
         updateSegmentComboBox();
         const auto segments = lastOrbitSegments_;
+        const std::atomic_bool *pauseFlag = &temperaturePauseFlag_;
 
         auto progressCounter = std::make_shared<std::atomic_int>(0);
         auto segmentProgress = [progressCounter, progressCallback, totalProgress, cancelFlag](int, int) {
@@ -1692,6 +1752,7 @@ private:
                            latitudePointCount,
                            segmentProgress,
                            cancelFlag,
+                           pauseFlag,
                            referenceDistanceAU,
                            obliquity,
                            perihelionArgument](const OrbitSegment &segment) {
@@ -1704,7 +1765,8 @@ private:
                                                                perihelionArgument,
                                                                latitudePointCount,
                                                                segmentProgress,
-                                                               cancelFlag.get());
+                                                               cancelFlag.get(),
+                                                               pauseFlag);
         };
 
         // В Qt 5.15 возникают проблемы с выводом типов в mappedReduced для сложных лямбд.
@@ -1726,6 +1788,7 @@ private:
         if (temperatureCancelFlag_) {
             temperatureCancelFlag_->store(true);
         }
+        resetTemperatureUiState();
         if (temperatureProgressDialog_) {
             temperatureProgressDialog_->hide();
         }
