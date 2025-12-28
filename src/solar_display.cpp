@@ -9,7 +9,6 @@
 #include "surface_temperature_plot.h"
 #include "surface_map_widget.h"
 #include "surface_temperature_scale_widget.h"
-#include "surface_temperature_state.h"
 #include "planet_surface_grid.h"
 
 #include <QtCore/QCommandLineOption>
@@ -1540,10 +1539,62 @@ private:
         surfaceGrid_.generateFibonacciPoints(qMax(1, latitudePointCount * pointsPerLatitude));
     }
 
+    struct SurfacePointStateDefaults {
+        double albedo = 0.0;
+        double heatCapacity = 1.0;
+        double greenhouseOpacity = 0.0;
+        double minTemperatureKelvin = 3.0;
+    };
+
+    std::optional<SurfacePointStateDefaults> buildSurfacePointStateDefaults() const {
+        const auto material = currentMaterial();
+        if (!material) {
+            return std::nullopt;
+        }
+
+        AtmosphereComposition atmosphere;
+        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
+        if (atmosphereValue.isValid()) {
+            atmosphere = atmosphereValue.value<AtmosphereComposition>();
+        }
+
+        double atmospherePressureAtm = 0.0;
+        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
+        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+        }
+
+        const double greenhouseOpacity =
+            planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        // Атмосфера добавляет тепловую инерцию, замедляя суточные колебания.
+        const double atmosphereInertia = atmospherePressureAtm * 20.0;
+        const double heatCapacity = qMax(1.0, material->heatCapacity + atmosphereInertia);
+        const double albedo = qBound(0.0, material->albedo, 1.0);
+        // Минимальная температура зависит от давления: плотная атмосфера снижает ночное остывание.
+        const double minTemperatureKelvin =
+            (atmospherePressureAtm > 0.5 ? 180.0 : 20.0) +
+            150.0 * (1.0 - std::exp(-atmospherePressureAtm * 0.2));
+
+        SurfacePointStateDefaults defaults;
+        defaults.albedo = albedo;
+        defaults.heatCapacity = heatCapacity;
+        defaults.greenhouseOpacity = greenhouseOpacity;
+        defaults.minTemperatureKelvin = minTemperatureKelvin;
+        return defaults;
+    }
+
     void updateSurfaceGridTemperatures() {
         resetSurfaceSimulation();
         rebuildSurfaceGrid();
         if (surfaceGrid_.points().isEmpty()) {
+            surfaceMapWidget_->setGrid(&surfaceGrid_);
+            updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            return;
+        }
+
+        const auto stateDefaults = buildSurfacePointStateDefaults();
+        if (!stateDefaults) {
             surfaceMapWidget_->setGrid(&surfaceGrid_);
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             return;
@@ -1561,6 +1612,14 @@ private:
         }
 
         if (!summarySource && !segmentSource) {
+            for (auto &point : surfaceGrid_.points()) {
+                point.temperatureK = stateDefaults->minTemperatureKelvin;
+                point.state = SurfacePointState(point.temperatureK,
+                                                stateDefaults->albedo,
+                                                stateDefaults->heatCapacity,
+                                                stateDefaults->greenhouseOpacity,
+                                                stateDefaults->minTemperatureKelvin);
+            }
             surfaceMapWidget_->setGrid(&surfaceGrid_);
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             return;
@@ -1619,6 +1678,11 @@ private:
         double maxTemperature = std::numeric_limits<double>::lowest();
         for (auto &point : surfaceGrid_.points()) {
             point.temperatureK = interpolateTemperatureByLatitude(point.latitudeDeg);
+            point.state = SurfacePointState(point.temperatureK,
+                                            stateDefaults->albedo,
+                                            stateDefaults->heatCapacity,
+                                            stateDefaults->greenhouseOpacity,
+                                            stateDefaults->minTemperatureKelvin);
             minTemperature = qMin(minTemperature, point.temperatureK);
             maxTemperature = qMax(maxTemperature, point.temperatureK);
         }
@@ -1729,18 +1793,14 @@ private:
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
 
-            // Применяем шаговый радиационный баланс как в расчёте по широте.
-            SurfaceTemperatureState state(point.temperatureK,
-                                          material->albedo,
-                                          material->heatCapacity,
-                                          0.0,
-                                          20.0);
-            state.updateTemperature(localInsolation, timeStepSeconds);
-            point.temperatureK = state.temperatureKelvin();
+            // Применяем шаговый радиационный баланс для состояния точки.
+            point.state.updateTemperature(localInsolation, timeStepSeconds);
+            point.temperatureK = point.state.temperatureKelvin();
             minTemperature = qMin(minTemperature, point.temperatureK);
             maxTemperature = qMax(maxTemperature, point.temperatureK);
         }
 
+        // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
         surfaceMapWidget_->setGrid(&surfaceGrid_);
         if (minTemperature <= maxTemperature) {
             surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
