@@ -7,6 +7,8 @@
 #include "atmosphere_widget.h"
 #include "surface_temperature_calculator.h"
 #include "surface_temperature_plot.h"
+#include "surface_map_widget.h"
+#include "planet_surface_grid.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -380,6 +382,9 @@ public:
         starsPanel->setLayout(starsPanelLayout);
 
         temperaturePlot_ = new SurfaceTemperaturePlot(this);
+        surfaceMapWidget_ = new SurfaceMapWidget(this);
+        surfaceMapWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        surfaceMapWidget_->setGrid(&surfaceGrid_);
         auto *plotGroupBox = new QGroupBox(QStringLiteral("Температурный профиль"), this);
         auto *plotLayout = new QVBoxLayout(plotGroupBox);
         auto *segmentLayout = new QHBoxLayout();
@@ -406,6 +411,7 @@ public:
         rightTabs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
         rightTabs->addTab(plotGroupBox, tr("Температура"));
         rightTabs->addTab(atmosphereWidget_, tr("Атмосфера"));
+        rightTabs->addTab(surfaceMapWidget_, tr("Поверхность"));
 
         auto *rightLayout = new QVBoxLayout();
         rightLayout->addWidget(rightTabs, 1);
@@ -650,8 +656,10 @@ private:
 
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
+    SurfaceMapWidget *surfaceMapWidget_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
+    PlanetSurfaceGrid surfaceGrid_;
     std::shared_ptr<std::atomic_bool> temperatureCancelFlag_;
     int temperatureRequestId_ = 0;
     int precision_ = kDefaultPrecision;
