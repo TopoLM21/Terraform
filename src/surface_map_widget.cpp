@@ -97,14 +97,31 @@ void SurfaceMapWidget::rebuildImages() {
         }
     }
 
+    pointRadiusPx_ = pointRadiusPx(grid_->pointCount());
+
+    QPainter colorPainter(&colorImage_);
+    colorPainter.setRenderHint(QPainter::Antialiasing, true);
+    colorPainter.setPen(Qt::NoPen);
+
+    QPainter idPainter(&idImage_);
+    idPainter.setRenderHint(QPainter::Antialiasing, false);
+    idPainter.setPen(Qt::NoPen);
+
     for (int i = 0; i < grid_->pointCount(); ++i) {
         const SurfacePoint &point = grid_->points()[i];
         const QPoint pixel = mapPointToPixel(point.latitudeDeg, point.longitudeDeg);
         if (!colorImage_.rect().contains(pixel)) {
             continue;
         }
-        colorImage_.setPixel(pixel, temperatureToColor(point.temperatureK));
-        idImage_.setPixel(pixel, encodeId(i));
+        const QRectF ellipseRect(pixel.x() - pointRadiusPx_,
+                                 pixel.y() - pointRadiusPx_,
+                                 pointRadiusPx_ * 2.0,
+                                 pointRadiusPx_ * 2.0);
+        colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
+        colorPainter.drawEllipse(ellipseRect);
+
+        idPainter.setBrush(QColor::fromRgb(encodeId(i)));
+        idPainter.drawEllipse(ellipseRect);
     }
 
     update();
@@ -145,4 +162,17 @@ QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point) const {
         .arg(point.longitudeDeg, 0, 'f', 2)
         .arg(point.temperatureK, 0, 'f', 2)
         .arg(point.heightKm, 0, 'f', 2);
+}
+
+double SurfaceMapWidget::pointRadiusPx(int pointCount) const {
+    if (pointCount <= 0) {
+        return 1.0;
+    }
+    const double widgetArea = static_cast<double>(width()) * static_cast<double>(height());
+    const double cellArea = widgetArea / static_cast<double>(pointCount);
+    const double spacing = qSqrt(cellArea);
+    // Радиус основан на среднем расстоянии между точками: при больших сетках он
+    // уменьшается, чтобы точки не слипались, а при малых ограничивается сверху,
+    // сохраняя читаемость без превращения точек в одиночные пиксели.
+    return qBound(1.0, spacing * 0.45, 6.0);
 }
