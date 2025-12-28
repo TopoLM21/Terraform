@@ -1,5 +1,7 @@
 #include "surface_temperature_calculator.h"
 
+#include "surface_temperature_state.h"
+
 #include <QtCore/QtMath>
 
 #include <algorithm>
@@ -16,6 +18,8 @@ constexpr double kEarthAtmosphereMassGt = 5140000.0;
 constexpr double kDefaultSurfaceRoughness = 20.0;
 constexpr double kDefaultBasinShape = 3.5;
 constexpr double kEarthWaterGigatons = 1.4e9;
+constexpr int kDailyTimeSteps = 96;
+constexpr int kSpinUpDays = 6;
 
 struct TraceGasSpec {
     const char *id;
@@ -293,6 +297,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         totalTau += -std::log(qMax(1e-6, 1.0 - greenhouseOpacity_));
     }
     const double ghMult = std::pow(1.0 + 0.75 * totalTau, 0.25);
+    // Приводим оптическую толщину к коэффициенту парникового эффекта для модели
+    // SurfaceTemperatureState: в стационаре T^4 ∝ 1 / (1 - G).
+    const double greenhouseOpacity =
+        (totalTau > 0.0) ? (1.0 - 1.0 / (1.0 + 0.75 * totalTau)) : 0.0;
 
     const double transport =
         (pressureAtm > 50.0)
@@ -318,6 +326,13 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     const double tGlobalAvg = tEff * ghMult;
 
     const bool isTidallyLocked = rotationMode_ == RotationMode::TidalLocked;
+    const int stepsPerDay = isTidallyLocked ? 1 : kDailyTimeSteps;
+    const int spinUpDays = isTidallyLocked ? 2 : kSpinUpDays;
+    const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * 86400.0;
+    const double timeStepSeconds =
+        (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
+    const double globalAverageInsolation =
+        segmentSolarConstant * (1.0 - finalAlbedo) / 4.0;
 
     for (int i = 0; i < latitudePoints; ++i) {
         if (cancelFlag && cancelFlag->load()) {
@@ -355,48 +370,82 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const double tBase =
             tLatRad * (1.0 - meridionalTransport) + tGlobalAvg * meridionalTransport;
 
-        // Амплитуда суточного хода переносится из исходного React-кода:
-        // A = sqrt(period) * 140 / sqrt(inertia).
+        // Теплоемкость включает вклад океана и атмосферы, чтобы замедлить суточные колебания.
         const double atmDamping = pressureAtm * 20.0;
         const double waterInertia = potentialCoverage * 120.0;
         const double totalInertia =
             qMax(1.0, material_.heatCapacity + waterInertia + atmDamping);
-        double amplitude = !isTidallyLocked
-                               ? (std::sqrt(qMax(0.01, dayLengthDays_)) * 140.0) /
-                                     std::sqrt(totalInertia)
-                               : 0.0;
-        if (hourAngleLimit == 0.0) {
-            amplitude = 0.0;
-        } else if (hourAngleLimit == kPi) {
-            amplitude *= 0.2;
-        } else {
-            amplitude *= (tBase / 300.0);
-        }
-
-        double tMax = tBase + amplitude / 2.0;
-        double tMin = tBase - amplitude / 2.0;
         const double absFloor =
             (pressureAtm > 0.5 ? 180.0 : 20.0) + 150.0 * (1.0 - std::exp(-pressureAtm * 0.2));
-        if (tMin < absFloor) {
-            tMin = absFloor;
+
+        // Шаговое обновление температуры на протяжении суток:
+        // S_inst = S0 * cos(zenith) при освещении, иначе 0.
+        // Поток смешивается с глобальным средним, чтобы имитировать меридиональный перенос.
+        SurfaceTemperatureState state(tBase,
+                                      finalAlbedo,
+                                      totalInertia,
+                                      greenhouseOpacity,
+                                      absFloor);
+
+        const int totalSteps = stepsPerDay * (spinUpDays + 1);
+        double tMin = state.temperatureKelvin();
+        double tMax = state.temperatureKelvin();
+        double tSum = 0.0;
+        double tDaySum = 0.0;
+        double tNightSum = 0.0;
+        int dayCount = 0;
+        int nightCount = 0;
+        for (int step = 0; step < totalSteps; ++step) {
+            const double phase =
+                (stepsPerDay > 0) ? (2.0 * kPi * (static_cast<double>(step % stepsPerDay) +
+                                                 0.5) /
+                                        static_cast<double>(stepsPerDay))
+                                  : 0.0;
+            const double hourAngle = isTidallyLocked ? 0.0 : (phase - kPi);
+            const double cosZenith =
+                std::sin(latitudeRadians) * std::sin(declinationRadians) +
+                std::cos(latitudeRadians) * std::cos(declinationRadians) *
+                    std::cos(hourAngle);
+            const double localInsolation =
+                segmentSolarConstant * qMax(0.0, cosZenith) * (1.0 - finalAlbedo);
+            const double blendedInsolation =
+                localInsolation * (1.0 - meridionalTransport) +
+                globalAverageInsolation * meridionalTransport;
+
+            state.updateTemperature(blendedInsolation, timeStepSeconds);
+
+            if (step >= stepsPerDay * spinUpDays) {
+                const double temp = state.temperatureKelvin();
+                tMin = qMin(tMin, temp);
+                tMax = qMax(tMax, temp);
+                tSum += temp;
+                if (cosZenith > 0.0) {
+                    tDaySum += temp;
+                    ++dayCount;
+                } else {
+                    tNightSum += temp;
+                    ++nightCount;
+                }
+            }
         }
-        if (tMax < tMin) {
-            tMax = tMin;
-        }
+
+        const double tMean = (stepsPerDay > 0) ? (tSum / stepsPerDay) : state.temperatureKelvin();
+        const double tDay = (dayCount > 0) ? (tDaySum / dayCount) : tMean;
+        const double tNight = (nightCount > 0) ? (tNightSum / nightCount) : tMean;
 
         TemperatureRangePoint point;
         point.latitudeDegrees = axisDegrees;
         point.hasInsolation = hasInsolation;
         point.minimumKelvin = tMin;
         point.maximumKelvin = tMax;
-        point.meanDailyKelvin = tBase;
-        point.meanDayKelvin = tMax;
-        point.meanNightKelvin = tMin;
+        point.meanDailyKelvin = tMean;
+        point.meanDayKelvin = tDay;
+        point.meanNightKelvin = tNight;
         point.minimumCelsius = tMin - kKelvinOffset;
         point.maximumCelsius = tMax - kKelvinOffset;
-        point.meanDailyCelsius = tBase - kKelvinOffset;
-        point.meanDayCelsius = tMax - kKelvinOffset;
-        point.meanNightCelsius = tMin - kKelvinOffset;
+        point.meanDailyCelsius = tMean - kKelvinOffset;
+        point.meanDayCelsius = tDay - kKelvinOffset;
+        point.meanNightCelsius = tNight - kKelvinOffset;
         points.push_back(point);
 
         ++processedLatitudes;
