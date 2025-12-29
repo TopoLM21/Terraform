@@ -5,6 +5,7 @@
 
 #include <QPoint>
 #include <QSize>
+#include <QRect>
 
 class SurfaceMapInterpolator {
 public:

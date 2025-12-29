@@ -1,7 +1,6 @@
 #include "surface_map_interpolator.h"
 
 #include <QtMath>
-
 namespace {
 const double kMaxX = 2.0 * qSqrt(2.0);
 const double kMaxY = qSqrt(2.0);
