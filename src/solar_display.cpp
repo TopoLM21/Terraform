@@ -392,6 +392,9 @@ public:
         surfaceMaxTemperatureLabel_ = new QLabel(QStringLiteral("Макс: —"), this);
         temperaturePauseButton_ = new QPushButton(QStringLiteral("Пауза"), this);
         surfaceSimToggleButton_ = new QPushButton(QStringLiteral("Старт"), this);
+        surfaceSimSpeedComboBox_ = new QComboBox(this);
+        surfaceSimSpeedComboBox_->addItem(QStringLiteral("1x"), 1.0);
+        surfaceSimSpeedComboBox_->addItem(QStringLiteral("10x"), 10.0);
         surfaceSimTimeLabel_ = new QLabel(QStringLiteral("t = —"), this);
         temperatureElapsedLabel_ = new QLabel(QStringLiteral("Прошло: 00:00"), this);
         temperatureScaleWidget_ = new SurfaceTemperatureScaleWidget(this);
@@ -405,6 +408,7 @@ public:
         // Управление дублирует диалог, чтобы расчётом можно было управлять без модального окна.
         surfaceControlLayout->addWidget(temperaturePauseButton_);
         surfaceControlLayout->addWidget(surfaceSimToggleButton_);
+        surfaceControlLayout->addWidget(surfaceSimSpeedComboBox_);
         surfaceControlLayout->addWidget(surfaceSimTimeLabel_);
         surfaceControlLayout->addWidget(temperatureElapsedLabel_);
         surfaceControlLayout->addStretch();
@@ -548,6 +552,13 @@ public:
 
         connect(surfaceSimToggleButton_, &QPushButton::clicked, this,
                 [this]() { toggleSurfaceSimulation(); });
+
+        connect(surfaceSimSpeedComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int) {
+                    surfaceSimSpeedMultiplier_ =
+                        surfaceSimSpeedComboBox_->currentData().toDouble();
+                    updateSurfaceSimulationUi();
+                });
 
         connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this, [this](bool checked) {
             if (!checked) {
@@ -711,6 +722,7 @@ private:
     QLabel *surfaceMaxTemperatureLabel_ = nullptr;
     QPushButton *temperaturePauseButton_ = nullptr;
     QPushButton *surfaceSimToggleButton_ = nullptr;
+    QComboBox *surfaceSimSpeedComboBox_ = nullptr;
     QLabel *surfaceSimTimeLabel_ = nullptr;
     QLabel *temperatureElapsedLabel_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
@@ -739,6 +751,7 @@ private:
     bool hasSurfaceTemperatureRange_ = false;
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
+    double surfaceSimSpeedMultiplier_ = 1.0;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCacheSurfaceOnly_;
     std::optional<StellarCacheKey> lastStellarKey_;
@@ -772,14 +785,18 @@ private:
                                                                 : QStringLiteral("Старт"));
         }
         if (surfaceSimTimeLabel_) {
+            const QString speedLabel =
+                QStringLiteral("%1x").arg(surfaceSimSpeedMultiplier_, 0, 'g', 3);
             if (!surfaceSimRunning_ && surfaceSimState_.dayIndex == 0 &&
                 surfaceSimState_.hourIndex == 0) {
-                surfaceSimTimeLabel_->setText(QStringLiteral("t = —"));
+                surfaceSimTimeLabel_->setText(
+                    QStringLiteral("t = — (%1)").arg(speedLabel));
             } else {
                 surfaceSimTimeLabel_->setText(
-                    QStringLiteral("t = День %1, Час %2")
+                    QStringLiteral("t = День %1, Час %2 (%3)")
                         .arg(surfaceSimState_.dayIndex + 1)
-                        .arg(surfaceSimState_.hourIndex + 1));
+                        .arg(surfaceSimState_.hourIndex + 1)
+                        .arg(speedLabel));
             }
         }
     }
@@ -1849,8 +1866,8 @@ private:
             lastSolarConstant_ *
             std::pow(lastSolarConstantDistanceAU_ / segment.distanceAU, 2.0);
 
-        // 1 секунда реального времени соответствует 1 часу планетарных суток.
-        const double timeStepSeconds = 3600.0;
+        // 1 секунда реального времени соответствует N часам планетарных суток (ускорение рассвета).
+        const double timeStepSeconds = 3600.0 * surfaceSimSpeedMultiplier_;
         const double phase =
             2.0 * M_PI *
             (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
