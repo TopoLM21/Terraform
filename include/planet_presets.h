@@ -17,6 +17,11 @@ struct SurfaceMaterial {
     double heatCapacity;
 };
 
+enum class HeightSourceType {
+    Procedural,
+    HeightmapEquirectangular
+};
+
 struct PlanetPreset {
     QString name;
     double semiMajorAxis;
@@ -35,6 +40,12 @@ struct PlanetPreset {
     // Приливная синхронизация задается отдельно: длина суток может совпадать
     // с резонансом вращения (например, 3:2) и не означает жесткую блокировку.
     bool tidallyLocked = false;
+    // Источник высот поверхности.
+    HeightSourceType heightSourceType = HeightSourceType::Procedural;
+    // Путь к equirectangular heightmap (строго 2:1).
+    QString heightmapPath;
+    // Масштаб высот в километрах: значение 1.0 соответствует диапазону (-1..+1) км.
+    double heightmapScaleKm = 0.0;
 };
 
 QVector<SurfaceMaterial> surfaceMaterials();

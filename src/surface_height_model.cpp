@@ -1,5 +1,7 @@
 #include "surface_height_model.h"
 
+#include "planet_presets.h"
+
 #include <QVector3D>
 #include <QtMath>
 
@@ -101,7 +103,24 @@ double ridgedFbmNoise(const QVector3D &p, double baseFrequency, int octaves) {
 }
 } // namespace
 
+SurfaceHeightModel::SurfaceHeightModel() = default;
+
+SurfaceHeightModel::SurfaceHeightModel(HeightSourceType sourceType,
+                                       const QString &heightmapPath,
+                                       double heightmapScaleKm)
+    : sourceType_(sourceType) {
+    if (sourceType_ == HeightSourceType::HeightmapEquirectangular) {
+        if (!heightmap_.loadFromFile(heightmapPath, heightmapScaleKm)) {
+            sourceType_ = HeightSourceType::Procedural;
+        }
+    }
+}
+
 double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) const {
+    if (sourceType_ == HeightSourceType::HeightmapEquirectangular && heightmap_.isValid()) {
+        return heightmap_.heightKmAt(latitudeDeg, longitudeDeg);
+    }
+
     const QVector3D p = unitSpherePoint(latitudeDeg, longitudeDeg);
 
     const double continentA = ridgedFbmNoise(p, 0.7, 4);

@@ -76,6 +76,9 @@ constexpr int kRoleRadiusKm = Qt::UserRole + 9;
 constexpr int kRoleRotationMode = Qt::UserRole + 10;
 constexpr int kRoleAtmosphere = Qt::UserRole + 11;
 constexpr int kRoleGreenhouseOpacity = Qt::UserRole + 12;
+constexpr int kRoleHeightSourceType = Qt::UserRole + 13;
+constexpr int kRoleHeightmapPath = Qt::UserRole + 14;
+constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 15;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -1176,6 +1179,10 @@ private:
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
         planetComboBox_->setItemData(index, QVariant::fromValue(planet.atmosphere), kRoleAtmosphere);
         planetComboBox_->setItemData(index, planet.greenhouseOpacity, kRoleGreenhouseOpacity);
+        planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
+                                     kRoleHeightSourceType);
+        planetComboBox_->setItemData(index, planet.heightmapPath, kRoleHeightmapPath);
+        planetComboBox_->setItemData(index, planet.heightmapScaleKm, kRoleHeightmapScaleKm);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -1407,6 +1414,12 @@ private:
                 planetComboBox_->setItemData(existingIndex, atmosphereValue, kRoleAtmosphere);
                 planetComboBox_->setItemData(existingIndex, preset.greenhouseOpacity,
                                              kRoleGreenhouseOpacity);
+                planetComboBox_->setItemData(existingIndex,
+                                             static_cast<int>(preset.heightSourceType),
+                                             kRoleHeightSourceType);
+                planetComboBox_->setItemData(existingIndex, preset.heightmapPath, kRoleHeightmapPath);
+                planetComboBox_->setItemData(existingIndex, preset.heightmapScaleKm,
+                                             kRoleHeightmapScaleKm);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
@@ -1624,6 +1637,14 @@ private:
     void rebuildSurfaceGrid() {
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         surfaceGrid_.setRadiusKm(radiusKm);
+        const HeightSourceType heightSource =
+            static_cast<HeightSourceType>(planetComboBox_->currentData(kRoleHeightSourceType)
+                                              .toInt());
+        const QString heightmapPath =
+            planetComboBox_->currentData(kRoleHeightmapPath).toString();
+        const double heightmapScaleKm =
+            planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
+        surfaceGrid_.setHeightSource(heightSource, heightmapPath, heightmapScaleKm);
 
         if (radiusKm <= 0.0) {
             surfaceGrid_.generateIcosahedronGrid(0);
