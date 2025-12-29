@@ -1616,10 +1616,9 @@ private:
         const double atmosphereInertia = atmospherePressureAtm * 20.0;
         const double heatCapacity = qMax(1.0, material->heatCapacity + atmosphereInertia);
         const double albedo = qBound(0.0, material->albedo, 1.0);
-        // Минимальная температура зависит от давления: плотная атмосфера снижает ночное остывание.
-        const double minTemperatureKelvin =
-            (atmospherePressureAtm > 0.5 ? 180.0 : 20.0) +
-            150.0 * (1.0 - std::exp(-atmospherePressureAtm * 0.2));
+        // Не задаем высокий нижний порог: карта поверхности должна стартовать от физического минимума,
+        // чтобы при слабой инсоляции температура могла быть значительно ниже 200 K.
+        const double minTemperatureKelvin = 3.0;
 
         SurfacePointStateDefaults defaults;
         defaults.albedo = albedo;
