@@ -1,14 +1,14 @@
 #include "surface_temperature_plot.h"
 #include "temperature_plot_tracker.h"
 
-#include <qwt-qt5/qwt_plot_curve.h>
-#include <qwt-qt5/qwt_plot_grid.h>
-#include <qwt-qt5/qwt_plot_marker.h>
-#include <qwt-qt5/qwt_scale_draw.h>
+#include <qwt/qwt_plot_curve.h>
+#include <qwt/qwt_plot_grid.h>
+#include <qwt/qwt_plot_marker.h>
+#include <qwt/qwt_scale_draw.h>
 // #include <qwt/qwt_spline_curve_fitter.h>
-#include <qwt-qt5/qwt_legend.h>
-#include <qwt-qt5/qwt_legend_data.h>
-#include <qwt-qt5/qwt_text.h>
+#include <qwt/qwt_legend.h>
+#include <qwt/qwt_legend_data.h>
+#include <qwt/qwt_text.h>
 
 #include <QtCore/QPair>
 #include <QtGui/QColor>
