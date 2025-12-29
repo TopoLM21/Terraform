@@ -416,6 +416,7 @@ public:
         surfaceSimSpeedComboBox_->addItem(QStringLiteral("10x"), 10.0);
         surfaceSimTimeLabel_ = new QLabel(QStringLiteral("t = —"), this);
         temperatureElapsedLabel_ = new QLabel(QStringLiteral("Прошло: 00:00"), this);
+        surfaceSeamlessCheckBox_ = new QCheckBox(QStringLiteral("Бесшовная карта"), this);
         temperatureScaleWidget_ = new SurfaceTemperatureScaleWidget(this);
         temperatureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         temperatureScaleWidget_->setMinimumHeight(18);
@@ -430,6 +431,7 @@ public:
         surfaceControlLayout->addWidget(surfaceSimSpeedComboBox_);
         surfaceControlLayout->addWidget(surfaceSimTimeLabel_);
         surfaceControlLayout->addWidget(temperatureElapsedLabel_);
+        surfaceControlLayout->addWidget(surfaceSeamlessCheckBox_);
         surfaceControlLayout->addStretch();
         auto *surfaceLegendBottomLayout = new QHBoxLayout();
         surfaceLegendBottomLayout->addStretch();
@@ -579,6 +581,12 @@ public:
                     updateSurfaceSimulationTimerInterval();
                     updateSurfaceSimulationUi();
                 });
+
+        connect(surfaceSeamlessCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+            if (surfaceMapWidget_) {
+                surfaceMapWidget_->setInterpolationEnabled(checked);
+            }
+        });
 
         connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this, [this](bool checked) {
             if (!checked) {
@@ -745,6 +753,7 @@ private:
     QComboBox *surfaceSimSpeedComboBox_ = nullptr;
     QLabel *surfaceSimTimeLabel_ = nullptr;
     QLabel *temperatureElapsedLabel_ = nullptr;
+    QCheckBox *surfaceSeamlessCheckBox_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
