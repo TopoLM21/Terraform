@@ -557,6 +557,7 @@ public:
                 [this](int) {
                     surfaceSimSpeedMultiplier_ =
                         surfaceSimSpeedComboBox_->currentData().toDouble();
+                    updateSurfaceSimulationTimerInterval();
                     updateSurfaceSimulationUi();
                 });
 
@@ -799,6 +800,14 @@ private:
                         .arg(speedLabel));
             }
         }
+    }
+
+    void updateSurfaceSimulationTimerInterval() {
+        if (!surfaceSimTimer_) {
+            return;
+        }
+        const int intervalMs = qMax(1, qRound(1000.0 / surfaceSimSpeedMultiplier_));
+        surfaceSimTimer_->setInterval(intervalMs);
     }
 
     void resetSurfaceSimulation() {
@@ -1811,10 +1820,10 @@ private:
 
         if (!surfaceSimTimer_) {
             surfaceSimTimer_ = new QTimer(this);
-            surfaceSimTimer_->setInterval(1000);
             connect(surfaceSimTimer_, &QTimer::timeout, this,
                     [this]() { advanceSurfaceSimulation(); });
         }
+        updateSurfaceSimulationTimerInterval();
 
         surfaceSimRunning_ = true;
         updateSurfaceSimulationUi();
@@ -1866,8 +1875,8 @@ private:
             lastSolarConstant_ *
             std::pow(lastSolarConstantDistanceAU_ / segment.distanceAU, 2.0);
 
-        // 1 секунда реального времени соответствует N часам планетарных суток (ускорение рассвета).
-        const double timeStepSeconds = 3600.0 * surfaceSimSpeedMultiplier_;
+        // Один тик = 1 час планетарных суток, ускорение реализовано уменьшением интервала таймера.
+        const double timeStepSeconds = 3600.0;
         const double phase =
             2.0 * M_PI *
             (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
