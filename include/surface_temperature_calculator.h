@@ -47,6 +47,7 @@ public:
                                  double greenhouseOpacity = 0.0,
                                  double atmospherePressureAtm = 0.0,
                                  double surfaceGravity = 0.0,
+                                 double planetRadiusKm = 6371.0,
                                  bool useAtmosphericModel = false,
                                  int meridionalTransportSteps = 8);
 
@@ -65,7 +66,8 @@ public:
         double perihelionArgumentDegrees,
         int latitudePoints,
         const ProgressCallback &progressCallback,
-        const std::atomic_bool *cancelFlag) const;
+        const std::atomic_bool *cancelFlag,
+        const std::atomic_bool *pauseFlag = nullptr) const;
     QVector<QVector<TemperatureRangePoint>> temperatureRangesByOrbitSegments(
         const QVector<OrbitSegment> &segments,
         double referenceDistanceAU,
@@ -82,6 +84,7 @@ private:
         double declinationDegrees,
         const ProgressCallback &progressCallback,
         const std::atomic_bool *cancelFlag,
+        const std::atomic_bool *pauseFlag,
         int progressOffset,
         int totalProgress) const;
 
@@ -91,6 +94,7 @@ private:
         double declinationDegrees,
         const ProgressCallback &progressCallback,
         const std::atomic_bool *cancelFlag,
+        const std::atomic_bool *pauseFlag,
         int progressOffset,
         int totalProgress) const;
 
@@ -102,6 +106,7 @@ private:
     double greenhouseOpacity_ = 0.0;
     double atmospherePressureAtm_ = 0.0;
     double surfaceGravity_ = 0.0;
+    double planetRadiusKm_ = 6371.0;
     bool useAtmosphericModel_ = false;
     int meridionalTransportSteps_ = 8;
 };

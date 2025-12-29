@@ -15,22 +15,34 @@ add_executable(solar_constant
     include/atmospheric_circulation_model.h
     include/atmospheric_lapse_rate_model.h
     include/atmosphere_widget.h
+    include/equal_area_projection.h
+    include/mollweide_projection.h
+    include/planet_surface_grid.h
+    include/planet_surface_point.h
     include/segment_selector_widget.h
+    include/surface_point_state.h
     include/surface_temperature_state.h
+    include/surface_temperature_scale_widget.h
+    include/surface_map_widget.h
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
     src/atmospheric_radiation_model.cpp
     src/atmospheric_circulation_model.cpp
     src/atmospheric_lapse_rate_model.cpp
     src/atmosphere_widget.cpp
+    src/mollweide_projection.cpp
     src/mode_illustration_widget.cpp
     src/mode_illustration_widget.h
     src/orbit_segment_calculator.cpp
+    src/planet_surface_grid.cpp
     src/planet_presets.cpp
     src/segment_selector_widget.cpp
     src/solar_calculator.cpp
     src/solar_display.cpp
+    src/surface_map_widget.cpp
+    src/surface_point_state.cpp
     src/surface_temperature_calculator.cpp
+    src/surface_temperature_scale_widget.cpp
     src/surface_temperature_state.cpp
     src/surface_temperature_plot.cpp
     src/temperature_plot_tracker.cpp
