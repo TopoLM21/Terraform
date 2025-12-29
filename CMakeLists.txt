@@ -24,6 +24,7 @@ add_executable(solar_constant
     include/surface_temperature_state.h
     include/surface_temperature_scale_widget.h
     include/surface_map_widget.h
+    include/temperature_color_scale.h
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
     src/atmospheric_radiation_model.cpp
@@ -46,6 +47,7 @@ add_executable(solar_constant
     src/surface_temperature_state.cpp
     src/surface_temperature_plot.cpp
     src/temperature_plot_tracker.cpp
+    src/temperature_color_scale.cpp
 )
 
 target_include_directories(solar_constant PRIVATE include src)

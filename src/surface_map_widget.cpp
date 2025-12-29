@@ -5,6 +5,8 @@
 #include <QToolTip>
 #include <QtMath>
 
+#include "temperature_color_scale.h"
+
 namespace {
 const double kMaxX = 2.0 * qSqrt(2.0);
 const double kMaxY = qSqrt(2.0);
@@ -138,15 +140,12 @@ QPoint SurfaceMapWidget::mapPointToPixel(double latitudeDeg, double longitudeDeg
 
 QRgb SurfaceMapWidget::temperatureToColor(double temperatureK) const {
     if (qFuzzyCompare(minTemperatureK_, maxTemperatureK_)) {
-        return qRgb(128, 128, 255);
+        return temperatureColorForRatio(0.5).rgb();
     }
     const double t = qBound(0.0,
                             (temperatureK - minTemperatureK_) / (maxTemperatureK_ - minTemperatureK_),
                             1.0);
-    const int r = static_cast<int>(255.0 * t);
-    const int g = static_cast<int>(80.0 * (1.0 - t));
-    const int b = static_cast<int>(255.0 * (1.0 - t));
-    return qRgb(r, g, b);
+    return temperatureColorForRatio(t).rgb();
 }
 
 int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
