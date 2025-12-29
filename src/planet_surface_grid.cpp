@@ -177,6 +177,14 @@ const SurfaceCell *PlanetSurfaceGrid::cellAt(int index) const {
     return &cells_[index];
 }
 
+void PlanetSurfaceGrid::setHeightSource(HeightSourceType sourceType,
+                                        const QString &heightmapPath,
+                                        double heightmapScaleKm) {
+    heightSourceType_ = sourceType;
+    heightmapPath_ = heightmapPath;
+    heightmapScaleKm_ = heightmapScaleKm;
+}
+
 void PlanetSurfaceGrid::rebuildIcosahedronCells(int subdivisionLevel) {
     QVector<QVector3D> vertices;
     QVector<Face> faces;
@@ -304,7 +312,7 @@ void PlanetSurfaceGrid::rebuildIcosahedronCells(int subdivisionLevel) {
 }
 
 void PlanetSurfaceGrid::applyHeightModel() {
-    SurfaceHeightModel heightModel;
+    SurfaceHeightModel heightModel(heightSourceType_, heightmapPath_, heightmapScaleKm_);
     for (auto &point : points_) {
         point.heightKm = heightModel.heightKmAt(point.latitudeDeg, point.longitudeDeg);
     }
