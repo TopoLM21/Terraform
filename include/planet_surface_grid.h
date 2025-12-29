@@ -26,7 +26,8 @@ public:
 
     void setHeightSource(HeightSourceType sourceType,
                          const QString &heightmapPath,
-                         double heightmapScaleKm);
+                         double heightmapScaleKm,
+                         bool useContinentsHeight);
 
 private:
     void rebuildIcosahedronCells(int subdivisionLevel);
@@ -37,6 +38,7 @@ private:
     HeightSourceType heightSourceType_ = HeightSourceType::Procedural;
     QString heightmapPath_;
     double heightmapScaleKm_ = 0.0;
+    bool useContinentsHeight_ = false;
     QVector<SurfacePoint> points_;
     QVector<SurfaceCell> cells_;
 };
