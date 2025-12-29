@@ -8,10 +8,12 @@ public:
     SurfaceHeightModel();
     SurfaceHeightModel(HeightSourceType sourceType,
                        const QString &heightmapPath,
-                       double heightmapScaleKm);
+                       double heightmapScaleKm,
+                       bool useContinentsHeight);
     double heightKmAt(double latitudeDeg, double longitudeDeg) const;
 
 private:
     HeightSourceType sourceType_ = HeightSourceType::Procedural;
     SurfaceHeightmap heightmap_;
+    bool useContinentsHeight_ = false;
 };

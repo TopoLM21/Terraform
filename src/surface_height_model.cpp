@@ -107,8 +107,10 @@ SurfaceHeightModel::SurfaceHeightModel() = default;
 
 SurfaceHeightModel::SurfaceHeightModel(HeightSourceType sourceType,
                                        const QString &heightmapPath,
-                                       double heightmapScaleKm)
-    : sourceType_(sourceType) {
+                                       double heightmapScaleKm,
+                                       bool useContinentsHeight)
+    : sourceType_(sourceType),
+      useContinentsHeight_(useContinentsHeight) {
     if (sourceType_ == HeightSourceType::HeightmapEquirectangular) {
         if (!heightmap_.loadFromFile(heightmapPath, heightmapScaleKm)) {
             sourceType_ = HeightSourceType::Procedural;
@@ -122,6 +124,25 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
     }
 
     const QVector3D p = unitSpherePoint(latitudeDeg, longitudeDeg);
+
+    if (useContinentsHeight_) {
+        // Низкочастотная FBM-маска формирует крупные континенты: частота мала, октав мало.
+        const double continentNoise = fbmNoise(p, 0.45, 3);
+        // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
+        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.05) / 0.95, 1.0));
+
+        // Гладкие равнины: средняя частота, небольшой вклад амплитуды.
+        const double plains = 0.5 + 0.5 * fbmNoise(p, 1.6, 4);
+        // Ridged noise даёт хребты: инверсия модуля шумового сигнала подчёркивает пики.
+        const double mountains = ridgedFbmNoise(p, 3.2, 4);
+
+        // Базовый уровень океана: отрицательный, чтобы было "морское дно".
+        const double oceanDepthKm = -5.5;
+        // Высота суши складывается из равнин и гор, чтобы избежать гауссовского вида.
+        const double landHeightKm = plains * 1.8 + mountains * 4.5;
+        // Маска плавно смешивает океан и сушу в километрах.
+        return lerp(oceanDepthKm, landHeightKm, landMask);
+    }
 
     const double continentA = ridgedFbmNoise(p, 0.7, 4);
     const double continentB = ridgedFbmNoise(p, 1.3, 3);
