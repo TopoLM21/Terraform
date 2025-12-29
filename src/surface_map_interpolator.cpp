@@ -4,7 +4,200 @@
 namespace {
 const double kMaxX = 2.0 * qSqrt(2.0);
 const double kMaxY = qSqrt(2.0);
+
+struct ProjectedNeighbor {
+    int index = -1;
+    double distanceSquared = 0.0;
+};
 } // namespace
+
+struct SurfaceMapInterpolator::SpatialIndex {
+    explicit SpatialIndex(const QVector<QPointF> &points) {
+        if (points.isEmpty()) {
+            return;
+        }
+
+        double minX = points.front().x();
+        double maxX = minX;
+        double minY = points.front().y();
+        double maxY = minY;
+        for (const auto &point : points) {
+            minX = qMin(minX, point.x());
+            maxX = qMax(maxX, point.x());
+            minY = qMin(minY, point.y());
+            maxY = qMax(maxY, point.y());
+        }
+
+        const double spanX = qMax(1e-6, maxX - minX);
+        const double spanY = qMax(1e-6, maxY - minY);
+        const int gridSide = qMax(1, static_cast<int>(qSqrt(points.size())));
+
+        minX_ = minX;
+        minY_ = minY;
+        cellsX_ = qMax(1, gridSide);
+        cellsY_ = qMax(1, gridSide);
+        cellWidth_ = spanX / static_cast<double>(cellsX_);
+        cellHeight_ = spanY / static_cast<double>(cellsY_);
+        cells_.resize(cellsX_ * cellsY_);
+
+        for (int i = 0; i < points.size(); ++i) {
+            const int cellX = cellIndexX(points[i].x());
+            const int cellY = cellIndexY(points[i].y());
+            cells_[flatIndex(cellX, cellY)].push_back(i);
+        }
+    }
+
+    void findNearest(const QPointF &target,
+                     int maxNeighbors,
+                     const QVector<QPointF> &points,
+                     QVector<ProjectedNeighbor> *neighbors,
+                     int *exactIndex) const {
+        neighbors->clear();
+        neighbors->reserve(maxNeighbors);
+        if (cells_.isEmpty()) {
+            return;
+        }
+
+        if (exactIndex) {
+            *exactIndex = -1;
+        }
+
+        const int targetCellX = cellIndexX(target.x());
+        const int targetCellY = cellIndexY(target.y());
+        int minCellX = targetCellX;
+        int maxCellX = targetCellX;
+        int minCellY = targetCellY;
+        int maxCellY = targetCellY;
+
+        const int maxRadius = qMax(cellsX_, cellsY_);
+        for (int radius = 0; radius <= maxRadius; ++radius) {
+            const int startX = qMax(0, targetCellX - radius);
+            const int endX = qMin(cellsX_ - 1, targetCellX + radius);
+            const int startY = qMax(0, targetCellY - radius);
+            const int endY = qMin(cellsY_ - 1, targetCellY + radius);
+
+            auto scanCell = [&](int cellX, int cellY) -> bool {
+                const auto &cell = cells_[flatIndex(cellX, cellY)];
+                for (int index : cell) {
+                    const QPointF point = points[index];
+                    const double dx = point.x() - target.x();
+                    const double dy = point.y() - target.y();
+                    const double distanceSquared = dx * dx + dy * dy;
+                    if (distanceSquared < 1e-12) {
+                        if (exactIndex) {
+                            *exactIndex = index;
+                        }
+                        return true;
+                    }
+
+                    if (neighbors->size() < maxNeighbors) {
+                        neighbors->push_back({index, distanceSquared});
+                        continue;
+                    }
+
+                    int worstIndex = 0;
+                    double worstDistance = (*neighbors)[0].distanceSquared;
+                    for (int i = 1; i < neighbors->size(); ++i) {
+                        if ((*neighbors)[i].distanceSquared > worstDistance) {
+                            worstDistance = (*neighbors)[i].distanceSquared;
+                            worstIndex = i;
+                        }
+                    }
+
+                    if (distanceSquared < worstDistance) {
+                        (*neighbors)[worstIndex] = {index, distanceSquared};
+                    }
+                }
+                return false;
+            };
+
+            for (int x = startX; x <= endX; ++x) {
+                if (scanCell(x, startY)) {
+                    return;
+                }
+                if (startY != endY && scanCell(x, endY)) {
+                    return;
+                }
+            }
+
+            for (int y = startY + 1; y <= endY - 1; ++y) {
+                if (scanCell(startX, y)) {
+                    return;
+                }
+                if (startX != endX && scanCell(endX, y)) {
+                    return;
+                }
+            }
+
+            minCellX = startX;
+            maxCellX = endX;
+            minCellY = startY;
+            maxCellY = endY;
+
+            if (neighbors->size() >= maxNeighbors) {
+                double worstDistance = (*neighbors)[0].distanceSquared;
+                for (int i = 1; i < neighbors->size(); ++i) {
+                    worstDistance = qMax(worstDistance, (*neighbors)[i].distanceSquared);
+                }
+
+                const double minDistanceOutside = minDistanceToOutside(target,
+                                                                       minCellX,
+                                                                       maxCellX,
+                                                                       minCellY,
+                                                                       maxCellY);
+                if (minDistanceOutside * minDistanceOutside >= worstDistance) {
+                    return;
+                }
+            }
+
+            if (startX == 0 && endX == cellsX_ - 1 && startY == 0 && endY == cellsY_ - 1) {
+                return;
+            }
+        }
+    }
+
+private:
+    int cellIndexX(double x) const {
+        const double normalized = (x - minX_) / cellWidth_;
+        return qBound(0, static_cast<int>(normalized), cellsX_ - 1);
+    }
+
+    int cellIndexY(double y) const {
+        const double normalized = (y - minY_) / cellHeight_;
+        return qBound(0, static_cast<int>(normalized), cellsY_ - 1);
+    }
+
+    int flatIndex(int cellX, int cellY) const {
+        return cellY * cellsX_ + cellX;
+    }
+
+    double minDistanceToOutside(const QPointF &target,
+                                int minCellX,
+                                int maxCellX,
+                                int minCellY,
+                                int maxCellY) const {
+        const double rectMinX = minX_ + static_cast<double>(minCellX) * cellWidth_;
+        const double rectMaxX = minX_ + static_cast<double>(maxCellX + 1) * cellWidth_;
+        const double rectMinY = minY_ + static_cast<double>(minCellY) * cellHeight_;
+        const double rectMaxY = minY_ + static_cast<double>(maxCellY + 1) * cellHeight_;
+
+        const double distanceLeft = target.x() - rectMinX;
+        const double distanceRight = rectMaxX - target.x();
+        const double distanceBottom = target.y() - rectMinY;
+        const double distanceTop = rectMaxY - target.y();
+        const double distanceToSide = qMin(qMin(distanceLeft, distanceRight),
+                                           qMin(distanceBottom, distanceTop));
+        return qMax(0.0, distanceToSide);
+    }
+
+    double minX_ = 0.0;
+    double minY_ = 0.0;
+    double cellWidth_ = 1.0;
+    double cellHeight_ = 1.0;
+    int cellsX_ = 0;
+    int cellsY_ = 0;
+    QVector<QVector<int>> cells_;
+};
 
 SurfaceMapInterpolator::SurfaceMapInterpolator(const PlanetSurfaceGrid *grid,
                                                const MollweideProjection *projection)
@@ -127,6 +320,8 @@ QVector<PixelWeights> SurfaceMapInterpolator::buildPixelWeights(const QSize &ima
         const auto &point = grid_->points()[i];
         projectedPoints[i] = projection_->project(point.latitudeDeg, point.longitudeDeg);
     }
+
+    SpatialIndex spatialIndex(projectedPoints);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const int pixelIndex = y * width + x;
@@ -139,49 +334,25 @@ QVector<PixelWeights> SurfaceMapInterpolator::buildPixelWeights(const QSize &ima
                 continue;
             }
 
-            struct Neighbor {
-                int index = -1;
-                double distanceSquared = 0.0;
-            };
+            QVector<ProjectedNeighbor> neighbors;
+            int exactIndex = -1;
+            // Пространственный индекс ускоряет поиск кандидатов ближайших точек в
+            // проекции, не меняя результат IDW по сравнению с полным перебором.
+            spatialIndex.findNearest(projected,
+                                     maxNeighbors,
+                                     projectedPoints,
+                                     &neighbors,
+                                     &exactIndex);
 
-            QVector<Neighbor> neighbors;
-            neighbors.reserve(maxNeighbors);
-
-            bool exactMatch = false;
-            for (int i = 0; i < grid_->points().size(); ++i) {
-                const QPointF pointProjected = projectedPoints[i];
-                const double dx = pointProjected.x() - projected.x();
-                const double dy = pointProjected.y() - projected.y();
-                const double distanceSquared = dx * dx + dy * dy;
-                if (distanceSquared < 1e-12) {
-                    PixelWeights weights;
-                    weights.indices.push_back(i);
-                    weights.weights.push_back(1.0f);
-                    result[pixelIndex] = std::move(weights);
-                    exactMatch = true;
-                    break;
-                }
-
-                if (neighbors.size() < maxNeighbors) {
-                    neighbors.push_back({i, distanceSquared});
-                    continue;
-                }
-
-                int worstIndex = 0;
-                double worstDistance = neighbors[0].distanceSquared;
-                for (int n = 1; n < neighbors.size(); ++n) {
-                    if (neighbors[n].distanceSquared > worstDistance) {
-                        worstDistance = neighbors[n].distanceSquared;
-                        worstIndex = n;
-                    }
-                }
-
-                if (distanceSquared < worstDistance) {
-                    neighbors[worstIndex] = {i, distanceSquared};
-                }
+            if (exactIndex >= 0) {
+                PixelWeights weights;
+                weights.indices.push_back(exactIndex);
+                weights.weights.push_back(1.0f);
+                result[pixelIndex] = std::move(weights);
+                continue;
             }
 
-            if (exactMatch || neighbors.isEmpty()) {
+            if (neighbors.isEmpty()) {
                 continue;
             }
 
