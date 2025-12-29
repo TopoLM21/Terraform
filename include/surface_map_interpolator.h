@@ -28,6 +28,8 @@ private:
                                const QSize &imageSize,
                                QPointF *projected) const;
 
+    struct SpatialIndex;
+
     const PlanetSurfaceGrid *grid_ = nullptr;
     const MollweideProjection *projection_ = nullptr;
 };
