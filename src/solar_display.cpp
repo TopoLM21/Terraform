@@ -1625,59 +1625,137 @@ private:
             return;
         }
 
+        const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        const RotationMode rotationMode =
+            static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
+        const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
+        const double phase =
+            2.0 * M_PI *
+            (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
+            static_cast<double>(stepsPerDay);
+        const double baseHourAngle =
+            (rotationMode == RotationMode::TidalLocked) ? 0.0 : (phase - M_PI);
+        // Субзвёздная долгота - долгота, где часовой угол равен нулю.
+        // Для приливной синхронизации она фиксирована в системе долгот карты.
+        const double substellarLongitudeRadians =
+            (rotationMode == RotationMode::TidalLocked) ? 0.0 : -baseHourAngle;
+
+        double declinationDegrees = surfaceSimState_.declinationDegrees;
+        if (lastOrbitSegments_.size() > 0) {
+            const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
+            const double perihelionArgument =
+                planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
+            const double obliquityRadians = qDegreesToRadians(obliquity);
+            const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgument);
+            const int segmentIndex = surfaceSimState_.segmentIndex % lastOrbitSegments_.size();
+            const OrbitSegment &segment = lastOrbitSegments_.at(segmentIndex);
+            // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
+            const double solarLongitude = segment.trueAnomalyRadians + perihelionArgumentRadians;
+            declinationDegrees = qRadiansToDegrees(
+                std::asin(std::sin(obliquityRadians) * std::sin(solarLongitude)));
+        }
+        const double declinationRadians = qDegreesToRadians(declinationDegrees);
+
         auto interpolateTemperatureByLatitude = [summarySource,
-                                                  segmentSource](double latitudeDeg) {
-            // Используем зонально-симметричную аппроксимацию: температура зависит только от широты.
-            // Это физически упрощает модель до средней по долготе, чтобы быстро заполнить карту.
+                                                  segmentSource,
+                                                  declinationRadians,
+                                                  substellarLongitudeRadians](double latitudeDeg,
+                                                                               double longitudeDeg) {
+            // Используем упрощенную аппроксимацию: базовая температура зависит от широты,
+            // а долгота учитывается через локальный зенитный угол для дневной/ночной стороны.
             if (summarySource) {
                 const auto &points = *summarySource;
+                auto interpolate = [&points, latitudeDeg](auto valueForPoint) {
+                    if (points.size() == 1) {
+                        return valueForPoint(points.first());
+                    }
+                    if (latitudeDeg <= points.first().latitudeDegrees) {
+                        return valueForPoint(points.first());
+                    }
+                    if (latitudeDeg >= points.last().latitudeDegrees) {
+                        return valueForPoint(points.last());
+                    }
+                    for (int i = 1; i < points.size(); ++i) {
+                        if (latitudeDeg <= points[i].latitudeDegrees) {
+                            const auto &lower = points[i - 1];
+                            const auto &upper = points[i];
+                            const double span = upper.latitudeDegrees - lower.latitudeDegrees;
+                            const double t =
+                                span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
+                            return valueForPoint(lower) + t * (valueForPoint(upper) - valueForPoint(lower));
+                        }
+                    }
+                    return valueForPoint(points.last());
+                };
+                const double meanDay =
+                    interpolate([](const TemperatureSummaryPoint &point) {
+                        return point.meanAnnualDayKelvin;
+                    });
+                const double meanNight =
+                    interpolate([](const TemperatureSummaryPoint &point) {
+                        return point.meanAnnualNightKelvin;
+                    });
+
+                const double latitudeRadians = qDegreesToRadians(latitudeDeg);
+                const double longitudeRadians = qDegreesToRadians(longitudeDeg);
+                const double localHourAngle = longitudeRadians - substellarLongitudeRadians;
+                const double cosZenith =
+                    std::sin(latitudeRadians) * std::sin(declinationRadians) +
+                    std::cos(latitudeRadians) * std::cos(declinationRadians) *
+                        std::cos(localHourAngle);
+                // Дневная/ночная температура плавно смешиваются через локальный косинус зенита.
+                const double dayFactor = qBound(0.0, cosZenith, 1.0);
+                return meanNight + dayFactor * (meanDay - meanNight);
+            }
+
+            const auto &points = *segmentSource;
+            auto interpolate = [&points, latitudeDeg](auto valueForPoint) {
                 if (points.size() == 1) {
-                    return points.first().meanAnnualKelvin;
+                    return valueForPoint(points.first());
                 }
                 if (latitudeDeg <= points.first().latitudeDegrees) {
-                    return points.first().meanAnnualKelvin;
+                    return valueForPoint(points.first());
                 }
                 if (latitudeDeg >= points.last().latitudeDegrees) {
-                    return points.last().meanAnnualKelvin;
+                    return valueForPoint(points.last());
                 }
                 for (int i = 1; i < points.size(); ++i) {
                     if (latitudeDeg <= points[i].latitudeDegrees) {
                         const auto &lower = points[i - 1];
                         const auto &upper = points[i];
                         const double span = upper.latitudeDegrees - lower.latitudeDegrees;
-                        const double t = span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
-                        return lower.meanAnnualKelvin + t * (upper.meanAnnualKelvin - lower.meanAnnualKelvin);
+                        const double t =
+                            span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
+                        return valueForPoint(lower) + t * (valueForPoint(upper) - valueForPoint(lower));
                     }
                 }
-                return points.last().meanAnnualKelvin;
-            }
+                return valueForPoint(points.last());
+            };
+            const double meanDay =
+                interpolate([](const TemperatureRangePoint &point) {
+                    return point.meanDayKelvin;
+                });
+            const double meanNight =
+                interpolate([](const TemperatureRangePoint &point) {
+                    return point.meanNightKelvin;
+                });
 
-            const auto &points = *segmentSource;
-            if (points.size() == 1) {
-                return points.first().meanDailyKelvin;
-            }
-            if (latitudeDeg <= points.first().latitudeDegrees) {
-                return points.first().meanDailyKelvin;
-            }
-            if (latitudeDeg >= points.last().latitudeDegrees) {
-                return points.last().meanDailyKelvin;
-            }
-            for (int i = 1; i < points.size(); ++i) {
-                if (latitudeDeg <= points[i].latitudeDegrees) {
-                    const auto &lower = points[i - 1];
-                    const auto &upper = points[i];
-                    const double span = upper.latitudeDegrees - lower.latitudeDegrees;
-                    const double t = span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
-                    return lower.meanDailyKelvin + t * (upper.meanDailyKelvin - lower.meanDailyKelvin);
-                }
-            }
-            return points.last().meanDailyKelvin;
+            const double latitudeRadians = qDegreesToRadians(latitudeDeg);
+            const double longitudeRadians = qDegreesToRadians(longitudeDeg);
+            const double localHourAngle = longitudeRadians - substellarLongitudeRadians;
+            const double cosZenith =
+                std::sin(latitudeRadians) * std::sin(declinationRadians) +
+                std::cos(latitudeRadians) * std::cos(declinationRadians) *
+                    std::cos(localHourAngle);
+            const double dayFactor = qBound(0.0, cosZenith, 1.0);
+            return meanNight + dayFactor * (meanDay - meanNight);
         };
 
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
         for (auto &point : surfaceGrid_.points()) {
-            point.temperatureK = interpolateTemperatureByLatitude(point.latitudeDeg);
+            point.temperatureK =
+                interpolateTemperatureByLatitude(point.latitudeDeg, point.longitudeDeg);
             point.state = SurfacePointState(point.temperatureK,
                                             stateDefaults->albedo,
                                             stateDefaults->heatCapacity,
@@ -1779,16 +1857,21 @@ private:
             static_cast<double>(stepsPerDay);
         const double hourAngle =
             (rotationMode == RotationMode::TidalLocked) ? 0.0 : (phase - M_PI);
+        // Субзвёздная долгота задает меридиан с нулевым часовым углом.
+        const double substellarLongitudeRadians =
+            (rotationMode == RotationMode::TidalLocked) ? 0.0 : -hourAngle;
         const double declinationRadians = qDegreesToRadians(surfaceSimState_.declinationDegrees);
 
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
         for (auto &point : surfaceGrid_.points()) {
             const double latitudeRadians = qDegreesToRadians(point.latitudeDeg);
+            const double longitudeRadians = qDegreesToRadians(point.longitudeDeg);
+            const double localHourAngle = longitudeRadians - substellarLongitudeRadians;
             const double cosZenith =
                 std::sin(latitudeRadians) * std::sin(declinationRadians) +
                 std::cos(latitudeRadians) * std::cos(declinationRadians) *
-                    std::cos(hourAngle);
+                    std::cos(localHourAngle);
             // S_inst = S0 * cos(zenith) при освещении, иначе 0.
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
