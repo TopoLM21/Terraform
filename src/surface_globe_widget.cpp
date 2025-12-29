@@ -65,10 +65,6 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         return;
     }
 
-    // Направление света выбрано слегка сверху-слева и с фронта, чтобы подчеркнуть объем
-    // без резкого пересвета на контуре сферы.
-    const QVector3D lightDir = QVector3D(-0.35f, 0.4f, 0.85f).normalized();
-
     QVector<GlobePoint> visiblePoints;
     visiblePoints.reserve(grid_->pointCount());
 
@@ -84,8 +80,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         GlobePoint globePoint;
         globePoint.position = projected;
         globePoint.z = normal.z();
-        globePoint.color =
-            applyLambertLighting(temperatureToColor(point.temperatureK), normal, lightDir);
+        // Освещение отключено по требованию отображения без теней и подсветок.
+        globePoint.color = temperatureToColor(point.temperatureK);
         visiblePoints.push_back(globePoint);
     }
 
@@ -101,14 +97,6 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         painter.drawEllipse(point.position, dotRadius, dotRadius);
     }
 
-    const QColor limbColor = palette().windowText().color();
-    QRadialGradient limbGradient(center, sphereRadius);
-    limbGradient.setColorAt(0.0, QColor(0, 0, 0, 0));
-    limbGradient.setColorAt(0.82, QColor(0, 0, 0, 0));
-    limbGradient.setColorAt(1.0, QColor(limbColor.red(), limbColor.green(), limbColor.blue(), 70));
-    painter.setBrush(limbGradient);
-    painter.setPen(Qt::NoPen);
-    painter.drawEllipse(center, sphereRadius, sphereRadius);
 }
 
 QColor SurfaceGlobeWidget::temperatureToColor(double temperatureK) const {
@@ -119,17 +107,6 @@ QColor SurfaceGlobeWidget::temperatureToColor(double temperatureK) const {
                             (temperatureK - minTemperatureK_) / (maxTemperatureK_ - minTemperatureK_),
                             1.0);
     return temperatureColorForRatio(t);
-}
-
-QColor SurfaceGlobeWidget::applyLambertLighting(const QColor &color,
-                                                const QVector3D &normal,
-                                                const QVector3D &lightDir) const {
-    // Ламбертово освещение: I = max(0, dot(n, L)).
-    const float intensity = qMax(0.0f, QVector3D::dotProduct(normal, lightDir));
-    const float r = static_cast<float>(color.redF()) * intensity;
-    const float g = static_cast<float>(color.greenF()) * intensity;
-    const float b = static_cast<float>(color.blueF()) * intensity;
-    return QColor::fromRgbF(r, g, b, color.alphaF());
 }
 
 double SurfaceGlobeWidget::pointRadiusPx(int pointCount, double sphereRadiusPx) const {
