@@ -7,6 +7,7 @@
 #include <QTransform>
 #include <QtMath>
 
+#include "height_color_scale.h"
 #include "temperature_color_scale.h"
 
 namespace {
@@ -97,6 +98,14 @@ SurfaceMapWidget::SurfaceMapWidget(QWidget *parent)
 void SurfaceMapWidget::setGrid(const PlanetSurfaceGrid *grid) {
     grid_ = grid;
     geometryCache_.clear();
+    rebuildImages();
+}
+
+void SurfaceMapWidget::setMapMode(SurfaceMapMode mode) {
+    if (mapMode_ == mode) {
+        return;
+    }
+    mapMode_ = mode;
     rebuildImages();
 }
 
@@ -194,14 +203,20 @@ void SurfaceMapWidget::rebuildImages() {
     if (grid_->pointCount() > 0) {
         double minTemp = grid_->points().first().temperatureK;
         double maxTemp = minTemp;
+        double minHeight = grid_->points().first().heightKm;
+        double maxHeight = minHeight;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
+            minHeight = qMin(minHeight, point.heightKm);
+            maxHeight = qMax(maxHeight, point.heightKm);
         }
         if (minTemp != maxTemp) {
             minTemperatureK_ = minTemp;
             maxTemperatureK_ = maxTemp;
         }
+        minHeightKm_ = minHeight;
+        maxHeightKm_ = maxHeight;
     }
 
     const double baseRadius = pointRadiusPx(grid_->pointCount(), size());
@@ -241,16 +256,22 @@ void SurfaceMapWidget::rebuildImages() {
                     continue;
                 }
 
-                double temperatureK = 0.0;
+                double value = 0.0;
                 for (int i = 0; i < pixelWeights.indices.size(); ++i) {
                     const int pointIndex = pixelWeights.indices[i];
                     if (pointIndex < 0 || pointIndex >= points.size()) {
                         continue;
                     }
-                    temperatureK += pixelWeights.weights[i] * points[pointIndex].temperatureK;
+                    const double sample =
+                        (mapMode_ == SurfaceMapMode::Temperature)
+                            ? points[pointIndex].temperatureK
+                            : points[pointIndex].heightKm;
+                    value += pixelWeights.weights[i] * sample;
                 }
 
-                scanLine[x] = temperatureToColor(temperatureK);
+                scanLine[x] = (mapMode_ == SurfaceMapMode::Temperature)
+                                  ? temperatureToColor(value)
+                                  : heightToColor(value);
             }
         }
     }
@@ -272,7 +293,11 @@ void SurfaceMapWidget::rebuildImages() {
             const auto idPaths = buildCellPaths(cell, projection_, size());
             if (!interpolationEnabled_) {
                 const auto colorPaths = buildCellPaths(cell, projection_, scaledSize);
-                colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
+                const QRgb color =
+                    (mapMode_ == SurfaceMapMode::Temperature)
+                        ? temperatureToColor(point.temperatureK)
+                        : heightToColor(point.heightKm);
+                colorPainter.setBrush(QColor::fromRgb(color));
                 for (const auto &path : colorPaths) {
                     colorPainter.drawPath(path);
                 }
@@ -299,7 +324,11 @@ void SurfaceMapWidget::rebuildImages() {
                                              pixel.y() - scaledPointRadius,
                                              scaledPointRadius * 2.0,
                                              scaledPointRadius * 2.0);
-                    colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
+                    const QRgb color =
+                        (mapMode_ == SurfaceMapMode::Temperature)
+                            ? temperatureToColor(point.temperatureK)
+                            : heightToColor(point.heightKm);
+                    colorPainter.setBrush(QColor::fromRgb(color));
                     colorPainter.drawEllipse(ellipseRect);
                 }
             }
@@ -338,6 +367,27 @@ QRgb SurfaceMapWidget::temperatureToColor(double temperatureK) const {
                             (temperatureK - minTemperatureK_) / (maxTemperatureK_ - minTemperatureK_),
                             1.0);
     return temperatureColorForRatio(t).rgb();
+}
+
+QRgb SurfaceMapWidget::heightToColor(double heightKm) const {
+    if (qFuzzyCompare(minHeightKm_, maxHeightKm_)) {
+        return heightColorForRatio(0.5).rgb();
+    }
+    if (minHeightKm_ < 0.0 && maxHeightKm_ > 0.0) {
+        // Делим диапазон по уровню моря: отрицательные высоты идут в нижнюю половину шкалы,
+        // положительные - в верхнюю, чтобы береговая линия всегда попадала в середину.
+        if (heightKm <= 0.0) {
+            const double t = qBound(0.0, heightKm / minHeightKm_, 1.0);
+            return heightColorForRatio(0.5 - 0.5 * t).rgb();
+        }
+        const double t = qBound(0.0, heightKm / maxHeightKm_, 1.0);
+        return heightColorForRatio(0.5 + 0.5 * t).rgb();
+    }
+
+    const double t = qBound(0.0,
+                            (heightKm - minHeightKm_) / (maxHeightKm_ - minHeightKm_),
+                            1.0);
+    return heightColorForRatio(t).rgb();
 }
 
 int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
