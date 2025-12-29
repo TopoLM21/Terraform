@@ -27,6 +27,7 @@ add_executable(solar_constant
     include/surface_map_interpolator.h
     include/surface_map_cache.h
     include/surface_cell.h
+    include/surface_height_model.h
     include/surface_globe_widget.h
     include/surface_point_status_dialog.h
     include/temperature_color_scale.h
@@ -49,6 +50,7 @@ add_executable(solar_constant
     src/surface_map_interpolator.cpp
     src/surface_map_cache.cpp
     src/surface_globe_widget.cpp
+    src/surface_height_model.cpp
     src/surface_point_status_dialog.cpp
     src/surface_point_state.cpp
     src/surface_temperature_calculator.cpp
