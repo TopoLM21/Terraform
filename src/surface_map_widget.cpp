@@ -143,8 +143,12 @@ void SurfaceMapWidget::rebuildImages() {
         }
     }
 
-    const double pointRadius = pointRadiusPx(grid_->pointCount(), size());
-    const double scaledPointRadius = pointRadiusPx(grid_->pointCount(), scaledSize);
+    const double baseRadius = pointRadiusPx(grid_->pointCount(), size());
+    const double baseScaledRadius = pointRadiusPx(grid_->pointCount(), scaledSize);
+    // В режиме точек увеличиваем радиус чуть сильнее, чтобы уменьшить заметные швы.
+    const double dotScale = interpolationEnabled_ ? 1.0 : 1.25;
+    const double pointRadius = qMin(baseRadius * dotScale, 6.0);
+    const double scaledPointRadius = qMin(baseScaledRadius * dotScale, 6.0);
 
     QPainter idPainter(&idImage_);
     idPainter.setRenderHint(QPainter::Antialiasing, false);
