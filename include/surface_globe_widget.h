@@ -15,12 +15,19 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
 
 private:
     QColor temperatureToColor(double temperatureK) const;
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
+    QVector3D applyRotation(const QVector3D &v) const;
 
     const PlanetSurfaceGrid *grid_ = nullptr;
     double minTemperatureK_ = 200.0;
     double maxTemperatureK_ = 320.0;
+    float yawDeg_ = 0.0f;
+    float pitchDeg_ = 0.0f;
+    QPoint lastMousePos_;
+    bool isDragging_ = false;
 };
