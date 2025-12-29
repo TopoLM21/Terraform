@@ -91,6 +91,7 @@ struct TemperatureCacheKey {
     double eccentricity = 0.0;
     double obliquity = 0.0;
     double perihelionArgument = 0.0;
+    double planetRadiusKm = 0.0;
     int latitudePoints = 0;
     int segmentCount = 0;
     RotationMode rotationMode = RotationMode::Normal;
@@ -108,6 +109,7 @@ struct TemperatureCacheKey {
                eccentricity == other.eccentricity &&
                obliquity == other.obliquity &&
                perihelionArgument == other.perihelionArgument &&
+               planetRadiusKm == other.planetRadiusKm &&
                latitudePoints == other.latitudePoints &&
                segmentCount == other.segmentCount &&
                rotationMode == other.rotationMode;
@@ -139,6 +141,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.eccentricity), seed);
     seed = qHash(hashDoubleBits(key.obliquity), seed);
     seed = qHash(hashDoubleBits(key.perihelionArgument), seed);
+    seed = qHash(hashDoubleBits(key.planetRadiusKm), seed);
     seed = qHash(key.latitudePoints, seed);
     seed = qHash(key.segmentCount, seed);
     seed = qHash(static_cast<int>(key.rotationMode), seed);
@@ -2122,6 +2125,9 @@ private:
                                             eccentricity,
                                             obliquity,
                                             perihelionArgument,
+                                            // Радиус влияет на столбовую плотность и водный баланс, поэтому он
+                                            // должен входить в ключ кэша температурных расчётов.
+                                            radiusKm,
                                             latitudePointCount,
                                             segmentCount,
                                             rotationMode};
@@ -2138,6 +2144,9 @@ private:
                                                       eccentricity,
                                                       obliquity,
                                                       perihelionArgument,
+                                                      // Радиус влияет на столбовую плотность и водный баланс, поэтому он
+                                                      // должен входить в ключ кэша температурных расчётов.
+                                                      radiusKm,
                                                       latitudePointCount,
                                                       segmentCount,
                                                       rotationMode};
