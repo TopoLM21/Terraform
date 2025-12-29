@@ -3,6 +3,8 @@
 #include <QPainter>
 #include <QtMath>
 
+#include "temperature_color_scale.h"
+
 SurfaceTemperatureScaleWidget::SurfaceTemperatureScaleWidget(QWidget *parent)
     : QWidget(parent) {}
 
@@ -36,18 +38,11 @@ void SurfaceTemperatureScaleWidget::paintEvent(QPaintEvent *event) {
     }
 
     QLinearGradient gradient(barRect.topLeft(), barRect.topRight());
-    // Градиент повторяет схему карты температур: от холодного синего к тёплому красному.
-    gradient.setColorAt(0.0, colorForRatio(0.0));
-    gradient.setColorAt(0.5, colorForRatio(0.5));
-    gradient.setColorAt(1.0, colorForRatio(1.0));
+    // Остановки размещены плотнее в холодной части диапазона, чтобы небольшие перепады
+    // температуры читались лучше и не сливались в один оттенок.
+    for (const auto &stop : temperatureColorStops()) {
+        gradient.setColorAt(stop.position, stop.color);
+    }
     painter.setBrush(gradient);
     painter.drawRoundedRect(barRect, 3.0, 3.0);
-}
-
-QColor SurfaceTemperatureScaleWidget::colorForRatio(double ratio) const {
-    const double t = qBound(0.0, ratio, 1.0);
-    const int r = static_cast<int>(255.0 * t);
-    const int g = static_cast<int>(80.0 * (1.0 - t));
-    const int b = static_cast<int>(255.0 * (1.0 - t));
-    return QColor(r, g, b);
 }
