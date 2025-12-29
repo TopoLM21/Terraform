@@ -236,14 +236,30 @@ public:
             applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
             applySecondary(std::nullopt);
             resetSolarConstant();
-            setPlanetPresets(solarSystemPresets());
+            const auto presets = solarSystemPresets();
+            QString selectedPlanet = QStringLiteral("Земля");
+            const bool hasEarth =
+                std::any_of(presets.begin(), presets.end(), [](const PlanetPreset &preset) {
+                    return preset.name == QStringLiteral("Земля");
+                });
+            if (!hasEarth && !presets.isEmpty()) {
+                selectedPlanet = presets.first().name;
+            }
+            setPlanetPresets(presets, selectedPlanet);
+            autoCalculateEnabled_ = true;
+            onCalculateRequested();
         });
 
         addPresetButton(QStringLiteral("Сладкое Небо"), [this, applyPrimary, applySecondary]() {
             applyPrimary(StellarParameters{0.3761, 2576.0, 1.0});
             applySecondary(StellarParameters{0.3741, 2349.0, 1.0});
             resetSolarConstant();
-            setPlanetPresets(sweetSkyPresets());
+            const auto presets = sweetSkyPresets();
+            const QString selectedPlanet =
+                presets.isEmpty() ? QString() : presets.first().name;
+            setPlanetPresets(presets, selectedPlanet);
+            autoCalculateEnabled_ = true;
+            onCalculateRequested();
         });
 
         addPresetButton(QStringLiteral("Пусто"), [this, applyPrimary, applySecondary]() {
