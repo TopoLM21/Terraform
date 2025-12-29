@@ -8,6 +8,7 @@
 #include "surface_temperature_calculator.h"
 #include "surface_temperature_plot.h"
 #include "surface_map_widget.h"
+#include "surface_globe_widget.h"
 #include "surface_temperature_scale_widget.h"
 #include "planet_surface_grid.h"
 
@@ -48,6 +49,7 @@
 #include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QRadioButton>
+#include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QTabWidget>
 #include <QtWidgets/QVBoxLayout>
@@ -407,6 +409,13 @@ public:
         surfaceMapWidget_ = new SurfaceMapWidget(this);
         surfaceMapWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
         surfaceMapWidget_->setGrid(&surfaceGrid_);
+        surfaceGlobeWidget_ = new SurfaceGlobeWidget(this);
+        surfaceGlobeWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        surfaceGlobeWidget_->setGrid(&surfaceGrid_);
+        surfaceViewStack_ = new QStackedWidget(this);
+        surfaceViewStack_->addWidget(surfaceMapWidget_);
+        surfaceViewStack_->addWidget(surfaceGlobeWidget_);
+        surfaceViewStack_->setCurrentWidget(surfaceMapWidget_);
         surfaceMinTemperatureLabel_ = new QLabel(QStringLiteral("Мин: —"), this);
         surfaceMaxTemperatureLabel_ = new QLabel(QStringLiteral("Макс: —"), this);
         temperaturePauseButton_ = new QPushButton(QStringLiteral("Пауза"), this);
@@ -417,6 +426,8 @@ public:
         surfaceSimTimeLabel_ = new QLabel(QStringLiteral("t = —"), this);
         temperatureElapsedLabel_ = new QLabel(QStringLiteral("Прошло: 00:00"), this);
         surfaceSeamlessCheckBox_ = new QCheckBox(QStringLiteral("Бесшовная карта"), this);
+        surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
+        surfaceViewToggleButton_->setCheckable(true);
         temperatureScaleWidget_ = new SurfaceTemperatureScaleWidget(this);
         temperatureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         temperatureScaleWidget_->setMinimumHeight(18);
@@ -432,6 +443,7 @@ public:
         surfaceControlLayout->addWidget(surfaceSimTimeLabel_);
         surfaceControlLayout->addWidget(temperatureElapsedLabel_);
         surfaceControlLayout->addWidget(surfaceSeamlessCheckBox_);
+        surfaceControlLayout->addWidget(surfaceViewToggleButton_);
         surfaceControlLayout->addStretch();
         auto *surfaceLegendBottomLayout = new QHBoxLayout();
         surfaceLegendBottomLayout->addStretch();
@@ -440,7 +452,7 @@ public:
         auto *surfaceMapLayout = new QVBoxLayout();
         surfaceMapLayout->addLayout(surfaceLegendTopLayout);
         surfaceMapLayout->addLayout(surfaceControlLayout);
-        surfaceMapLayout->addWidget(surfaceMapWidget_, 1);
+        surfaceMapLayout->addWidget(surfaceViewStack_, 1);
         surfaceMapLayout->addLayout(surfaceLegendBottomLayout);
         auto *surfaceMapContainer = new QWidget(this);
         surfaceMapContainer->setLayout(surfaceMapLayout);
@@ -586,6 +598,17 @@ public:
             if (surfaceMapWidget_) {
                 surfaceMapWidget_->setInterpolationEnabled(checked);
             }
+        });
+
+        connect(surfaceViewToggleButton_, &QPushButton::toggled, this, [this](bool checked) {
+            if (!surfaceViewStack_) {
+                return;
+            }
+            surfaceViewStack_->setCurrentWidget(checked
+                                                    ? static_cast<QWidget *>(surfaceGlobeWidget_)
+                                                    : static_cast<QWidget *>(surfaceMapWidget_));
+            surfaceViewToggleButton_->setText(checked ? QStringLiteral("2D вид")
+                                                      : QStringLiteral("3D вид"));
         });
 
         connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this, [this](bool checked) {
@@ -746,6 +769,8 @@ private:
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
     SurfaceMapWidget *surfaceMapWidget_ = nullptr;
+    SurfaceGlobeWidget *surfaceGlobeWidget_ = nullptr;
+    QStackedWidget *surfaceViewStack_ = nullptr;
     QLabel *surfaceMinTemperatureLabel_ = nullptr;
     QLabel *surfaceMaxTemperatureLabel_ = nullptr;
     QPushButton *temperaturePauseButton_ = nullptr;
@@ -754,6 +779,7 @@ private:
     QLabel *surfaceSimTimeLabel_ = nullptr;
     QLabel *temperatureElapsedLabel_ = nullptr;
     QCheckBox *surfaceSeamlessCheckBox_ = nullptr;
+    QPushButton *surfaceViewToggleButton_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
@@ -1637,18 +1663,36 @@ private:
         return defaults;
     }
 
+    void applySurfaceGridToViews() {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setGrid(&surfaceGrid_);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setGrid(&surfaceGrid_);
+        }
+    }
+
+    void applySurfaceTemperatureRangeToViews(double minTemperature, double maxTemperature) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setTemperatureRange(minTemperature, maxTemperature);
+        }
+    }
+
     void updateSurfaceGridTemperatures() {
         resetSurfaceSimulation();
         rebuildSurfaceGrid();
         if (surfaceGrid_.points().isEmpty()) {
-            surfaceMapWidget_->setGrid(&surfaceGrid_);
+            applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             return;
         }
 
         const auto stateDefaults = buildSurfacePointStateDefaults();
         if (!stateDefaults) {
-            surfaceMapWidget_->setGrid(&surfaceGrid_);
+            applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             return;
         }
@@ -1673,7 +1717,7 @@ private:
                                                 stateDefaults->greenhouseOpacity,
                                                 stateDefaults->minTemperatureKelvin);
             }
-            surfaceMapWidget_->setGrid(&surfaceGrid_);
+            applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             return;
         }
@@ -1818,9 +1862,9 @@ private:
             maxTemperature = qMax(maxTemperature, point.temperatureK);
         }
 
-        surfaceMapWidget_->setGrid(&surfaceGrid_);
+        applySurfaceGridToViews();
         if (minTemperature <= maxTemperature) {
-            surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
+            applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
@@ -1937,9 +1981,9 @@ private:
         }
 
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
-        surfaceMapWidget_->setGrid(&surfaceGrid_);
+        applySurfaceGridToViews();
         if (minTemperature <= maxTemperature) {
-            surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
+            applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
