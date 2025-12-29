@@ -14,6 +14,7 @@ public:
 
     void setGrid(const PlanetSurfaceGrid *grid);
     void setTemperatureRange(double minK, double maxK);
+    void setInterpolationEnabled(bool enabled);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -35,4 +36,5 @@ private:
     double minTemperatureK_ = 200.0;
     double maxTemperatureK_ = 320.0;
     double pointRadiusPx_ = 1.0;
+    bool interpolationEnabled_ = false;
 };
