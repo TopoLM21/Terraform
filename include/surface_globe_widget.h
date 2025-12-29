@@ -2,7 +2,6 @@
 
 #include "planet_surface_grid.h"
 
-#include <QVector3D>
 #include <QWidget>
 
 class SurfaceGlobeWidget : public QWidget {
@@ -19,9 +18,6 @@ protected:
 
 private:
     QColor temperatureToColor(double temperatureK) const;
-    QColor applyLambertLighting(const QColor &color,
-                                const QVector3D &normal,
-                                const QVector3D &lightDir) const;
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
 
     const PlanetSurfaceGrid *grid_ = nullptr;
