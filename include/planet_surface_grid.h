@@ -1,6 +1,7 @@
 #pragma once
 
 #include "planet_surface_point.h"
+#include "surface_cell.h"
 
 #include <QVector>
 
@@ -10,6 +11,7 @@ public:
     double radiusKm() const;
 
     void generateFibonacciPoints(int pointCount);
+    void generateIcosahedronGrid(int subdivisionLevel);
 
     int pointCount() const;
     double pointAreaKm2() const;
@@ -18,8 +20,14 @@ public:
     QVector<SurfacePoint> &points();
     const SurfacePoint *pointAt(int index) const;
 
+    const QVector<SurfaceCell> &cells() const;
+    const SurfaceCell *cellAt(int index) const;
+
 private:
+    void rebuildIcosahedronCells(int subdivisionLevel);
+
     double radiusKm_ = 0.0;
     double pointAreaKm2_ = 0.0;
     QVector<SurfacePoint> points_;
+    QVector<SurfaceCell> cells_;
 };

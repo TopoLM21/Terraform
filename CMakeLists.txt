@@ -26,6 +26,7 @@ add_executable(solar_constant
     include/surface_map_widget.h
     include/surface_map_interpolator.h
     include/surface_map_cache.h
+    include/surface_cell.h
     include/surface_globe_widget.h
     include/surface_point_status_dialog.h
     include/temperature_color_scale.h

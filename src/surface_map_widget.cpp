@@ -2,7 +2,9 @@
 
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QToolTip>
+#include <QTransform>
 #include <QtMath>
 
 #include "temperature_color_scale.h"
@@ -25,6 +27,65 @@ int decodeId(QRgb pixel) {
     const int b = qBlue(pixel);
     const int value = (r << 16) | (g << 8) | b;
     return value - 1;
+}
+
+QPointF projectToPixel(const QPointF &projected, const QSize &imageSize) {
+    const double normalizedX = (projected.x() + kMaxX) / (2.0 * kMaxX);
+    const double normalizedY = (kMaxY - projected.y()) / (2.0 * kMaxY);
+    return QPointF(normalizedX * (imageSize.width() - 1),
+                   normalizedY * (imageSize.height() - 1));
+}
+
+QVector<QPainterPath> buildCellPaths(const SurfaceCell &cell,
+                                     const MollweideProjection &projection,
+                                     const QSize &imageSize) {
+    QVector<QPainterPath> paths;
+    if (cell.polygon.size() < 3 || imageSize.isEmpty()) {
+        return paths;
+    }
+
+    QVector<QPointF> pixelPoints;
+    pixelPoints.reserve(cell.polygon.size());
+
+    double previousLon = cell.polygon.first().longitudeDeg;
+    for (const auto &vertex : cell.polygon) {
+        double lon = vertex.longitudeDeg;
+        // Разворачиваем долготы, чтобы избежать скачка на ±180° и сохранить
+        // непрерывный контур для проекции Mollweide.
+        while (lon - previousLon > 180.0) {
+            lon -= 360.0;
+        }
+        while (lon - previousLon < -180.0) {
+            lon += 360.0;
+        }
+        previousLon = lon;
+        const QPointF projected = projection.project(vertex.latitudeDeg, lon);
+        pixelPoints.push_back(projectToPixel(projected, imageSize));
+    }
+
+    QPainterPath basePath;
+    basePath.moveTo(pixelPoints.first());
+    for (int i = 1; i < pixelPoints.size(); ++i) {
+        basePath.lineTo(pixelPoints[i]);
+    }
+    basePath.closeSubpath();
+    paths.push_back(basePath);
+
+    const double imageWidth = imageSize.width();
+    const QRectF bounds = basePath.boundingRect();
+    // Если контур ушёл за пределы карты, рисуем копию с переносом на ширину карты.
+    if (bounds.left() < 0.0) {
+        QTransform shift;
+        shift.translate(imageWidth, 0.0);
+        paths.push_back(shift.map(basePath));
+    }
+    if (bounds.right() > imageWidth) {
+        QTransform shift;
+        shift.translate(-imageWidth, 0.0);
+        paths.push_back(shift.map(basePath));
+    }
+
+    return paths;
 }
 } // namespace
 
@@ -151,7 +212,7 @@ void SurfaceMapWidget::rebuildImages() {
     const double scaledPointRadius = qMin(baseScaledRadius * dotScale, 6.0);
 
     QPainter idPainter(&idImage_);
-    idPainter.setRenderHint(QPainter::Antialiasing, false);
+    idPainter.setRenderHint(QPainter::Antialiasing, true);
     idPainter.setPen(Qt::NoPen);
 
     if (interpolationEnabled_) {
@@ -201,28 +262,51 @@ void SurfaceMapWidget::rebuildImages() {
         colorPainter.setPen(Qt::NoPen);
     }
 
-    for (int i = 0; i < grid_->pointCount(); ++i) {
-        const SurfacePoint &point = grid_->points()[i];
-        const QPoint idPixel = mapPointToPixel(point.latitudeDeg, point.longitudeDeg, size());
-        const QRectF idEllipse(idPixel.x() - pointRadius,
-                               idPixel.y() - pointRadius,
-                               pointRadius * 2.0,
-                               pointRadius * 2.0);
-        if (!interpolationEnabled_) {
-            const QPoint pixel =
-                mapPointToPixel(point.latitudeDeg, point.longitudeDeg, scaledSize);
-            if (colorImage_.rect().contains(pixel)) {
-                const QRectF ellipseRect(pixel.x() - scaledPointRadius,
-                                         pixel.y() - scaledPointRadius,
-                                         scaledPointRadius * 2.0,
-                                         scaledPointRadius * 2.0);
+    if (!grid_->cells().isEmpty()) {
+        for (const SurfaceCell &cell : grid_->cells()) {
+            const int pointIndex = cell.pointIndex;
+            if (pointIndex < 0 || pointIndex >= grid_->points().size()) {
+                continue;
+            }
+            const SurfacePoint &point = grid_->points().at(pointIndex);
+            const auto idPaths = buildCellPaths(cell, projection_, size());
+            if (!interpolationEnabled_) {
+                const auto colorPaths = buildCellPaths(cell, projection_, scaledSize);
                 colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
-                colorPainter.drawEllipse(ellipseRect);
+                for (const auto &path : colorPaths) {
+                    colorPainter.drawPath(path);
+                }
+            }
+
+            idPainter.setBrush(QColor::fromRgb(encodeId(pointIndex)));
+            for (const auto &path : idPaths) {
+                idPainter.drawPath(path);
             }
         }
+    } else {
+        for (int i = 0; i < grid_->pointCount(); ++i) {
+            const SurfacePoint &point = grid_->points()[i];
+            const QPoint idPixel = mapPointToPixel(point.latitudeDeg, point.longitudeDeg, size());
+            const QRectF idEllipse(idPixel.x() - pointRadius,
+                                   idPixel.y() - pointRadius,
+                                   pointRadius * 2.0,
+                                   pointRadius * 2.0);
+            if (!interpolationEnabled_) {
+                const QPoint pixel =
+                    mapPointToPixel(point.latitudeDeg, point.longitudeDeg, scaledSize);
+                if (colorImage_.rect().contains(pixel)) {
+                    const QRectF ellipseRect(pixel.x() - scaledPointRadius,
+                                             pixel.y() - scaledPointRadius,
+                                             scaledPointRadius * 2.0,
+                                             scaledPointRadius * 2.0);
+                    colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
+                    colorPainter.drawEllipse(ellipseRect);
+                }
+            }
 
-        idPainter.setBrush(QColor::fromRgb(encodeId(i)));
-        idPainter.drawEllipse(idEllipse);
+            idPainter.setBrush(QColor::fromRgb(encodeId(i)));
+            idPainter.drawEllipse(idEllipse);
+        }
     }
 
     update();
