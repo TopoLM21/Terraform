@@ -5,6 +5,7 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QMatrix4x4>
+#include <QPainterPath>
 #include <QVector3D>
 #include <QtMath>
 
@@ -18,6 +19,12 @@ struct GlobePoint {
     int pointIndex = -1;
 };
 
+struct GlobeCell {
+    QPainterPath path;
+    double depth = 0.0;
+    QColor color;
+};
+
 QVector3D latLonToCartesian(double latitudeDeg, double longitudeDeg) {
     const double latRad = qDegreesToRadians(latitudeDeg);
     const double lonRad = qDegreesToRadians(longitudeDeg);
@@ -25,6 +32,32 @@ QVector3D latLonToCartesian(double latitudeDeg, double longitudeDeg) {
     return QVector3D(static_cast<float>(cosLat * qSin(lonRad)),
                      static_cast<float>(qSin(latRad)),
                      static_cast<float>(cosLat * qCos(lonRad)));
+}
+
+QVector<QVector3D> clipPolygonAgainstZ(const QVector<QVector3D> &input) {
+    QVector<QVector3D> output;
+    if (input.isEmpty()) {
+        return output;
+    }
+
+    // Отсекаем по плоскости z=0 (видимая полусфера). Используем
+    // Sutherland-Hodgman, чтобы сохранить форму многогранника после отсечения.
+    QVector3D prev = input.last();
+    bool prevInside = prev.z() > 0.0f;
+    for (const auto &current : input) {
+        const bool currentInside = current.z() > 0.0f;
+        if (currentInside != prevInside) {
+            const float t = (0.0f - prev.z()) / (current.z() - prev.z());
+            const QVector3D intersection = prev + t * (current - prev);
+            output.push_back(intersection);
+        }
+        if (currentInside) {
+            output.push_back(current);
+        }
+        prev = current;
+        prevInside = currentInside;
+    }
+    return output;
 }
 } // namespace
 
@@ -72,6 +105,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
 
     QVector<GlobePoint> visiblePoints;
     visiblePoints.reserve(grid_->pointCount());
+    QVector<GlobeCell> visibleCells;
+    visibleCells.reserve(grid_->cells().size());
 
     for (int pointIndex = 0; pointIndex < grid_->points().size(); ++pointIndex) {
         const auto &point = grid_->points().at(pointIndex);
@@ -97,14 +132,71 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         return a.z < b.z;
     });
 
+    if (!grid_->cells().isEmpty()) {
+        for (const SurfaceCell &cell : grid_->cells()) {
+            if (cell.polygon.size() < 3 || cell.pointIndex < 0 ||
+                cell.pointIndex >= grid_->points().size()) {
+                continue;
+            }
+            QVector<QVector3D> polygon3d;
+            polygon3d.reserve(cell.polygon.size());
+            for (const auto &vertex : cell.polygon) {
+                const QVector3D rotated = applyRotation(latLonToCartesian(vertex.latitudeDeg,
+                                                                          vertex.longitudeDeg));
+                polygon3d.push_back(rotated);
+            }
+
+            QVector<QVector3D> clipped = clipPolygonAgainstZ(polygon3d);
+            if (clipped.size() < 3) {
+                continue;
+            }
+
+            QPainterPath path;
+            const QPointF start(center.x() + clipped.first().x() * sphereRadius,
+                                center.y() - clipped.first().y() * sphereRadius);
+            path.moveTo(start);
+            double depthSum = 0.0;
+            for (int i = 0; i < clipped.size(); ++i) {
+                const QVector3D &v = clipped[i];
+                depthSum += v.z();
+                const QPointF projected(center.x() + v.x() * sphereRadius,
+                                         center.y() - v.y() * sphereRadius);
+                if (i > 0) {
+                    path.lineTo(projected);
+                }
+            }
+            path.closeSubpath();
+
+            GlobeCell cellDraw;
+            cellDraw.path = path;
+            cellDraw.depth = depthSum / static_cast<double>(clipped.size());
+            cellDraw.color =
+                temperatureToColor(grid_->points().at(cell.pointIndex).temperatureK);
+            visibleCells.push_back(cellDraw);
+        }
+
+        std::sort(visibleCells.begin(), visibleCells.end(), [](const GlobeCell &a, const GlobeCell &b) {
+            return a.depth < b.depth;
+        });
+
+        painter.setPen(Qt::NoPen);
+        for (const auto &cell : visibleCells) {
+            painter.setBrush(cell.color);
+            painter.drawPath(cell.path);
+        }
+    } else {
+        const double dotRadius = pointRadiusPx(visiblePoints.size(), sphereRadius);
+        lastPointRadiusPx_ = dotRadius;
+        painter.setPen(Qt::NoPen);
+
+        for (const auto &point : visiblePoints) {
+            painter.setBrush(point.color);
+            painter.drawEllipse(point.position, dotRadius, dotRadius);
+        }
+    }
+
     const double dotRadius = pointRadiusPx(visiblePoints.size(), sphereRadius);
     lastPointRadiusPx_ = dotRadius;
-    painter.setPen(Qt::NoPen);
-
-    for (const auto &point : visiblePoints) {
-        painter.setBrush(point.color);
-        painter.drawEllipse(point.position, dotRadius, dotRadius);
-    }
 
 }
 

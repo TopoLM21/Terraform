@@ -1626,13 +1626,18 @@ private:
         surfaceGrid_.setRadiusKm(radiusKm);
 
         if (radiusKm <= 0.0) {
-            surfaceGrid_.generateFibonacciPoints(0);
+            surfaceGrid_.generateIcosahedronGrid(0);
             return;
         }
 
         const int latitudePointCount = latitudePoints();
         const int pointsPerLatitude = 6;
-        surfaceGrid_.generateFibonacciPoints(qMax(1, latitudePointCount * pointsPerLatitude));
+        const int targetPointCount = qMax(1, latitudePointCount * pointsPerLatitude);
+        // Число ячеек в геодезической сетке равно 20 * 4^n, подбираем n под желаемое
+        // количество точек, чтобы сохранить приблизительную плотность сетки.
+        const double ratio = qMax(1.0, static_cast<double>(targetPointCount) / 20.0);
+        const int subdivisionLevel = qMax(0, static_cast<int>(qRound(qLn(ratio) / qLn(4.0))));
+        surfaceGrid_.generateIcosahedronGrid(subdivisionLevel);
     }
 
     struct SurfacePointStateDefaults {
