@@ -9,6 +9,7 @@
 #include "surface_temperature_plot.h"
 #include "surface_map_widget.h"
 #include "surface_globe_widget.h"
+#include "surface_point_status_dialog.h"
 #include "surface_temperature_scale_widget.h"
 #include "planet_surface_grid.h"
 
@@ -412,6 +413,20 @@ public:
         surfaceGlobeWidget_ = new SurfaceGlobeWidget(this);
         surfaceGlobeWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
         surfaceGlobeWidget_->setGrid(&surfaceGrid_);
+        connect(surfaceGlobeWidget_, &SurfaceGlobeWidget::pointClicked, this,
+                [this](int pointIndex) {
+                    const SurfacePoint *point = surfaceGrid_.pointAt(pointIndex);
+                    if (!point) {
+                        return;
+                    }
+                    if (!surfacePointStatusDialog_) {
+                        surfacePointStatusDialog_ = new SurfacePointStatusDialog(this);
+                    }
+                    surfacePointStatusDialog_->setPoint(*point);
+                    surfacePointStatusDialog_->show();
+                    surfacePointStatusDialog_->raise();
+                    surfacePointStatusDialog_->activateWindow();
+                });
         surfaceViewStack_ = new QStackedWidget(this);
         surfaceViewStack_->addWidget(surfaceMapWidget_);
         surfaceViewStack_->addWidget(surfaceGlobeWidget_);
@@ -770,6 +785,7 @@ private:
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
     SurfaceMapWidget *surfaceMapWidget_ = nullptr;
     SurfaceGlobeWidget *surfaceGlobeWidget_ = nullptr;
+    QPointer<SurfacePointStatusDialog> surfacePointStatusDialog_;
     QStackedWidget *surfaceViewStack_ = nullptr;
     QLabel *surfaceMinTemperatureLabel_ = nullptr;
     QLabel *surfaceMaxTemperatureLabel_ = nullptr;

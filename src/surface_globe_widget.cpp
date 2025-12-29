@@ -15,6 +15,7 @@ struct GlobePoint {
     QPointF position;
     double z = 0.0;
     QColor color;
+    int pointIndex = -1;
 };
 
 QVector3D latLonToCartesian(double latitudeDeg, double longitudeDeg) {
@@ -57,6 +58,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.fillRect(rect(), palette().window());
 
+    projectedPoints_.clear();
+    lastPointRadiusPx_ = 0.0;
     if (!grid_ || grid_->points().isEmpty()) {
         return;
     }
@@ -70,7 +73,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     QVector<GlobePoint> visiblePoints;
     visiblePoints.reserve(grid_->pointCount());
 
-    for (const auto &point : grid_->points()) {
+    for (int pointIndex = 0; pointIndex < grid_->points().size(); ++pointIndex) {
+        const auto &point = grid_->points().at(pointIndex);
         const QVector3D normal = applyRotation(latLonToCartesian(point.latitudeDeg, point.longitudeDeg));
         if (normal.z() <= 0.0f) {
             continue;
@@ -82,9 +86,11 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         GlobePoint globePoint;
         globePoint.position = projected;
         globePoint.z = normal.z();
+        globePoint.pointIndex = pointIndex;
         // Освещение отключено по требованию отображения без теней и подсветок.
         globePoint.color = temperatureToColor(point.temperatureK);
         visiblePoints.push_back(globePoint);
+        projectedPoints_.push_back(ProjectedPoint{projected, pointIndex});
     }
 
     std::sort(visiblePoints.begin(), visiblePoints.end(), [](const GlobePoint &a, const GlobePoint &b) {
@@ -92,6 +98,7 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     });
 
     const double dotRadius = pointRadiusPx(visiblePoints.size(), sphereRadius);
+    lastPointRadiusPx_ = dotRadius;
     painter.setPen(Qt::NoPen);
 
     for (const auto &point : visiblePoints) {
@@ -102,6 +109,26 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
 }
 
 void SurfaceGlobeWidget::mousePressEvent(QMouseEvent *event) {
+    if (event->button() == Qt::LeftButton && !projectedPoints_.isEmpty()) {
+        const QPointF clickPos = event->pos();
+        const double hitRadius = lastPointRadiusPx_;
+        // Хит-тест делаем в 2D-проекции: точки рисуются как круги на экране,
+        // поэтому используем расстояние до проекций и порог радиуса точки.
+        double closestDistanceSq = hitRadius * hitRadius;
+        int closestIndex = -1;
+        for (const auto &point : projectedPoints_) {
+            const double dx = point.position.x() - clickPos.x();
+            const double dy = point.position.y() - clickPos.y();
+            const double distanceSq = dx * dx + dy * dy;
+            if (distanceSq <= closestDistanceSq) {
+                closestDistanceSq = distanceSq;
+                closestIndex = point.pointIndex;
+            }
+        }
+        if (closestIndex >= 0) {
+            emit pointClicked(closestIndex);
+        }
+    }
     if (event->button() == Qt::LeftButton) {
         isDragging_ = true;
         lastMousePos_ = event->pos();
