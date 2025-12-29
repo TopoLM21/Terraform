@@ -1,6 +1,7 @@
 #pragma once
 
 #include "planet_surface_grid.h"
+#include "surface_map_mode.h"
 
 #include <QWidget>
 #include <QPointF>
@@ -13,6 +14,7 @@ public:
     explicit SurfaceGlobeWidget(QWidget *parent = nullptr);
 
     void setGrid(const PlanetSurfaceGrid *grid);
+    void setMapMode(SurfaceMapMode mode);
     void setTemperatureRange(double minK, double maxK);
 
 signals:
@@ -30,12 +32,16 @@ private:
     };
 
     QColor temperatureToColor(double temperatureK) const;
+    QColor heightToColor(double heightKm) const;
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
     QVector3D applyRotation(const QVector3D &v) const;
 
     const PlanetSurfaceGrid *grid_ = nullptr;
+    SurfaceMapMode mapMode_ = SurfaceMapMode::Temperature;
     double minTemperatureK_ = 200.0;
     double maxTemperatureK_ = 320.0;
+    double minHeightKm_ = -5.0;
+    double maxHeightKm_ = 5.0;
     float yawDeg_ = 0.0f;
     float pitchDeg_ = 0.0f;
     QPoint lastMousePos_;

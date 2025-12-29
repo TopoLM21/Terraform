@@ -9,6 +9,7 @@
 #include <QVector3D>
 #include <QtMath>
 
+#include "height_color_scale.h"
 #include "temperature_color_scale.h"
 
 namespace {
@@ -69,13 +70,27 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
     if (grid_ && !grid_->points().isEmpty()) {
         double minTemp = grid_->points().first().temperatureK;
         double maxTemp = minTemp;
+        double minHeight = grid_->points().first().heightKm;
+        double maxHeight = minHeight;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
+            minHeight = qMin(minHeight, point.heightKm);
+            maxHeight = qMax(maxHeight, point.heightKm);
         }
         minTemperatureK_ = minTemp;
         maxTemperatureK_ = maxTemp;
+        minHeightKm_ = minHeight;
+        maxHeightKm_ = maxHeight;
     }
+    update();
+}
+
+void SurfaceGlobeWidget::setMapMode(SurfaceMapMode mode) {
+    if (mapMode_ == mode) {
+        return;
+    }
+    mapMode_ = mode;
     update();
 }
 
@@ -123,7 +138,9 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         globePoint.z = normal.z();
         globePoint.pointIndex = pointIndex;
         // Освещение отключено по требованию отображения без теней и подсветок.
-        globePoint.color = temperatureToColor(point.temperatureK);
+        globePoint.color = (mapMode_ == SurfaceMapMode::Temperature)
+                               ? temperatureToColor(point.temperatureK)
+                               : heightToColor(point.heightKm);
         visiblePoints.push_back(globePoint);
         projectedPoints_.push_back(ProjectedPoint{projected, pointIndex});
     }
@@ -170,8 +187,10 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             GlobeCell cellDraw;
             cellDraw.path = path;
             cellDraw.depth = depthSum / static_cast<double>(clipped.size());
-            cellDraw.color =
-                temperatureToColor(grid_->points().at(cell.pointIndex).temperatureK);
+            const SurfacePoint &cellPoint = grid_->points().at(cell.pointIndex);
+            cellDraw.color = (mapMode_ == SurfaceMapMode::Temperature)
+                                 ? temperatureToColor(cellPoint.temperatureK)
+                                 : heightToColor(cellPoint.heightKm);
             visibleCells.push_back(cellDraw);
         }
 
@@ -252,6 +271,26 @@ QColor SurfaceGlobeWidget::temperatureToColor(double temperatureK) const {
                             (temperatureK - minTemperatureK_) / (maxTemperatureK_ - minTemperatureK_),
                             1.0);
     return temperatureColorForRatio(t);
+}
+
+QColor SurfaceGlobeWidget::heightToColor(double heightKm) const {
+    if (qFuzzyCompare(minHeightKm_, maxHeightKm_)) {
+        return heightColorForRatio(0.5);
+    }
+    if (minHeightKm_ < 0.0 && maxHeightKm_ > 0.0) {
+        // Разделяем океан и сушу на шкале: 0 км находится в центре цветовой палитры.
+        if (heightKm <= 0.0) {
+            const double t = qBound(0.0, heightKm / minHeightKm_, 1.0);
+            return heightColorForRatio(0.5 - 0.5 * t);
+        }
+        const double t = qBound(0.0, heightKm / maxHeightKm_, 1.0);
+        return heightColorForRatio(0.5 + 0.5 * t);
+    }
+
+    const double t = qBound(0.0,
+                            (heightKm - minHeightKm_) / (maxHeightKm_ - minHeightKm_),
+                            1.0);
+    return heightColorForRatio(t);
 }
 
 double SurfaceGlobeWidget::pointRadiusPx(int pointCount, double sphereRadiusPx) const {

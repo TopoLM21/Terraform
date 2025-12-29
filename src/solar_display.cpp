@@ -11,6 +11,8 @@
 #include "surface_globe_widget.h"
 #include "surface_point_status_dialog.h"
 #include "surface_temperature_scale_widget.h"
+#include "surface_height_scale_widget.h"
+#include "surface_map_mode.h"
 #include "planet_surface_grid.h"
 
 #include <QtCore/QCommandLineOption>
@@ -445,11 +447,23 @@ public:
         surfaceSimTimeLabel_ = new QLabel(QStringLiteral("t = —"), this);
         temperatureElapsedLabel_ = new QLabel(QStringLiteral("Прошло: 00:00"), this);
         surfaceSeamlessCheckBox_ = new QCheckBox(QStringLiteral("Бесшовная карта"), this);
+        surfaceMapModeComboBox_ = new QComboBox(this);
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура"),
+                                         static_cast<int>(SurfaceMapMode::Temperature));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Высота"),
+                                         static_cast<int>(SurfaceMapMode::Height));
         surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
         surfaceViewToggleButton_->setCheckable(true);
         temperatureScaleWidget_ = new SurfaceTemperatureScaleWidget(this);
         temperatureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         temperatureScaleWidget_->setMinimumHeight(18);
+        heightScaleWidget_ = new SurfaceHeightScaleWidget(this);
+        heightScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        heightScaleWidget_->setMinimumHeight(18);
+        surfaceLegendScaleStack_ = new QStackedWidget(this);
+        surfaceLegendScaleStack_->addWidget(temperatureScaleWidget_);
+        surfaceLegendScaleStack_->addWidget(heightScaleWidget_);
+        surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
         auto *surfaceLegendTopLayout = new QHBoxLayout();
         surfaceLegendTopLayout->addWidget(surfaceMinTemperatureLabel_);
         surfaceLegendTopLayout->addStretch();
@@ -462,11 +476,13 @@ public:
         surfaceControlLayout->addWidget(surfaceSimTimeLabel_);
         surfaceControlLayout->addWidget(temperatureElapsedLabel_);
         surfaceControlLayout->addWidget(surfaceSeamlessCheckBox_);
+        surfaceControlLayout->addWidget(new QLabel(QStringLiteral("Карта:"), this));
+        surfaceControlLayout->addWidget(surfaceMapModeComboBox_);
         surfaceControlLayout->addWidget(surfaceViewToggleButton_);
         surfaceControlLayout->addStretch();
         auto *surfaceLegendBottomLayout = new QHBoxLayout();
         surfaceLegendBottomLayout->addStretch();
-        surfaceLegendBottomLayout->addWidget(temperatureScaleWidget_, 1);
+        surfaceLegendBottomLayout->addWidget(surfaceLegendScaleStack_, 1);
         surfaceLegendBottomLayout->addStretch();
         auto *surfaceMapLayout = new QVBoxLayout();
         surfaceMapLayout->addLayout(surfaceLegendTopLayout);
@@ -618,6 +634,13 @@ public:
                 surfaceMapWidget_->setInterpolationEnabled(checked);
             }
         });
+
+        connect(surfaceMapModeComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int) {
+                    const SurfaceMapMode mode =
+                        static_cast<SurfaceMapMode>(surfaceMapModeComboBox_->currentData().toInt());
+                    applySurfaceMapMode(mode);
+                });
 
         connect(surfaceViewToggleButton_, &QPushButton::toggled, this, [this](bool checked) {
             if (!surfaceViewStack_) {
@@ -799,8 +822,11 @@ private:
     QLabel *surfaceSimTimeLabel_ = nullptr;
     QLabel *temperatureElapsedLabel_ = nullptr;
     QCheckBox *surfaceSeamlessCheckBox_ = nullptr;
+    QComboBox *surfaceMapModeComboBox_ = nullptr;
     QPushButton *surfaceViewToggleButton_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
+    SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
+    QStackedWidget *surfaceLegendScaleStack_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
     QElapsedTimer temperatureElapsed_;
@@ -824,6 +850,10 @@ private:
     double surfaceMinTemperatureK_ = 0.0;
     double surfaceMaxTemperatureK_ = 0.0;
     bool hasSurfaceTemperatureRange_ = false;
+    double surfaceMinHeightKm_ = 0.0;
+    double surfaceMaxHeightKm_ = 0.0;
+    bool hasSurfaceHeightRange_ = false;
+    SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
@@ -1730,9 +1760,21 @@ private:
         }
     }
 
+    void applySurfaceMapMode(SurfaceMapMode mode) {
+        surfaceMapMode_ = mode;
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setMapMode(mode);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setMapMode(mode);
+        }
+        refreshSurfaceLegend();
+    }
+
     void updateSurfaceGridTemperatures() {
         resetSurfaceSimulation();
         rebuildSurfaceGrid();
+        updateSurfaceHeightLegendFromGrid();
         if (surfaceGrid_.points().isEmpty()) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
@@ -2049,21 +2091,90 @@ private:
 
     void updateSurfaceTemperatureLegend(bool hasRange, double minTemperature, double maxTemperature) {
         hasSurfaceTemperatureRange_ = hasRange;
-        if (!hasRange) {
-            surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
-            surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
-            temperatureScaleWidget_->clearRange();
+        if (hasRange) {
+            surfaceMinTemperatureK_ = minTemperature;
+            surfaceMaxTemperatureK_ = maxTemperature;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::Temperature) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceHeightLegendFromGrid() {
+        if (surfaceGrid_.points().isEmpty()) {
+            hasSurfaceHeightRange_ = false;
+            surfaceMinHeightKm_ = 0.0;
+            surfaceMaxHeightKm_ = 0.0;
+            if (surfaceMapMode_ == SurfaceMapMode::Height) {
+                refreshSurfaceLegend();
+            }
             return;
         }
 
-        surfaceMinTemperatureK_ = minTemperature;
-        surfaceMaxTemperatureK_ = maxTemperature;
+        double minHeight = surfaceGrid_.points().first().heightKm;
+        double maxHeight = minHeight;
+        for (const auto &point : surfaceGrid_.points()) {
+            minHeight = qMin(minHeight, point.heightKm);
+            maxHeight = qMax(maxHeight, point.heightKm);
+        }
+
+        hasSurfaceHeightRange_ = minHeight <= maxHeight;
+        surfaceMinHeightKm_ = minHeight;
+        surfaceMaxHeightKm_ = maxHeight;
+        if (surfaceMapMode_ == SurfaceMapMode::Height) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void refreshSurfaceLegend() {
+        if (!surfaceMinTemperatureLabel_ || !surfaceMaxTemperatureLabel_) {
+            return;
+        }
+
         const QLocale locale;
+        if (surfaceMapMode_ == SurfaceMapMode::Temperature) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
+            }
+            if (!hasSurfaceTemperatureRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (temperatureScaleWidget_) {
+                    temperatureScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 K").arg(locale.toString(surfaceMinTemperatureK_, 'f', 1)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 K").arg(locale.toString(surfaceMaxTemperatureK_, 'f', 1)));
+            if (temperatureScaleWidget_) {
+                temperatureScaleWidget_->setTemperatureRange(surfaceMinTemperatureK_,
+                                                             surfaceMaxTemperatureK_);
+            }
+            return;
+        }
+
+        if (surfaceLegendScaleStack_) {
+            surfaceLegendScaleStack_->setCurrentWidget(heightScaleWidget_);
+        }
+        if (!hasSurfaceHeightRange_) {
+            surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+            surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+            if (heightScaleWidget_) {
+                heightScaleWidget_->clearRange();
+            }
+            return;
+        }
+
         surfaceMinTemperatureLabel_->setText(
-            QStringLiteral("Мин: %1 K").arg(locale.toString(minTemperature, 'f', 1)));
+            QStringLiteral("Мин: %1 км").arg(locale.toString(surfaceMinHeightKm_, 'f', 1)));
         surfaceMaxTemperatureLabel_->setText(
-            QStringLiteral("Макс: %1 K").arg(locale.toString(maxTemperature, 'f', 1)));
-        temperatureScaleWidget_->setTemperatureRange(minTemperature, maxTemperature);
+            QStringLiteral("Макс: %1 км").arg(locale.toString(surfaceMaxHeightKm_, 'f', 1)));
+        if (heightScaleWidget_) {
+            heightScaleWidget_->setHeightRange(surfaceMinHeightKm_, surfaceMaxHeightKm_);
+        }
     }
 
     QProgressDialog *ensureTemperatureProgressDialog() {

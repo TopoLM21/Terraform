@@ -20,9 +20,12 @@ add_executable(solar_constant
     include/planet_surface_grid.h
     include/planet_surface_point.h
     include/segment_selector_widget.h
+    include/height_color_scale.h
     include/surface_point_state.h
     include/surface_temperature_state.h
     include/surface_temperature_scale_widget.h
+    include/surface_height_scale_widget.h
+    include/surface_map_mode.h
     include/surface_map_widget.h
     include/surface_map_interpolator.h
     include/surface_map_cache.h
@@ -47,6 +50,7 @@ add_executable(solar_constant
     src/segment_selector_widget.cpp
     src/solar_calculator.cpp
     src/solar_display.cpp
+    src/height_color_scale.cpp
     src/surface_map_widget.cpp
     src/surface_map_interpolator.cpp
     src/surface_map_cache.cpp
@@ -55,6 +59,7 @@ add_executable(solar_constant
     src/surface_heightmap.cpp
     src/surface_point_status_dialog.cpp
     src/surface_point_state.cpp
+    src/surface_height_scale_widget.cpp
     src/surface_temperature_calculator.cpp
     src/surface_temperature_scale_widget.cpp
     src/surface_temperature_state.cpp
