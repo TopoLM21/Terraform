@@ -5,7 +5,6 @@
 #include <QToolTip>
 #include <QtMath>
 
-#include "surface_map_interpolator.h"
 #include "temperature_color_scale.h"
 
 namespace {
@@ -36,6 +35,7 @@ SurfaceMapWidget::SurfaceMapWidget(QWidget *parent)
 
 void SurfaceMapWidget::setGrid(const PlanetSurfaceGrid *grid) {
     grid_ = grid;
+    geometryCache_.clear();
     rebuildImages();
 }
 
@@ -53,11 +53,43 @@ void SurfaceMapWidget::setInterpolationEnabled(bool enabled) {
     rebuildImages();
 }
 
+void SurfaceMapWidget::setRenderScale(double scale) {
+    const double clampedScale = qMax(0.1, scale);
+    if (qFuzzyCompare(renderScale_ + 1.0, clampedScale + 1.0)) {
+        return;
+    }
+    renderScale_ = clampedScale;
+    geometryCache_.clear();
+    rebuildImages();
+}
+
+void SurfaceMapWidget::setInterpolationNeighborCount(int neighborCount) {
+    const int clampedNeighbors = qMax(1, neighborCount);
+    if (neighborCount_ == clampedNeighbors) {
+        return;
+    }
+    neighborCount_ = clampedNeighbors;
+    geometryCache_.clear();
+    rebuildImages();
+}
+
+void SurfaceMapWidget::setInterpolationPower(double power) {
+    const double clampedPower = qMax(0.1, power);
+    if (qFuzzyCompare(interpolationPower_ + 1.0, clampedPower + 1.0)) {
+        return;
+    }
+    interpolationPower_ = clampedPower;
+    geometryCache_.clear();
+    rebuildImages();
+}
+
 void SurfaceMapWidget::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event)
     QPainter painter(this);
     painter.fillRect(rect(), palette().window());
     if (!colorImage_.isNull()) {
+        // Масштабирование изображения позволяет уменьшить renderScale ради скорости,
+        // сохранив прозрачный для UI компромисс между качеством и производительностью.
         painter.drawImage(rect(), colorImage_);
     }
 }
@@ -79,6 +111,7 @@ void SurfaceMapWidget::mousePressEvent(QMouseEvent *event) {
 
 void SurfaceMapWidget::resizeEvent(QResizeEvent *event) {
     QWidget::resizeEvent(event);
+    geometryCache_.clear();
     rebuildImages();
 }
 
@@ -86,11 +119,13 @@ void SurfaceMapWidget::rebuildImages() {
     if (!grid_ || grid_->points().isEmpty() || width() <= 0 || height() <= 0) {
         colorImage_ = QImage();
         idImage_ = QImage();
+        geometryCache_.clear();
         update();
         return;
     }
 
-    colorImage_ = QImage(size(), QImage::Format_ARGB32);
+    const QSize scaledSize = scaledRenderSize();
+    colorImage_ = QImage(scaledSize, QImage::Format_ARGB32);
     colorImage_.fill(Qt::transparent);
     idImage_ = QImage(size(), QImage::Format_ARGB32);
     idImage_.fill(Qt::transparent);
@@ -108,32 +143,48 @@ void SurfaceMapWidget::rebuildImages() {
         }
     }
 
-    pointRadiusPx_ = pointRadiusPx(grid_->pointCount());
+    const double pointRadius = pointRadiusPx(grid_->pointCount(), size());
+    const double scaledPointRadius = pointRadiusPx(grid_->pointCount(), scaledSize);
 
     QPainter idPainter(&idImage_);
     idPainter.setRenderHint(QPainter::Antialiasing, false);
     idPainter.setPen(Qt::NoPen);
 
     if (interpolationEnabled_) {
-        SurfaceMapInterpolator interpolator(grid_, &projection_);
-        const int clampedNeighbors = qBound(6, grid_->pointCount(), 12);
-        const int neighborCount = qMin(clampedNeighbors, grid_->pointCount());
-        const double power = 2.0;
+        const int neighborCount = qMin(qMax(1, neighborCount_), grid_->pointCount());
+        const SurfaceMapCacheKey cacheKey = currentCacheKey(neighborCount);
+        if (!geometryCache_.isValidFor(cacheKey, grid_)) {
+            geometryCache_.rebuild(grid_, &projection_, cacheKey);
+        }
 
+        const auto &weights = geometryCache_.pixelWeights();
+        const auto &mask = geometryCache_.insideMask();
+        const auto &points = grid_->points();
+
+        const int imageWidth = colorImage_.width();
         for (int y = 0; y < colorImage_.height(); ++y) {
             auto *scanLine = reinterpret_cast<QRgb *>(colorImage_.scanLine(y));
-            for (int x = 0; x < colorImage_.width(); ++x) {
-                bool inside = false;
-                const double temperatureK =
-                    interpolator.interpolateTemperatureForPixel(QPoint(x, y),
-                                                                colorImage_.size(),
-                                                                neighborCount,
-                                                                power,
-                                                                &inside);
-                if (!inside) {
+            int pixelIndex = y * imageWidth;
+            for (int x = 0; x < imageWidth; ++x, ++pixelIndex) {
+                if (pixelIndex >= mask.size() || !mask[pixelIndex]) {
                     scanLine[x] = qRgba(0, 0, 0, 0);
                     continue;
                 }
+                const PixelWeights &pixelWeights = weights.value(pixelIndex);
+                if (pixelWeights.indices.isEmpty()) {
+                    scanLine[x] = qRgba(0, 0, 0, 0);
+                    continue;
+                }
+
+                double temperatureK = 0.0;
+                for (int i = 0; i < pixelWeights.indices.size(); ++i) {
+                    const int pointIndex = pixelWeights.indices[i];
+                    if (pointIndex < 0 || pointIndex >= points.size()) {
+                        continue;
+                    }
+                    temperatureK += pixelWeights.weights[i] * points[pointIndex].temperatureK;
+                }
+
                 scanLine[x] = temperatureToColor(temperatureK);
             }
         }
@@ -148,32 +199,46 @@ void SurfaceMapWidget::rebuildImages() {
 
     for (int i = 0; i < grid_->pointCount(); ++i) {
         const SurfacePoint &point = grid_->points()[i];
-        const QPoint pixel = mapPointToPixel(point.latitudeDeg, point.longitudeDeg);
-        if (!colorImage_.rect().contains(pixel)) {
-            continue;
-        }
-        const QRectF ellipseRect(pixel.x() - pointRadiusPx_,
-                                 pixel.y() - pointRadiusPx_,
-                                 pointRadiusPx_ * 2.0,
-                                 pointRadiusPx_ * 2.0);
+        const QPoint idPixel = mapPointToPixel(point.latitudeDeg, point.longitudeDeg, size());
+        const QRectF idEllipse(idPixel.x() - pointRadius,
+                               idPixel.y() - pointRadius,
+                               pointRadius * 2.0,
+                               pointRadius * 2.0);
         if (!interpolationEnabled_) {
-            colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
-            colorPainter.drawEllipse(ellipseRect);
+            const QPoint pixel =
+                mapPointToPixel(point.latitudeDeg, point.longitudeDeg, scaledSize);
+            if (colorImage_.rect().contains(pixel)) {
+                const QRectF ellipseRect(pixel.x() - scaledPointRadius,
+                                         pixel.y() - scaledPointRadius,
+                                         scaledPointRadius * 2.0,
+                                         scaledPointRadius * 2.0);
+                colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
+                colorPainter.drawEllipse(ellipseRect);
+            }
         }
 
         idPainter.setBrush(QColor::fromRgb(encodeId(i)));
-        idPainter.drawEllipse(ellipseRect);
+        idPainter.drawEllipse(idEllipse);
     }
 
     update();
 }
 
-QPoint SurfaceMapWidget::mapPointToPixel(double latitudeDeg, double longitudeDeg) const {
+QPoint SurfaceMapWidget::mapPointToPixel(double latitudeDeg,
+                                         double longitudeDeg,
+                                         const QSize &imageSize) const {
+    if (imageSize.isEmpty()) {
+        return QPoint();
+    }
     const QPointF projected = projection_.project(latitudeDeg, longitudeDeg);
     const double normalizedX = (projected.x() + kMaxX) / (2.0 * kMaxX);
     const double normalizedY = (kMaxY - projected.y()) / (2.0 * kMaxY);
-    const int x = qBound(0, static_cast<int>(normalizedX * (width() - 1)), width() - 1);
-    const int y = qBound(0, static_cast<int>(normalizedY * (height() - 1)), height() - 1);
+    const int x = qBound(0,
+                         static_cast<int>(normalizedX * (imageSize.width() - 1)),
+                         imageSize.width() - 1);
+    const int y = qBound(0,
+                         static_cast<int>(normalizedY * (imageSize.height() - 1)),
+                         imageSize.height() - 1);
     return QPoint(x, y);
 }
 
@@ -202,15 +267,31 @@ QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point) const {
         .arg(point.heightKm, 0, 'f', 2);
 }
 
-double SurfaceMapWidget::pointRadiusPx(int pointCount) const {
-    if (pointCount <= 0) {
+double SurfaceMapWidget::pointRadiusPx(int pointCount, const QSize &imageSize) const {
+    if (pointCount <= 0 || imageSize.isEmpty()) {
         return 1.0;
     }
-    const double widgetArea = static_cast<double>(width()) * static_cast<double>(height());
+    const double widgetArea =
+        static_cast<double>(imageSize.width()) * static_cast<double>(imageSize.height());
     const double cellArea = widgetArea / static_cast<double>(pointCount);
     const double spacing = qSqrt(cellArea);
     // Радиус основан на среднем расстоянии между точками: при больших сетках он
     // уменьшается, чтобы точки не слипались, а при малых ограничивается сверху,
     // сохраняя читаемость без превращения точек в одиночные пиксели.
     return qBound(1.0, spacing * 0.45, 6.0);
+}
+
+QSize SurfaceMapWidget::scaledRenderSize() const {
+    const int width = qMax(1, qRound(size().width() * renderScale_));
+    const int height = qMax(1, qRound(size().height() * renderScale_));
+    return QSize(width, height);
+}
+
+SurfaceMapCacheKey SurfaceMapWidget::currentCacheKey(int neighborCount) const {
+    SurfaceMapCacheKey key;
+    key.widgetSize = size();
+    key.renderScale = renderScale_;
+    key.neighborCount = neighborCount;
+    key.power = interpolationPower_;
+    return key;
 }

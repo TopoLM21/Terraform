@@ -96,6 +96,124 @@ double SurfaceMapInterpolator::interpolateTemperatureForPixel(const QPoint &pixe
     return weightedSum / weightSum;
 }
 
+QVector<PixelWeights> SurfaceMapInterpolator::buildPixelWeights(const QSize &imageSize,
+                                                                int neighborCount,
+                                                                double power,
+                                                                QVector<quint8> *insideMask) const {
+    QVector<PixelWeights> result;
+    if (!grid_ || !projection_ || grid_->points().isEmpty() || imageSize.isEmpty()) {
+        if (insideMask) {
+            insideMask->clear();
+        }
+        return result;
+    }
+
+    const int width = imageSize.width();
+    const int height = imageSize.height();
+    const int pixelCount = width * height;
+    result.resize(pixelCount);
+    if (insideMask) {
+        insideMask->fill(0, pixelCount);
+    }
+
+    const int maxNeighbors = qMax(1, neighborCount);
+    // Предрасчёт IDW-весов ускоряет последующие кадры: геометрия (проекция и
+    // положение точек сетки) не меняется, поэтому можно повторно использовать
+    // индексы соседей и веса при обновлении температур.
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const int pixelIndex = y * width + x;
+            QPointF projected;
+            const bool inside = pixelInsideProjection(QPoint(x, y), imageSize, &projected);
+            if (insideMask) {
+                (*insideMask)[pixelIndex] = inside ? 1 : 0;
+            }
+            if (!inside) {
+                continue;
+            }
+
+            struct Neighbor {
+                int index = -1;
+                double distanceSquared = 0.0;
+            };
+
+            QVector<Neighbor> neighbors;
+            neighbors.reserve(maxNeighbors);
+
+            bool exactMatch = false;
+            for (int i = 0; i < grid_->points().size(); ++i) {
+                const auto &point = grid_->points()[i];
+                const QPointF pointProjected = projection_->project(point.latitudeDeg,
+                                                                    point.longitudeDeg);
+                const double dx = pointProjected.x() - projected.x();
+                const double dy = pointProjected.y() - projected.y();
+                const double distanceSquared = dx * dx + dy * dy;
+                if (distanceSquared < 1e-12) {
+                    PixelWeights weights;
+                    weights.indices.push_back(i);
+                    weights.weights.push_back(1.0f);
+                    result[pixelIndex] = std::move(weights);
+                    exactMatch = true;
+                    break;
+                }
+
+                if (neighbors.size() < maxNeighbors) {
+                    neighbors.push_back({i, distanceSquared});
+                    continue;
+                }
+
+                int worstIndex = 0;
+                double worstDistance = neighbors[0].distanceSquared;
+                for (int n = 1; n < neighbors.size(); ++n) {
+                    if (neighbors[n].distanceSquared > worstDistance) {
+                        worstDistance = neighbors[n].distanceSquared;
+                        worstIndex = n;
+                    }
+                }
+
+                if (distanceSquared < worstDistance) {
+                    neighbors[worstIndex] = {i, distanceSquared};
+                }
+            }
+
+            if (exactMatch || neighbors.isEmpty()) {
+                continue;
+            }
+
+            PixelWeights weights;
+            weights.indices.reserve(neighbors.size());
+            weights.weights.reserve(neighbors.size());
+
+            double weightSum = 0.0;
+            // IDW: T(x) = sum(w_i * T_i) / sum(w_i), где w_i = 1 / d_i^p.
+            // Степень p регулирует спад влияния соседей и позволяет балансировать
+            // между локальными деталями и сглаживанием.
+            for (const auto &neighbor : neighbors) {
+                const double distance = qSqrt(neighbor.distanceSquared);
+                if (distance <= 0.0) {
+                    continue;
+                }
+                const double weight = 1.0 / qPow(distance, power);
+                weights.indices.push_back(neighbor.index);
+                weights.weights.push_back(static_cast<float>(weight));
+                weightSum += weight;
+            }
+
+            if (qFuzzyIsNull(weightSum)) {
+                continue;
+            }
+
+            for (auto &weight : weights.weights) {
+                weight = static_cast<float>(weight / weightSum);
+            }
+
+            result[pixelIndex] = std::move(weights);
+        }
+    }
+
+    return result;
+}
+
 bool SurfaceMapInterpolator::pixelInsideProjection(const QPoint &pixel,
                                                    const QSize &imageSize,
                                                    QPointF *projected) const {
