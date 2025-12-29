@@ -7,6 +7,7 @@ const QVector<TemperatureColorStop> &defaultStops() {
     static const QVector<TemperatureColorStop> kStops = {
         // Холодная часть диапазона разбита более мелкими шагами,
         // чтобы тонкие различия температур были заметнее на карте и шкале.
+        // У максимума добавлен более плотный stop для акцента на суточных колебаниях.
         {0.0, QColor(12, 24, 96)},
         {0.08, QColor(0, 64, 164)},
         {0.18, QColor(0, 120, 210)},
@@ -15,6 +16,7 @@ const QVector<TemperatureColorStop> &defaultStops() {
         {0.62, QColor(190, 220, 80)},
         {0.76, QColor(250, 180, 60)},
         {0.9, QColor(240, 80, 40)},
+        {0.97, QColor(250, 100, 50)},
         {1.0, QColor(170, 0, 20)}
     };
     return kStops;
