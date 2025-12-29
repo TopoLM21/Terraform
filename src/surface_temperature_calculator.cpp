@@ -396,8 +396,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const double waterInertia = potentialCoverage * 120.0;
         const double totalInertia =
             qMax(1.0, material_.heatCapacity + waterInertia + atmDamping);
-        const double absFloor =
-            (pressureAtm > 0.5 ? 180.0 : 20.0) + 150.0 * (1.0 - std::exp(-pressureAtm * 0.2));
+        // В базовом радиационном балансе не ограничиваем температуру атмосферным "полом":
+        // слабые звезды должны давать холодные поверхности вплоть до физического минимума ~3 K.
+        const double absFloor = 3.0;
 
         // Шаговое обновление температуры на протяжении суток:
         // S_inst = S0 * cos(zenith) при освещении, иначе 0.
