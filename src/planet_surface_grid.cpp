@@ -1,4 +1,5 @@
 #include "planet_surface_grid.h"
+#include "surface_height_model.h"
 
 #include <algorithm>
 
@@ -120,6 +121,7 @@ void PlanetSurfaceGrid::generateFibonacciPoints(int pointCount) {
 
     const double surfaceAreaKm2 = 4.0 * kPi * radiusKm_ * radiusKm_;
     pointAreaKm2_ = surfaceAreaKm2 / static_cast<double>(points_.size());
+    applyHeightModel();
 }
 
 void PlanetSurfaceGrid::generateIcosahedronGrid(int subdivisionLevel) {
@@ -138,6 +140,7 @@ void PlanetSurfaceGrid::generateIcosahedronGrid(int subdivisionLevel) {
 
     const double surfaceAreaKm2 = 4.0 * kPi * radiusKm_ * radiusKm_;
     pointAreaKm2_ = surfaceAreaKm2 / static_cast<double>(points_.size());
+    applyHeightModel();
 }
 
 int PlanetSurfaceGrid::pointCount() const {
@@ -297,5 +300,12 @@ void PlanetSurfaceGrid::rebuildIcosahedronCells(int subdivisionLevel) {
         cell.pointIndex = faceIndex;
         cell.polygon = polygon;
         cells_.push_back(cell);
+    }
+}
+
+void PlanetSurfaceGrid::applyHeightModel() {
+    SurfaceHeightModel heightModel;
+    for (auto &point : points_) {
+        point.heightKm = heightModel.heightKmAt(point.latitudeDeg, point.longitudeDeg);
     }
 }

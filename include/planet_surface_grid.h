@@ -25,6 +25,7 @@ public:
 
 private:
     void rebuildIcosahedronCells(int subdivisionLevel);
+    void applyHeightModel();
 
     double radiusKm_ = 0.0;
     double pointAreaKm2_ = 0.0;
