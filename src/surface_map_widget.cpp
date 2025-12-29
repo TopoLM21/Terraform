@@ -5,6 +5,7 @@
 #include <QToolTip>
 #include <QtMath>
 
+#include "surface_map_interpolator.h"
 #include "temperature_color_scale.h"
 
 namespace {
@@ -41,6 +42,14 @@ void SurfaceMapWidget::setGrid(const PlanetSurfaceGrid *grid) {
 void SurfaceMapWidget::setTemperatureRange(double minK, double maxK) {
     minTemperatureK_ = minK;
     maxTemperatureK_ = maxK;
+    rebuildImages();
+}
+
+void SurfaceMapWidget::setInterpolationEnabled(bool enabled) {
+    if (interpolationEnabled_ == enabled) {
+        return;
+    }
+    interpolationEnabled_ = enabled;
     rebuildImages();
 }
 
@@ -101,13 +110,41 @@ void SurfaceMapWidget::rebuildImages() {
 
     pointRadiusPx_ = pointRadiusPx(grid_->pointCount());
 
-    QPainter colorPainter(&colorImage_);
-    colorPainter.setRenderHint(QPainter::Antialiasing, true);
-    colorPainter.setPen(Qt::NoPen);
-
     QPainter idPainter(&idImage_);
     idPainter.setRenderHint(QPainter::Antialiasing, false);
     idPainter.setPen(Qt::NoPen);
+
+    if (interpolationEnabled_) {
+        SurfaceMapInterpolator interpolator(grid_, &projection_);
+        const int clampedNeighbors = qBound(6, grid_->pointCount(), 12);
+        const int neighborCount = qMin(clampedNeighbors, grid_->pointCount());
+        const double power = 2.0;
+
+        for (int y = 0; y < colorImage_.height(); ++y) {
+            auto *scanLine = reinterpret_cast<QRgb *>(colorImage_.scanLine(y));
+            for (int x = 0; x < colorImage_.width(); ++x) {
+                bool inside = false;
+                const double temperatureK =
+                    interpolator.interpolateTemperatureForPixel(QPoint(x, y),
+                                                                colorImage_.size(),
+                                                                neighborCount,
+                                                                power,
+                                                                &inside);
+                if (!inside) {
+                    scanLine[x] = qRgba(0, 0, 0, 0);
+                    continue;
+                }
+                scanLine[x] = temperatureToColor(temperatureK);
+            }
+        }
+    }
+
+    QPainter colorPainter;
+    if (!interpolationEnabled_) {
+        colorPainter.begin(&colorImage_);
+        colorPainter.setRenderHint(QPainter::Antialiasing, true);
+        colorPainter.setPen(Qt::NoPen);
+    }
 
     for (int i = 0; i < grid_->pointCount(); ++i) {
         const SurfacePoint &point = grid_->points()[i];
@@ -119,8 +156,10 @@ void SurfaceMapWidget::rebuildImages() {
                                  pixel.y() - pointRadiusPx_,
                                  pointRadiusPx_ * 2.0,
                                  pointRadiusPx_ * 2.0);
-        colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
-        colorPainter.drawEllipse(ellipseRect);
+        if (!interpolationEnabled_) {
+            colorPainter.setBrush(QColor::fromRgb(temperatureToColor(point.temperatureK)));
+            colorPainter.drawEllipse(ellipseRect);
+        }
 
         idPainter.setBrush(QColor::fromRgb(encodeId(i)));
         idPainter.drawEllipse(ellipseRect);
