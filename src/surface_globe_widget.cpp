@@ -3,6 +3,8 @@
 #include <algorithm>
 
 #include <QPainter>
+#include <QMouseEvent>
+#include <QMatrix4x4>
 #include <QVector3D>
 #include <QtMath>
 
@@ -69,7 +71,7 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     visiblePoints.reserve(grid_->pointCount());
 
     for (const auto &point : grid_->points()) {
-        const QVector3D normal = latLonToCartesian(point.latitudeDeg, point.longitudeDeg);
+        const QVector3D normal = applyRotation(latLonToCartesian(point.latitudeDeg, point.longitudeDeg));
         if (normal.z() <= 0.0f) {
             continue;
         }
@@ -99,6 +101,30 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
 
 }
 
+void SurfaceGlobeWidget::mousePressEvent(QMouseEvent *event) {
+    if (event->button() == Qt::LeftButton) {
+        isDragging_ = true;
+        lastMousePos_ = event->pos();
+    }
+    QWidget::mousePressEvent(event);
+}
+
+void SurfaceGlobeWidget::mouseMoveEvent(QMouseEvent *event) {
+    if (isDragging_ && (event->buttons() & Qt::LeftButton)) {
+        const QPoint delta = event->pos() - lastMousePos_;
+        lastMousePos_ = event->pos();
+
+        const float sensitivity = 0.4f;
+        yawDeg_ += delta.x() * sensitivity;
+        pitchDeg_ += delta.y() * sensitivity;
+        // Yaw - поворот вокруг вертикальной оси Y, pitch - вокруг оси X.
+        // Pitch ограничен, чтобы избежать переворота «камеры» при взгляде через полюса.
+        pitchDeg_ = qBound(-89.0f, pitchDeg_, 89.0f);
+        update();
+    }
+    QWidget::mouseMoveEvent(event);
+}
+
 QColor SurfaceGlobeWidget::temperatureToColor(double temperatureK) const {
     if (qFuzzyCompare(minTemperatureK_, maxTemperatureK_)) {
         return temperatureColorForRatio(0.5);
@@ -117,4 +143,11 @@ double SurfaceGlobeWidget::pointRadiusPx(int pointCount, double sphereRadiusPx) 
     const double cellArea = sphereArea / static_cast<double>(pointCount);
     const double spacing = qSqrt(cellArea);
     return qBound(1.0, spacing * 0.45, 6.0);
+}
+
+QVector3D SurfaceGlobeWidget::applyRotation(const QVector3D &v) const {
+    QMatrix4x4 rotation;
+    rotation.rotate(yawDeg_, 0.0f, 1.0f, 0.0f);
+    rotation.rotate(pitchDeg_, 1.0f, 0.0f, 0.0f);
+    return rotation.mapVector(v);
 }
