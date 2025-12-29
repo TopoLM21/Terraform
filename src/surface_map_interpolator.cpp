@@ -120,6 +120,13 @@ QVector<PixelWeights> SurfaceMapInterpolator::buildPixelWeights(const QSize &ima
     // Предрасчёт IDW-весов ускоряет последующие кадры: геометрия (проекция и
     // положение точек сетки) не меняется, поэтому можно повторно использовать
     // индексы соседей и веса при обновлении температур.
+    QVector<QPointF> projectedPoints(grid_->points().size());
+    // Проекция зависит только от геометрии сетки и одинакова для всех пикселей,
+    // поэтому вычисляем её один раз, аналогично пояснению формулы IDW.
+    for (int i = 0; i < grid_->points().size(); ++i) {
+        const auto &point = grid_->points()[i];
+        projectedPoints[i] = projection_->project(point.latitudeDeg, point.longitudeDeg);
+    }
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const int pixelIndex = y * width + x;
@@ -142,9 +149,7 @@ QVector<PixelWeights> SurfaceMapInterpolator::buildPixelWeights(const QSize &ima
 
             bool exactMatch = false;
             for (int i = 0; i < grid_->points().size(); ++i) {
-                const auto &point = grid_->points()[i];
-                const QPointF pointProjected = projection_->project(point.latitudeDeg,
-                                                                    point.longitudeDeg);
+                const QPointF pointProjected = projectedPoints[i];
                 const double dx = pointProjected.x() - projected.x();
                 const double dy = pointProjected.y() - projected.y();
                 const double distanceSquared = dx * dx + dy * dy;
