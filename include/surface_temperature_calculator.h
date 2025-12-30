@@ -4,6 +4,7 @@
 #include "orbit_segment_calculator.h"
 #include "planet_presets.h"
 #include "rotation_mode.h"
+#include "subsurface_temperature_solver.h"
 
 #include <QtCore/QVector>
 
@@ -41,15 +42,19 @@ struct TemperatureSummaryPoint {
 
 class SurfaceTemperatureCalculator {
 public:
-    SurfaceTemperatureCalculator(double solarConstant, const SurfaceMaterial &material,
-                                 double dayLengthDays, RotationMode rotationMode,
+    SurfaceTemperatureCalculator(double solarConstant,
+                                 const SurfaceMaterial &material,
+                                 double dayLengthDays,
+                                 RotationMode rotationMode,
                                  const AtmosphereComposition &atmosphere = AtmosphereComposition{},
                                  double greenhouseOpacity = 0.0,
                                  double atmospherePressureAtm = 0.0,
                                  double surfaceGravity = 0.0,
                                  double planetRadiusKm = 6371.0,
                                  bool useAtmosphericModel = false,
-                                 int meridionalTransportSteps = 8);
+                                 int meridionalTransportSteps = 8,
+                                 const SubsurfaceModelSettings &subsurfaceSettings =
+                                     SubsurfaceModelSettings{});
 
     void setMeridionalTransportSteps(int steps);
 
@@ -109,4 +114,5 @@ private:
     double planetRadiusKm_ = 6371.0;
     bool useAtmosphericModel_ = false;
     int meridionalTransportSteps_ = 8;
+    SubsurfaceModelSettings subsurfaceSettings_;
 };

@@ -14,6 +14,7 @@
 #include "surface_height_scale_widget.h"
 #include "surface_map_mode.h"
 #include "planet_surface_grid.h"
+#include "subsurface_temperature_solver.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -40,6 +41,7 @@
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QDialog>
 #include <QtWidgets/QDialogButtonBox>
+#include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
@@ -103,6 +105,11 @@ struct TemperatureCacheKey {
     double obliquity = 0.0;
     double perihelionArgument = 0.0;
     double planetRadiusKm = 0.0;
+    int subsurfaceLayers = 0;
+    double subsurfaceTopThicknessMeters = 0.0;
+    double subsurfaceDepthMeters = 0.0;
+    SubsurfaceBottomBoundaryCondition subsurfaceBoundary =
+        SubsurfaceBottomBoundaryCondition::Insulating;
     int latitudePoints = 0;
     int segmentCount = 0;
     RotationMode rotationMode = RotationMode::Normal;
@@ -121,6 +128,10 @@ struct TemperatureCacheKey {
                obliquity == other.obliquity &&
                perihelionArgument == other.perihelionArgument &&
                planetRadiusKm == other.planetRadiusKm &&
+               subsurfaceLayers == other.subsurfaceLayers &&
+               subsurfaceTopThicknessMeters == other.subsurfaceTopThicknessMeters &&
+               subsurfaceDepthMeters == other.subsurfaceDepthMeters &&
+               subsurfaceBoundary == other.subsurfaceBoundary &&
                latitudePoints == other.latitudePoints &&
                segmentCount == other.segmentCount &&
                rotationMode == other.rotationMode;
@@ -153,6 +164,10 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.obliquity), seed);
     seed = qHash(hashDoubleBits(key.perihelionArgument), seed);
     seed = qHash(hashDoubleBits(key.planetRadiusKm), seed);
+    seed = qHash(key.subsurfaceLayers, seed);
+    seed = qHash(hashDoubleBits(key.subsurfaceTopThicknessMeters), seed);
+    seed = qHash(hashDoubleBits(key.subsurfaceDepthMeters), seed);
+    seed = qHash(static_cast<int>(key.subsurfaceBoundary), seed);
     seed = qHash(key.latitudePoints, seed);
     seed = qHash(key.segmentCount, seed);
     seed = qHash(static_cast<int>(key.rotationMode), seed);
@@ -460,6 +475,26 @@ public:
                                          static_cast<int>(SurfaceMapMode::Height));
         surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
         surfaceViewToggleButton_->setCheckable(true);
+        subsurfaceLayersSpinBox_ = new QSpinBox(this);
+        subsurfaceLayersSpinBox_->setRange(1, 200);
+        subsurfaceLayersSpinBox_->setValue(24);
+        subsurfaceTopThicknessSpinBox_ = new QDoubleSpinBox(this);
+        subsurfaceTopThicknessSpinBox_->setRange(0.001, 10.0);
+        subsurfaceTopThicknessSpinBox_->setDecimals(3);
+        subsurfaceTopThicknessSpinBox_->setSingleStep(0.01);
+        subsurfaceTopThicknessSpinBox_->setValue(0.02);
+        subsurfaceTopThicknessSpinBox_->setSuffix(QStringLiteral(" м"));
+        subsurfaceDepthSpinBox_ = new QDoubleSpinBox(this);
+        subsurfaceDepthSpinBox_->setRange(0.1, 200.0);
+        subsurfaceDepthSpinBox_->setDecimals(2);
+        subsurfaceDepthSpinBox_->setSingleStep(0.1);
+        subsurfaceDepthSpinBox_->setValue(2.0);
+        subsurfaceDepthSpinBox_->setSuffix(QStringLiteral(" м"));
+        subsurfaceBoundaryComboBox_ = new QComboBox(this);
+        subsurfaceBoundaryComboBox_->addItem(QStringLiteral("Поток = 0"),
+                                             static_cast<int>(SubsurfaceBottomBoundaryCondition::Insulating));
+        subsurfaceBoundaryComboBox_->addItem(QStringLiteral("Фиксированная температура"),
+                                             static_cast<int>(SubsurfaceBottomBoundaryCondition::FixedTemperature));
         temperatureScaleWidget_ = new SurfaceTemperatureScaleWidget(this);
         temperatureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         temperatureScaleWidget_->setMinimumHeight(18);
@@ -490,9 +525,17 @@ public:
         surfaceLegendBottomLayout->addStretch();
         surfaceLegendBottomLayout->addWidget(surfaceLegendScaleStack_, 1);
         surfaceLegendBottomLayout->addStretch();
+        auto *subsurfaceFormLayout = new QFormLayout();
+        subsurfaceFormLayout->addRow(QStringLiteral("Слои подповерхности:"), subsurfaceLayersSpinBox_);
+        subsurfaceFormLayout->addRow(QStringLiteral("Верхняя толщина:"), subsurfaceTopThicknessSpinBox_);
+        subsurfaceFormLayout->addRow(QStringLiteral("Глубина модели:"), subsurfaceDepthSpinBox_);
+        subsurfaceFormLayout->addRow(QStringLiteral("Граница снизу:"), subsurfaceBoundaryComboBox_);
+        auto *subsurfaceGroupBox = new QGroupBox(QStringLiteral("Подповерхностная модель"), this);
+        subsurfaceGroupBox->setLayout(subsurfaceFormLayout);
         auto *surfaceMapLayout = new QVBoxLayout();
         surfaceMapLayout->addLayout(surfaceLegendTopLayout);
         surfaceMapLayout->addLayout(surfaceControlLayout);
+        surfaceMapLayout->addWidget(subsurfaceGroupBox);
         surfaceMapLayout->addWidget(surfaceViewStack_, 1);
         surfaceMapLayout->addLayout(surfaceLegendBottomLayout);
         auto *surfaceMapContainer = new QWidget(this);
@@ -656,6 +699,20 @@ public:
                         static_cast<SurfaceMapMode>(surfaceMapModeComboBox_->currentData().toInt());
                     applySurfaceMapMode(mode);
                 });
+
+        const auto onSubsurfaceChanged = [this]() {
+            clearTemperatureCache();
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
+        };
+        connect(subsurfaceLayersSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [onSubsurfaceChanged](int) { onSubsurfaceChanged(); });
+        connect(subsurfaceTopThicknessSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
+        connect(subsurfaceDepthSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+                [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
+        connect(subsurfaceBoundaryComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [onSubsurfaceChanged](int) { onSubsurfaceChanged(); });
 
         connect(surfaceViewToggleButton_, &QPushButton::toggled, this, [this](bool checked) {
             if (!surfaceViewStack_) {
@@ -841,6 +898,10 @@ private:
     QCheckBox *surfaceSeamlessCheckBox_ = nullptr;
     QComboBox *surfaceMapModeComboBox_ = nullptr;
     QPushButton *surfaceViewToggleButton_ = nullptr;
+    QSpinBox *subsurfaceLayersSpinBox_ = nullptr;
+    QDoubleSpinBox *subsurfaceTopThicknessSpinBox_ = nullptr;
+    QDoubleSpinBox *subsurfaceDepthSpinBox_ = nullptr;
+    QComboBox *subsurfaceBoundaryComboBox_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
     QStackedWidget *surfaceLegendScaleStack_ = nullptr;
@@ -1765,9 +1826,10 @@ private:
 
     struct SurfacePointStateDefaults {
         double albedo = 0.0;
-        double heatCapacity = 1.0;
         double greenhouseOpacity = 0.0;
         double minTemperatureKelvin = 3.0;
+        SurfaceMaterial material;
+        SubsurfaceModelSettings subsurfaceSettings;
     };
 
     std::optional<SurfacePointStateDefaults> buildSurfacePointStateDefaults() const {
@@ -1776,24 +1838,8 @@ private:
             return std::nullopt;
         }
 
-        AtmosphereComposition atmosphere;
-        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
-        if (atmosphereValue.isValid()) {
-            atmosphere = atmosphereValue.value<AtmosphereComposition>();
-        }
-
-        double atmospherePressureAtm = 0.0;
-        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
-        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
-        if (massEarths > 0.0 && radiusKm > 0.0) {
-            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
-        }
-
         const double greenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
-        // Атмосфера добавляет тепловую инерцию, замедляя суточные колебания.
-        const double atmosphereInertia = atmospherePressureAtm * 20.0;
-        const double heatCapacity = qMax(1.0, material->heatCapacity + atmosphereInertia);
         const double albedo = qBound(0.0, material->albedo, 1.0);
         // Не задаем высокий нижний порог: карта поверхности должна стартовать от физического минимума,
         // чтобы при слабой инсоляции температура могла быть значительно ниже 200 K.
@@ -1801,10 +1847,29 @@ private:
 
         SurfacePointStateDefaults defaults;
         defaults.albedo = albedo;
-        defaults.heatCapacity = heatCapacity;
         defaults.greenhouseOpacity = greenhouseOpacity;
         defaults.minTemperatureKelvin = minTemperatureKelvin;
+        defaults.material = *material;
+        defaults.subsurfaceSettings = buildSubsurfaceSettings();
         return defaults;
+    }
+
+    SubsurfaceModelSettings buildSubsurfaceSettings() const {
+        SubsurfaceModelSettings settings;
+        if (subsurfaceLayersSpinBox_) {
+            settings.layerCount = subsurfaceLayersSpinBox_->value();
+        }
+        if (subsurfaceTopThicknessSpinBox_) {
+            settings.topLayerThicknessMeters = subsurfaceTopThicknessSpinBox_->value();
+        }
+        if (subsurfaceDepthSpinBox_) {
+            settings.bottomDepthMeters = subsurfaceDepthSpinBox_->value();
+        }
+        if (subsurfaceBoundaryComboBox_) {
+            settings.bottomBoundary = static_cast<SubsurfaceBottomBoundaryCondition>(
+                subsurfaceBoundaryComboBox_->currentData().toInt());
+        }
+        return settings;
     }
 
     void applySurfaceGridToViews() {
@@ -1870,9 +1935,10 @@ private:
                 point.temperatureK = stateDefaults->minTemperatureKelvin;
                 point.state = SurfacePointState(point.temperatureK,
                                                 stateDefaults->albedo,
-                                                stateDefaults->heatCapacity,
                                                 stateDefaults->greenhouseOpacity,
-                                                stateDefaults->minTemperatureKelvin);
+                                                stateDefaults->minTemperatureKelvin,
+                                                stateDefaults->material,
+                                                stateDefaults->subsurfaceSettings);
             }
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
@@ -2012,9 +2078,10 @@ private:
                 interpolateTemperatureByLatitude(point.latitudeDeg, point.longitudeDeg);
             point.state = SurfacePointState(point.temperatureK,
                                             stateDefaults->albedo,
-                                            stateDefaults->heatCapacity,
                                             stateDefaults->greenhouseOpacity,
-                                            stateDefaults->minTemperatureKelvin);
+                                            stateDefaults->minTemperatureKelvin,
+                                            stateDefaults->material,
+                                            stateDefaults->subsurfaceSettings);
             minTemperature = qMin(minTemperature, point.temperatureK);
             maxTemperature = qMax(maxTemperature, point.temperatureK);
         }
@@ -2130,8 +2197,10 @@ private:
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
 
+            const double absorbedFlux = point.state.absorbedFlux(localInsolation);
+            const double emittedFlux = point.state.emittedFlux();
             // Применяем шаговый радиационный баланс для состояния точки.
-            point.state.updateTemperature(localInsolation, timeStepSeconds);
+            point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             point.temperatureK = point.state.temperatureKelvin();
             minTemperature = qMin(minTemperature, point.temperatureK);
             maxTemperature = qMax(maxTemperature, point.temperatureK);
@@ -2380,6 +2449,7 @@ private:
             return;
         }
 
+        const SubsurfaceModelSettings subsurfaceSettings = buildSubsurfaceSettings();
         const int latitudePointCount = latitudePoints();
         const RotationMode rotationMode =
             static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
@@ -2422,6 +2492,10 @@ private:
                                             // Радиус влияет на столбовую плотность и водный баланс, поэтому он
                                             // должен входить в ключ кэша температурных расчётов.
                                             radiusKm,
+                                            subsurfaceSettings.layerCount,
+                                            subsurfaceSettings.topLayerThicknessMeters,
+                                            subsurfaceSettings.bottomDepthMeters,
+                                            subsurfaceSettings.bottomBoundary,
                                             latitudePointCount,
                                             segmentCount,
                                             rotationMode};
@@ -2441,6 +2515,10 @@ private:
                                                       // Радиус влияет на столбовую плотность и водный баланс, поэтому он
                                                       // должен входить в ключ кэша температурных расчётов.
                                                       radiusKm,
+                                                      subsurfaceSettings.layerCount,
+                                                      subsurfaceSettings.topLayerThicknessMeters,
+                                                      subsurfaceSettings.bottomDepthMeters,
+                                                      subsurfaceSettings.bottomBoundary,
                                                       latitudePointCount,
                                                       segmentCount,
                                                       rotationMode};
@@ -2452,6 +2530,7 @@ private:
              surfaceOnlyAtmosphere,
              surfaceGravity,
              radiusKm,
+             subsurfaceSettings,
              latitudePointCount,
              referenceDistanceAU,
              obliquity,
@@ -2468,7 +2547,9 @@ private:
                                                                   0.0,
                                                                   surfaceGravity,
                                                                   radiusKm,
-                                                                  false);
+                                                                  false,
+                                                                  8,
+                                                                  subsurfaceSettings);
                 startTemperatureElapsedUi(requestId, QPointer<QProgressDialog>());
                 auto *surfaceWatcher =
                     new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
@@ -2629,7 +2710,9 @@ private:
                                                 atmospherePressureAtm,
                                                 surfaceGravity,
                                                 radiusKm,
-                                                hasAtmosphere);
+                                                hasAtmosphere,
+                                                8,
+                                                subsurfaceSettings);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
                 [this,
