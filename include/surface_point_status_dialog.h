@@ -13,6 +13,7 @@ public:
     explicit SurfacePointStatusDialog(QWidget *parent = nullptr);
 
     void setPoint(const SurfacePoint &point);
+    void clearPoint();
 
 private:
     QLabel *latitudeValueLabel_ = nullptr;

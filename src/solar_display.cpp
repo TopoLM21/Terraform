@@ -433,6 +433,7 @@ public:
                     if (!surfacePointStatusDialog_) {
                         surfacePointStatusDialog_ = new SurfacePointStatusDialog(this);
                     }
+                    selectedSurfacePointIndex_ = pointIndex;
                     surfacePointStatusDialog_->setPoint(*point);
                     surfacePointStatusDialog_->show();
                     surfacePointStatusDialog_->raise();
@@ -828,6 +829,7 @@ private:
     SurfaceMapWidget *surfaceMapWidget_ = nullptr;
     SurfaceGlobeWidget *surfaceGlobeWidget_ = nullptr;
     QPointer<SurfacePointStatusDialog> surfacePointStatusDialog_;
+    int selectedSurfacePointIndex_ = -1;
     QStackedWidget *surfaceViewStack_ = nullptr;
     QLabel *surfaceMinTemperatureLabel_ = nullptr;
     QLabel *surfaceMaxTemperatureLabel_ = nullptr;
@@ -937,6 +939,18 @@ private:
             surfaceSimTimer_->stop();
         }
         updateSurfaceSimulationUi();
+    }
+
+    void updateSurfacePointStatusDialog() {
+        if (!surfacePointStatusDialog_) {
+            return;
+        }
+        const SurfacePoint *point = surfaceGrid_.pointAt(selectedSurfacePointIndex_);
+        if (!point) {
+            surfacePointStatusDialog_->clearPoint();
+            return;
+        }
+        surfacePointStatusDialog_->setPoint(*point);
     }
 
     void setInputValue(QLineEdit *input, double value) {
@@ -1800,6 +1814,7 @@ private:
         if (surfaceGlobeWidget_) {
             surfaceGlobeWidget_->setGrid(&surfaceGrid_);
         }
+        updateSurfacePointStatusDialog();
     }
 
     void applySurfaceTemperatureRangeToViews(double minTemperature, double maxTemperature) {
