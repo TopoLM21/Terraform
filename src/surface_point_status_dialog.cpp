@@ -35,3 +35,11 @@ void SurfacePointStatusDialog::setPoint(const SurfacePoint &point) {
     heightValueLabel_->setText(formatNumber(point.heightKm));
     materialValueLabel_->setText(point.materialId.isEmpty() ? QStringLiteral("—") : point.materialId);
 }
+
+void SurfacePointStatusDialog::clearPoint() {
+    latitudeValueLabel_->setText(QStringLiteral("—"));
+    longitudeValueLabel_->setText(QStringLiteral("—"));
+    temperatureValueLabel_->setText(QStringLiteral("—"));
+    heightValueLabel_->setText(QStringLiteral("—"));
+    materialValueLabel_->setText(QStringLiteral("—"));
+}
