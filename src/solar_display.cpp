@@ -48,6 +48,7 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressDialog>
+#include <QtWidgets/QSpinBox>
 #include <algorithm>
 #include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QPushButton>
@@ -334,6 +335,8 @@ public:
         rotationModeComboBox_->addItem(
             QStringLiteral("Приливная синхронизация (угол от подсолнечной точки)"),
             static_cast<int>(RotationMode::TidalLocked));
+        heightSeedSpinBox_ = new QSpinBox(this);
+        heightSeedSpinBox_->setRange(0, std::numeric_limits<int>::max());
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
@@ -388,6 +391,7 @@ public:
         auto *planetControlsLayout = new QFormLayout();
         planetControlsLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         planetControlsLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
+        planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
         planetControlsLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
         planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
 
@@ -546,6 +550,7 @@ public:
             updateLatitudePointsDefault();
             syncMaterialWithPlanet();
             syncRotationModeWithPlanet();
+            syncHeightSeedWithPlanet();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
                 (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -595,6 +600,14 @@ public:
             updateRotationModeIllustration();
             clearTemperatureCache();
             updateTemperaturePlot();
+        });
+
+        connect(heightSeedSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetHeightSeedWithSelection();
+            updateSurfaceGridTemperatures();
         });
 
         connect(latitudeStepFastRadio_, &QRadioButton::toggled, this, [this](bool checked) {
@@ -801,6 +814,7 @@ private:
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
     QComboBox *rotationModeComboBox_ = nullptr;
+    QSpinBox *heightSeedSpinBox_ = nullptr;
     ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
     QRadioButton *latitudeStepFastRadio_ = nullptr;
     QRadioButton *latitudeStepSlowRadio_ = nullptr;
@@ -956,6 +970,7 @@ private:
         updateLatitudePointsDefault();
         syncMaterialWithPlanet();
         syncRotationModeWithPlanet();
+        syncHeightSeedWithPlanet();
         updatePlanetActions();
     }
 
@@ -980,6 +995,10 @@ private:
             rotationModeComboBox_->setCurrentIndex(-1);
         }
         updateRotationModeIllustration();
+        if (heightSeedSpinBox_) {
+            const QSignalBlocker seedBlocker(heightSeedSpinBox_);
+            heightSeedSpinBox_->setValue(0);
+        }
         updatePlanetActions();
         updateTemperaturePlot();
     }
@@ -1291,6 +1310,10 @@ private:
         greenhouseValidator->setLocale(QLocale::C);
         greenhouseOpacityInput->setValidator(greenhouseValidator);
 
+        auto *heightSeedInput = new QSpinBox(&dialog);
+        heightSeedInput->setRange(0, std::numeric_limits<int>::max());
+        heightSeedInput->setValue(0);
+
         auto *formLayout = new QFormLayout();
         formLayout->addRow(QStringLiteral("Имя:"), nameInput);
         formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
@@ -1302,6 +1325,7 @@ private:
         formLayout->addRow(QStringLiteral("Аргумент перицентра (°):"), perihelionArgumentInput);
         formLayout->addRow(QStringLiteral("Парниковая непрозрачность (0..1):"),
                            greenhouseOpacityInput);
+        formLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedInput);
 
         auto *materialInput = new QComboBox(&dialog);
         for (const auto &material : surfaceMaterials()) {
@@ -1350,8 +1374,8 @@ private:
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
                 [&dialog, nameInput, axisInput, dayLengthInput, massInput, radiusInput,
                  eccentricityInput, obliquityInput, perihelionArgumentInput,
-                 greenhouseOpacityInput, materialInput, rotationModeInput, atmosphereInput,
-                 this]() {
+                 greenhouseOpacityInput, heightSeedInput, materialInput, rotationModeInput,
+                 atmosphereInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -1421,10 +1445,12 @@ private:
             const RotationMode rotationMode =
                 static_cast<RotationMode>(rotationModeInput->currentData().toInt());
             const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
+            const quint32 heightSeed = static_cast<quint32>(heightSeedInput->value());
             const AtmosphereComposition composition = atmosphereInput->composition(false);
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
                                 composition, greenhouseOpacity, tidallyLocked};
+            preset.heightSeed = heightSeed;
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -1525,6 +1551,17 @@ private:
         updateRotationModeIllustration();
     }
 
+    void syncHeightSeedWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !heightSeedSpinBox_) {
+            return;
+        }
+
+        const int heightSeed = planetComboBox_->itemData(index, kRoleHeightSeed).toInt();
+        const QSignalBlocker blocker(heightSeedSpinBox_);
+        heightSeedSpinBox_->setValue(heightSeed);
+    }
+
     void syncPlanetMaterialWithSelection() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0) {
@@ -1539,6 +1576,14 @@ private:
             return;
         }
         planetComboBox_->setItemData(index, rotationModeComboBox_->currentData(), kRoleRotationMode);
+    }
+
+    void syncPlanetHeightSeedWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !heightSeedSpinBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(index, heightSeedSpinBox_->value(), kRoleHeightSeed);
     }
 
     void updateRotationModeIllustration() {
@@ -1681,6 +1726,7 @@ private:
             planetComboBox_->currentData(kRoleHeightmapPath).toString();
         const double heightmapScaleKm =
             planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
+        // Seed влияет только на HeightSourceType::Procedural.
         const quint32 heightSeed =
             planetComboBox_->currentData(kRoleHeightSeed).toUInt();
         const bool useContinentsHeight =
