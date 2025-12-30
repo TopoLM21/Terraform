@@ -101,6 +101,23 @@ double ridgedFbmNoise(const QVector3D &p, double baseFrequency, int octaves) {
     }
     return (amplitudeSum > 0.0) ? sum / amplitudeSum : 0.0;
 }
+
+double hashToSignedUnit(quint32 h) {
+    return (static_cast<double>(h) / static_cast<double>(std::numeric_limits<quint32>::max())) * 2.0 - 1.0;
+}
+
+QVector3D seedOffsetVector(quint32 seed) {
+    if (seed == 0u) {
+        return QVector3D();
+    }
+    const double offsetScale = 13.5;
+    const double ox = hashToSignedUnit(hash3(static_cast<int>(seed), 11, 23));
+    const double oy = hashToSignedUnit(hash3(static_cast<int>(seed), 41, 59));
+    const double oz = hashToSignedUnit(hash3(static_cast<int>(seed), 97, 101));
+    return QVector3D(static_cast<float>(ox * offsetScale),
+                     static_cast<float>(oy * offsetScale),
+                     static_cast<float>(oz * offsetScale));
+}
 } // namespace
 
 SurfaceHeightModel::SurfaceHeightModel() = default;
@@ -108,8 +125,10 @@ SurfaceHeightModel::SurfaceHeightModel() = default;
 SurfaceHeightModel::SurfaceHeightModel(HeightSourceType sourceType,
                                        const QString &heightmapPath,
                                        double heightmapScaleKm,
+                                       quint32 heightSeed,
                                        bool useContinentsHeight)
     : sourceType_(sourceType),
+      heightSeed_(heightSeed),
       useContinentsHeight_(useContinentsHeight) {
     if (sourceType_ == HeightSourceType::HeightmapEquirectangular) {
         if (!heightmap_.loadFromFile(heightmapPath, heightmapScaleKm)) {
@@ -124,17 +143,20 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
     }
 
     const QVector3D p = unitSpherePoint(latitudeDeg, longitudeDeg);
+    // Seed смещает пространство шума, чтобы разные пресеты не делили одну и ту же "карту"
+    // континентов: добавляем детерминированный вектор в шумовой домен, сохраняя непрерывность.
+    const QVector3D noisePoint = p + seedOffsetVector(heightSeed_);
 
     if (useContinentsHeight_) {
         // Низкочастотная FBM-маска формирует крупные континенты: частота мала, октав мало.
-        const double continentNoise = fbmNoise(p, 0.45, 3);
+        const double continentNoise = fbmNoise(noisePoint, 0.45, 3);
         // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
         const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.05) / 0.95, 1.0));
 
         // Гладкие равнины: средняя частота, небольшой вклад амплитуды.
-        const double plains = 0.5 + 0.5 * fbmNoise(p, 1.6, 4);
+        const double plains = 0.5 + 0.5 * fbmNoise(noisePoint, 1.6, 4);
         // Ridged noise даёт хребты: инверсия модуля шумового сигнала подчёркивает пики.
-        const double mountains = ridgedFbmNoise(p, 3.2, 4);
+        const double mountains = ridgedFbmNoise(noisePoint, 3.2, 4);
 
         // Базовый уровень океана: отрицательный, чтобы было "морское дно".
         const double oceanDepthKm = -5.5;
@@ -144,12 +166,12 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
         return lerp(oceanDepthKm, landHeightKm, landMask);
     }
 
-    const double continentA = ridgedFbmNoise(p, 0.7, 4);
-    const double continentB = ridgedFbmNoise(p, 1.3, 3);
-    const double continentC = 0.5 + 0.5 * fbmNoise(p, 0.9, 5);
+    const double continentA = ridgedFbmNoise(noisePoint, 0.7, 4);
+    const double continentB = ridgedFbmNoise(noisePoint, 1.3, 3);
+    const double continentC = 0.5 + 0.5 * fbmNoise(noisePoint, 0.9, 5);
     const double continents = 0.55 * continentA + 0.30 * continentB + 0.15 * continentC;
 
-    const double detail = fbmNoise(p, 6.5, 5);
+    const double detail = fbmNoise(noisePoint, 6.5, 5);
 
     // Нормируем суммарный сигнал: крупный рельеф доминирует, детализация лишь подчёркивает форму.
     const double normalized = qBound(-1.0, (continents * 2.0 - 1.0) + detail * 0.15, 1.0);

@@ -27,6 +27,7 @@ public:
     void setHeightSource(HeightSourceType sourceType,
                          const QString &heightmapPath,
                          double heightmapScaleKm,
+                         quint32 heightSeed,
                          bool useContinentsHeight);
 
 private:
@@ -38,6 +39,7 @@ private:
     HeightSourceType heightSourceType_ = HeightSourceType::Procedural;
     QString heightmapPath_;
     double heightmapScaleKm_ = 0.0;
+    quint32 heightSeed_ = 0;
     bool useContinentsHeight_ = false;
     QVector<SurfacePoint> points_;
     QVector<SurfaceCell> cells_;

@@ -46,6 +46,8 @@ struct PlanetPreset {
     QString heightmapPath;
     // Масштаб высот в километрах: значение 1.0 соответствует диапазону (-1..+1) км.
     double heightmapScaleKm = 0.0;
+    // Seed для процедурного рельефа (для heightmap игнорируется).
+    quint32 heightSeed = 0;
     // Процедурный режим "continents" (маска суши + горы/равнины).
     bool useContinentsHeight = false;
 };
