@@ -1,6 +1,6 @@
 #include "temperature_plot_tracker.h"
 
-#include <qwt-qt5/qwt_text.h>
+#include <qwt/qwt_text.h>
 
 #include <QtGui/QBrush>
 #include <QtGui/QColor>
