@@ -23,6 +23,8 @@ add_executable(solar_constant
     include/height_color_scale.h
     include/surface_point_state.h
     include/surface_temperature_state.h
+    include/subsurface_grid.h
+    include/subsurface_temperature_solver.h
     include/surface_temperature_scale_widget.h
     include/surface_height_scale_widget.h
     include/surface_map_mode.h
@@ -63,6 +65,8 @@ add_executable(solar_constant
     src/surface_temperature_calculator.cpp
     src/surface_temperature_scale_widget.cpp
     src/surface_temperature_state.cpp
+    src/subsurface_grid.cpp
+    src/subsurface_temperature_solver.cpp
     src/surface_temperature_plot.cpp
     src/temperature_plot_tracker.cpp
     src/temperature_color_scale.cpp

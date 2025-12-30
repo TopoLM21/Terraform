@@ -59,7 +59,8 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            double surfaceGravity,
                                                            double planetRadiusKm,
                                                            bool useAtmosphericModel,
-                                                           int meridionalTransportSteps)
+                                                           int meridionalTransportSteps,
+                                                           const SubsurfaceModelSettings &subsurfaceSettings)
     : solarConstant_(solarConstant),
       material_(material),
       dayLengthDays_(dayLengthDays),
@@ -70,7 +71,8 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       surfaceGravity_(surfaceGravity),
       planetRadiusKm_(planetRadiusKm),
       useAtmosphericModel_(useAtmosphericModel),
-      meridionalTransportSteps_(qMax(1, meridionalTransportSteps)) {}
+      meridionalTransportSteps_(qMax(1, meridionalTransportSteps)),
+      subsurfaceSettings_(subsurfaceSettings) {}
 
 void SurfaceTemperatureCalculator::setMeridionalTransportSteps(int steps) {
     meridionalTransportSteps_ = qMax(1, steps);
@@ -391,11 +393,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const double tBase =
             tLatRad * (1.0 - meridionalTransport) + tGlobalAvg * meridionalTransport;
 
-        // Теплоемкость включает вклад океана и атмосферы, чтобы замедлить суточные колебания.
-        const double atmDamping = pressureAtm * 20.0;
-        const double waterInertia = potentialCoverage * 120.0;
-        const double totalInertia =
-            qMax(1.0, material_.heatCapacity + waterInertia + atmDamping);
         // В базовом радиационном балансе не ограничиваем температуру атмосферным "полом":
         // слабые звезды должны давать холодные поверхности вплоть до физического минимума ~3 K.
         const double absFloor = 3.0;
@@ -405,9 +402,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         // Поток смешивается с глобальным средним, чтобы имитировать меридиональный перенос.
         SurfaceTemperatureState state(tBase,
                                       finalAlbedo,
-                                      totalInertia,
                                       greenhouseOpacity,
-                                      absFloor);
+                                      absFloor,
+                                      material_,
+                                      subsurfaceSettings_);
 
         const int totalSteps = stepsPerDay * (spinUpDays + 1);
         double tMin = state.temperatureKelvin();
@@ -428,15 +426,16 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                 std::sin(latitudeRadians) * std::sin(declinationRadians) +
                 std::cos(latitudeRadians) * std::cos(declinationRadians) *
                     std::cos(hourAngle);
-            // Суточная инсоляция до учета альбедо: альбедо применяется внутри
-            // SurfaceTemperatureState::updateTemperature().
+            // Суточная инсоляция до учета альбедо.
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
             const double blendedInsolation =
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
 
-            state.updateTemperature(blendedInsolation, timeStepSeconds);
+            const double absorbedFlux = state.absorbedFlux(blendedInsolation);
+            const double emittedFlux = state.emittedFlux();
+            state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
 
             if (step >= stepsPerDay * spinUpDays) {
                 const double temp = state.temperatureKelvin();
