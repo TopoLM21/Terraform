@@ -11,7 +11,6 @@
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
-constexpr int kContinentCount = 5;
 
 double degreesToRadians(double degrees) {
     return degrees * kPi / 180.0;
@@ -126,7 +125,7 @@ QVector3D seedOffsetVector(quint32 seed) {
                      static_cast<float>(oz * offsetScale));
 }
 
-QVector3D continentCenterFromSeed(quint32 seed, int index) {
+std::vector<QVector3D> continentCandidatesFromSeed(quint32 seed) {
     constexpr int kLatitudeSteps = 6;
     constexpr int kLongitudeSteps = 12;
     constexpr double kJitterFraction = 0.35;
@@ -156,48 +155,7 @@ QVector3D continentCenterFromSeed(quint32 seed, int index) {
         }
     }
 
-    std::vector<QVector3D> selected;
-    selected.reserve(kContinentCount);
-    std::vector<bool> used(candidates.size(), false);
-
-    const int startIndex = static_cast<int>(hashToUnit01(hash3(static_cast<int>(seed), 19, 73))
-                                            * static_cast<double>(candidates.size()));
-    const int clampedStart = qBound(0, startIndex, static_cast<int>(candidates.size()) - 1);
-    selected.push_back(candidates[static_cast<size_t>(clampedStart)]);
-    used[static_cast<size_t>(clampedStart)] = true;
-
-    // Итеративный отбор: на каждом шаге выбираем кандидата с максимальной минимальной угловой дистанцией.
-    for (int pick = 1; pick < kContinentCount; ++pick) {
-        double bestScore = 2.0;
-        int bestIndex = -1;
-        for (size_t candidateIndex = 0; candidateIndex < candidates.size(); ++candidateIndex) {
-            if (used[candidateIndex]) {
-                continue;
-            }
-            double maxDot = -1.0;
-            for (const QVector3D &center : selected) {
-                const double dot = qBound(-1.0,
-                                          static_cast<double>(QVector3D::dotProduct(candidates[candidateIndex], center)),
-                                          1.0);
-                maxDot = qMax(maxDot, dot);
-            }
-            if (maxDot < bestScore) {
-                bestScore = maxDot;
-                bestIndex = static_cast<int>(candidateIndex);
-            }
-        }
-        if (bestIndex < 0) {
-            break;
-        }
-        used[static_cast<size_t>(bestIndex)] = true;
-        selected.push_back(candidates[static_cast<size_t>(bestIndex)]);
-    }
-
-    if (selected.empty()) {
-        return QVector3D(0.0f, 1.0f, 0.0f);
-    }
-    const int wrappedIndex = (index >= 0) ? (index % static_cast<int>(selected.size())) : 0;
-    return selected[static_cast<size_t>(wrappedIndex)];
+    return candidates;
 }
 } // namespace
 
@@ -218,6 +176,60 @@ SurfaceHeightModel::SurfaceHeightModel(HeightSourceType sourceType,
     }
 }
 
+void SurfaceHeightModel::rebuildContinentCentersCache() const {
+    const std::vector<QVector3D> candidates = continentCandidatesFromSeed(heightSeed_);
+    std::vector<QVector3D> selected;
+    selected.reserve(kContinentCount);
+    std::vector<bool> used(candidates.size(), false);
+
+    if (!candidates.empty()) {
+        const int startIndex = static_cast<int>(hashToUnit01(hash3(static_cast<int>(heightSeed_), 19, 73))
+                                                * static_cast<double>(candidates.size()));
+        const int clampedStart = qBound(0, startIndex, static_cast<int>(candidates.size()) - 1);
+        selected.push_back(candidates[static_cast<size_t>(clampedStart)]);
+        used[static_cast<size_t>(clampedStart)] = true;
+
+        // Итеративный отбор: на каждом шаге выбираем кандидата с максимальной минимальной угловой дистанцией.
+        for (int pick = 1; pick < kContinentCount; ++pick) {
+            double bestScore = 2.0;
+            int bestIndex = -1;
+            for (size_t candidateIndex = 0; candidateIndex < candidates.size(); ++candidateIndex) {
+                if (used[candidateIndex]) {
+                    continue;
+                }
+                double maxDot = -1.0;
+                for (const QVector3D &center : selected) {
+                    const double dot = qBound(-1.0,
+                                              static_cast<double>(QVector3D::dotProduct(candidates[candidateIndex],
+                                                                                        center)),
+                                              1.0);
+                    maxDot = qMax(maxDot, dot);
+                }
+                if (maxDot < bestScore) {
+                    bestScore = maxDot;
+                    bestIndex = static_cast<int>(candidateIndex);
+                }
+            }
+            if (bestIndex < 0) {
+                break;
+            }
+            used[static_cast<size_t>(bestIndex)] = true;
+            selected.push_back(candidates[static_cast<size_t>(bestIndex)]);
+        }
+    }
+
+    if (selected.empty()) {
+        continentCenters_.fill(QVector3D(0.0f, 1.0f, 0.0f));
+    } else {
+        for (int i = 0; i < kContinentCount; ++i) {
+            continentCenters_[static_cast<size_t>(i)] = selected[static_cast<size_t>(i % selected.size())];
+        }
+    }
+
+    continentCentersSeed_ = heightSeed_;
+    continentCentersValid_ = true;
+}
+
 double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) const {
     if (sourceType_ == HeightSourceType::HeightmapEquirectangular && heightmap_.isValid()) {
         return heightmap_.heightKmAt(latitudeDeg, longitudeDeg);
@@ -229,6 +241,9 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
     const QVector3D noisePoint = p + seedOffsetVector(heightSeed_);
 
     if (useContinentsHeight_) {
+        if (!continentCentersValid_ || continentCentersSeed_ != heightSeed_) {
+            rebuildContinentCentersCache();
+        }
         // Несколько "пятен" материков: суммируем гауссовы спады по угловому расстоянию.
         // Важно использовать больше центров и добавить низкочастотный шум, чтобы суша
         // не вырождалась в одно маленькое пятно даже для разных сидов.
@@ -242,7 +257,7 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
         double spotSum = 0.0;
         double weightSum = 0.0;
         for (int i = 0; i < kContinentCount; ++i) {
-            const QVector3D center = continentCenterFromSeed(heightSeed_, i);
+            const QVector3D center = continentCenters_[static_cast<size_t>(i)];
             const double weight = weights[static_cast<size_t>(i)];
             spotSum += weight * spot(center, sigmas[static_cast<size_t>(i)]);
             weightSum += weight;
