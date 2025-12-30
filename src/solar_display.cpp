@@ -2209,8 +2209,9 @@ private:
         // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
         const double globalAverageInsolation = segmentSolarConstant / 4.0;
 
-        // Один тик = 1 час планетарных суток, ускорение реализовано уменьшением интервала таймера.
-        const double timeStepSeconds = 3600.0;
+        const double dayLengthSeconds = qMax(0.01, dayLengthDays) * 86400.0;
+        // Шаг должен совпадать с фазой суточного цикла, иначе появляются пульсации и нестабильный прогрев.
+        const double timeStepSeconds = dayLengthSeconds / static_cast<double>(stepsPerDay);
         const double phase =
             2.0 * M_PI *
             (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
