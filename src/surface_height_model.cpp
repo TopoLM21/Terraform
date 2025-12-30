@@ -5,6 +5,7 @@
 #include <QVector3D>
 #include <QtMath>
 
+#include <array>
 #include <limits>
 
 namespace {
@@ -159,34 +160,42 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
     const QVector3D noisePoint = p + seedOffsetVector(heightSeed_);
 
     if (useContinentsHeight_) {
-        // Несколько "пятен" материков: суммируем гауссовы спады по угловому расстоянию
-        // до 2–3 центроидов, чтобы на сфере появлялись отдельные массивы суши.
-        const QVector3D centerA = continentCenterFromSeed(heightSeed_, 0);
-        const QVector3D centerB = continentCenterFromSeed(heightSeed_, 1);
-        const QVector3D centerC = continentCenterFromSeed(heightSeed_, 2);
-        const double sigmaA = 0.75;
-        const double sigmaB = 0.6;
-        const double sigmaC = 0.5;
+        // Несколько "пятен" материков: суммируем гауссовы спады по угловому расстоянию.
+        // Важно использовать больше центров и добавить низкочастотный шум, чтобы суша
+        // не вырождалась в одно маленькое пятно даже для разных сидов.
+        constexpr int kContinentCount = 5;
+        const std::array<double, kContinentCount> sigmas{{0.9, 0.75, 0.65, 0.55, 0.5}};
+        const std::array<double, kContinentCount> weights{{1.0, 0.9, 0.8, 0.7, 0.6}};
         const auto spot = [&](const QVector3D &center, double sigma) {
             const double dot = qBound(-1.0, static_cast<double>(QVector3D::dotProduct(p, center)), 1.0);
             const double angle = qAcos(dot);
             return qExp(-(angle * angle) / (2.0 * sigma * sigma));
         };
-        const double continentNoise = (spot(centerA, sigmaA) * 1.0
-                                       + spot(centerB, sigmaB) * 0.85
-                                       + spot(centerC, sigmaC) * 0.7) / 2.55;
+        double spotSum = 0.0;
+        double weightSum = 0.0;
+        for (int i = 0; i < kContinentCount; ++i) {
+            const QVector3D center = continentCenterFromSeed(heightSeed_, i);
+            const double weight = weights[static_cast<size_t>(i)];
+            spotSum += weight * spot(center, sigmas[static_cast<size_t>(i)]);
+            weightSum += weight;
+        }
+        const double continentSpots = (weightSum > 0.0) ? (spotSum / weightSum) : 0.0;
+        // Низкочастотный шум разбивает сплошные пятна и равномерно распределяет материки.
+        const double breakup = 0.5 + 0.5 * fbmNoise(noisePoint, 0.85, 4);
+        const double continentNoise = qBound(0.0, continentSpots * 0.65 + breakup * 0.35, 1.0);
         // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
-        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.32) / 0.68, 1.0));
+        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.22) / 0.6, 1.0));
 
         // Гладкие равнины: средняя частота, небольшой вклад амплитуды.
         const double plains = 0.5 + 0.5 * fbmNoise(noisePoint, 1.6, 4);
+        const double hills = 0.5 + 0.5 * fbmNoise(noisePoint, 3.4, 4);
         // Ridged noise даёт хребты: инверсия модуля шумового сигнала подчёркивает пики.
-        const double mountains = ridgedFbmNoise(noisePoint, 3.2, 4);
+        const double mountains = ridgedFbmNoise(noisePoint, 3.8, 5);
 
         // Базовый уровень океана: отрицательный, чтобы было "морское дно".
-        const double oceanDepthKm = -5.5;
+        const double oceanDepthKm = -6.0;
         // Высота суши складывается из равнин и гор, чтобы избежать гауссовского вида.
-        const double landHeightKm = plains * 1.8 + mountains * 4.5;
+        const double landHeightKm = plains * 1.5 + hills * 1.4 + mountains * 4.2;
         // Маска плавно смешивает океан и сушу в километрах.
         return lerp(oceanDepthKm, landHeightKm, landMask);
     }
