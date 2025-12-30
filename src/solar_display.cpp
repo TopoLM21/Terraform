@@ -81,7 +81,8 @@ constexpr int kRoleGreenhouseOpacity = Qt::UserRole + 12;
 constexpr int kRoleHeightSourceType = Qt::UserRole + 13;
 constexpr int kRoleHeightmapPath = Qt::UserRole + 14;
 constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 15;
-constexpr int kRoleUseContinentsHeight = Qt::UserRole + 16;
+constexpr int kRoleHeightSeed = Qt::UserRole + 16;
+constexpr int kRoleUseContinentsHeight = Qt::UserRole + 17;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -1214,6 +1215,7 @@ private:
                                      kRoleHeightSourceType);
         planetComboBox_->setItemData(index, planet.heightmapPath, kRoleHeightmapPath);
         planetComboBox_->setItemData(index, planet.heightmapScaleKm, kRoleHeightmapScaleKm);
+        planetComboBox_->setItemData(index, planet.heightSeed, kRoleHeightSeed);
         planetComboBox_->setItemData(index, planet.useContinentsHeight, kRoleUseContinentsHeight);
     }
 
@@ -1452,6 +1454,7 @@ private:
                 planetComboBox_->setItemData(existingIndex, preset.heightmapPath, kRoleHeightmapPath);
                 planetComboBox_->setItemData(existingIndex, preset.heightmapScaleKm,
                                              kRoleHeightmapScaleKm);
+                planetComboBox_->setItemData(existingIndex, preset.heightSeed, kRoleHeightSeed);
                 planetComboBox_->setItemData(existingIndex, preset.useContinentsHeight,
                                              kRoleUseContinentsHeight);
                 planetComboBox_->setCurrentIndex(existingIndex);
@@ -1678,10 +1681,12 @@ private:
             planetComboBox_->currentData(kRoleHeightmapPath).toString();
         const double heightmapScaleKm =
             planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
+        const quint32 heightSeed =
+            planetComboBox_->currentData(kRoleHeightSeed).toUInt();
         const bool useContinentsHeight =
             planetComboBox_->currentData(kRoleUseContinentsHeight).toBool();
         surfaceGrid_.setHeightSource(heightSource, heightmapPath, heightmapScaleKm,
-                                     useContinentsHeight);
+                                     heightSeed, useContinentsHeight);
 
         if (radiusKm <= 0.0) {
             surfaceGrid_.generateIcosahedronGrid(0);
