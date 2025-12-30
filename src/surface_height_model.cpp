@@ -118,6 +118,17 @@ QVector3D seedOffsetVector(quint32 seed) {
                      static_cast<float>(oy * offsetScale),
                      static_cast<float>(oz * offsetScale));
 }
+
+QVector3D continentCenterFromSeed(quint32 seed, int index) {
+    const double u = hashToSignedUnit(hash3(static_cast<int>(seed), 73 + index * 31, 19));
+    const double v = hashToSignedUnit(hash3(static_cast<int>(seed), 101 + index * 47, 57));
+    const double latitudeRad = qAsin(qBound(-1.0, u, 1.0));
+    const double longitudeRad = v * kPi;
+    const double cosLat = qCos(latitudeRad);
+    return QVector3D(static_cast<float>(cosLat * qCos(longitudeRad)),
+                     static_cast<float>(qSin(latitudeRad)),
+                     static_cast<float>(cosLat * qSin(longitudeRad)));
+}
 } // namespace
 
 SurfaceHeightModel::SurfaceHeightModel() = default;
@@ -148,10 +159,24 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
     const QVector3D noisePoint = p + seedOffsetVector(heightSeed_);
 
     if (useContinentsHeight_) {
-        // Низкочастотная FBM-маска формирует крупные континенты: частота мала, октав мало.
-        const double continentNoise = fbmNoise(noisePoint, 0.45, 3);
+        // Несколько "пятен" материков: суммируем гауссовы спады по угловому расстоянию
+        // до 2–3 центроидов, чтобы на сфере появлялись отдельные массивы суши.
+        const QVector3D centerA = continentCenterFromSeed(heightSeed_, 0);
+        const QVector3D centerB = continentCenterFromSeed(heightSeed_, 1);
+        const QVector3D centerC = continentCenterFromSeed(heightSeed_, 2);
+        const double sigmaA = 0.75;
+        const double sigmaB = 0.6;
+        const double sigmaC = 0.5;
+        const auto spot = [&](const QVector3D &center, double sigma) {
+            const double dot = qBound(-1.0, static_cast<double>(QVector3D::dotProduct(p, center)), 1.0);
+            const double angle = qAcos(dot);
+            return qExp(-(angle * angle) / (2.0 * sigma * sigma));
+        };
+        const double continentNoise = (spot(centerA, sigmaA) * 1.0
+                                       + spot(centerB, sigmaB) * 0.85
+                                       + spot(centerC, sigmaC) * 0.7) / 2.55;
         // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
-        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.05) / 0.95, 1.0));
+        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.32) / 0.68, 1.0));
 
         // Гладкие равнины: средняя частота, небольшой вклад амплитуды.
         const double plains = 0.5 + 0.5 * fbmNoise(noisePoint, 1.6, 4);
