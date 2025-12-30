@@ -7,9 +7,11 @@
 
 #include <array>
 #include <limits>
+#include <vector>
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
+constexpr int kContinentCount = 5;
 
 double degreesToRadians(double degrees) {
     return degrees * kPi / 180.0;
@@ -107,6 +109,10 @@ double hashToSignedUnit(quint32 h) {
     return (static_cast<double>(h) / static_cast<double>(std::numeric_limits<quint32>::max())) * 2.0 - 1.0;
 }
 
+double hashToUnit01(quint32 h) {
+    return static_cast<double>(h) / static_cast<double>(std::numeric_limits<quint32>::max());
+}
+
 QVector3D seedOffsetVector(quint32 seed) {
     if (seed == 0u) {
         return QVector3D();
@@ -121,14 +127,77 @@ QVector3D seedOffsetVector(quint32 seed) {
 }
 
 QVector3D continentCenterFromSeed(quint32 seed, int index) {
-    const double u = hashToSignedUnit(hash3(static_cast<int>(seed), 73 + index * 31, 19));
-    const double v = hashToSignedUnit(hash3(static_cast<int>(seed), 101 + index * 47, 57));
-    const double latitudeRad = qAsin(qBound(-1.0, u, 1.0));
-    const double longitudeRad = v * kPi;
-    const double cosLat = qCos(latitudeRad);
-    return QVector3D(static_cast<float>(cosLat * qCos(longitudeRad)),
-                     static_cast<float>(qSin(latitudeRad)),
-                     static_cast<float>(cosLat * qSin(longitudeRad)));
+    constexpr int kLatitudeSteps = 6;
+    constexpr int kLongitudeSteps = 12;
+    constexpr double kJitterFraction = 0.35;
+
+    const double latitudeStep = kPi / static_cast<double>(kLatitudeSteps);
+    const double longitudeStep = 2.0 * kPi / static_cast<double>(kLongitudeSteps);
+
+    std::vector<QVector3D> candidates;
+    candidates.reserve(static_cast<size_t>(kLatitudeSteps * kLongitudeSteps));
+
+    for (int latIndex = 0; latIndex < kLatitudeSteps; ++latIndex) {
+        const double baseLatitude = -0.5 * kPi + latitudeStep * (latIndex + 0.5);
+        for (int lonIndex = 0; lonIndex < kLongitudeSteps; ++lonIndex) {
+            const double baseLongitude = -kPi + longitudeStep * (lonIndex + 0.5);
+            const double jitterLat = hashToSignedUnit(hash3(static_cast<int>(seed), latIndex, lonIndex))
+                                     * latitudeStep * kJitterFraction;
+            const double jitterLon = hashToSignedUnit(hash3(static_cast<int>(seed), latIndex, lonIndex + 97))
+                                     * longitudeStep * kJitterFraction;
+            // Детерминированный джиттер по сетке широта/долгота даёт равномерные кандидаты,
+            // но с минимальной регулярностью рисунка.
+            const double latitude = qBound(-0.5 * kPi + 1e-4, baseLatitude + jitterLat, 0.5 * kPi - 1e-4);
+            const double longitude = baseLongitude + jitterLon;
+            const double cosLat = qCos(latitude);
+            candidates.emplace_back(static_cast<float>(cosLat * qCos(longitude)),
+                                    static_cast<float>(qSin(latitude)),
+                                    static_cast<float>(cosLat * qSin(longitude)));
+        }
+    }
+
+    std::vector<QVector3D> selected;
+    selected.reserve(kContinentCount);
+    std::vector<bool> used(candidates.size(), false);
+
+    const int startIndex = static_cast<int>(hashToUnit01(hash3(static_cast<int>(seed), 19, 73))
+                                            * static_cast<double>(candidates.size()));
+    const int clampedStart = qBound(0, startIndex, static_cast<int>(candidates.size()) - 1);
+    selected.push_back(candidates[static_cast<size_t>(clampedStart)]);
+    used[static_cast<size_t>(clampedStart)] = true;
+
+    // Итеративный отбор: на каждом шаге выбираем кандидата с максимальной минимальной угловой дистанцией.
+    for (int pick = 1; pick < kContinentCount; ++pick) {
+        double bestScore = 2.0;
+        int bestIndex = -1;
+        for (size_t candidateIndex = 0; candidateIndex < candidates.size(); ++candidateIndex) {
+            if (used[candidateIndex]) {
+                continue;
+            }
+            double maxDot = -1.0;
+            for (const QVector3D &center : selected) {
+                const double dot = qBound(-1.0,
+                                          static_cast<double>(QVector3D::dotProduct(candidates[candidateIndex], center)),
+                                          1.0);
+                maxDot = qMax(maxDot, dot);
+            }
+            if (maxDot < bestScore) {
+                bestScore = maxDot;
+                bestIndex = static_cast<int>(candidateIndex);
+            }
+        }
+        if (bestIndex < 0) {
+            break;
+        }
+        used[static_cast<size_t>(bestIndex)] = true;
+        selected.push_back(candidates[static_cast<size_t>(bestIndex)]);
+    }
+
+    if (selected.empty()) {
+        return QVector3D(0.0f, 1.0f, 0.0f);
+    }
+    const int wrappedIndex = (index >= 0) ? (index % static_cast<int>(selected.size())) : 0;
+    return selected[static_cast<size_t>(wrappedIndex)];
 }
 } // namespace
 
@@ -163,7 +232,6 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
         // Несколько "пятен" материков: суммируем гауссовы спады по угловому расстоянию.
         // Важно использовать больше центров и добавить низкочастотный шум, чтобы суша
         // не вырождалась в одно маленькое пятно даже для разных сидов.
-        constexpr int kContinentCount = 5;
         const std::array<double, kContinentCount> sigmas{{0.9, 0.75, 0.65, 0.55, 0.5}};
         const std::array<double, kContinentCount> weights{{1.0, 0.9, 0.8, 0.7, 0.6}};
         const auto spot = [&](const QVector3D &center, double sigma) {
