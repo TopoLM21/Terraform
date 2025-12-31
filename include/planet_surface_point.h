@@ -18,6 +18,10 @@ struct SurfacePoint {
     // тепловую инерцию и парниковую поправку без глобального пересчёта.
     SurfacePointState state;
     double heightKm = 0.0;
+    double pressureAtm = 0.0;
+    double windEastMps = 0.0;
+    double windNorthMps = 0.0;
+    double windSpeedMps = 0.0;
     QVector<double> layerHeightsKm;
     QString materialId;
     QVector<int> neighborIndices;
