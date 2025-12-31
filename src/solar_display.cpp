@@ -700,6 +700,7 @@ public:
             syncPlanetCloudAlbedoWithSelection();
             clearTemperatureCache();
             updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
         });
 
         connect(latitudeStepFastRadio_, &QRadioButton::toggled, this, [this](bool checked) {
@@ -2110,6 +2111,8 @@ private:
         }
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        const double cloudAlbedo =
+            qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
         const QString baseMaterialId =
             resolveSurfaceMaterialIdForPoint(atmosphere, massEarths, radiusKm);
         for (auto &point : surfaceGrid_.points()) {
@@ -2162,8 +2165,10 @@ private:
         if (!summarySource && !segmentSource) {
             for (auto &point : surfaceGrid_.points()) {
                 const SurfaceMaterial material = materialForPoint(point.materialId);
-                // Альбедо и теплофизика теперь зависят от материала ячейки.
-                const double albedo = qBound(0.0, material.albedo, 1.0);
+                // Альбедо и теплофизика зависят от материала ячейки, но облака перекрывают
+                // поверхность, поэтому берём максимум между материалом и облаками.
+                const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+                const double albedo = qMax(materialAlbedo, cloudAlbedo);
                 point.temperatureK = stateDefaults->minTemperatureKelvin;
                 point.state = SurfacePointState(point.temperatureK,
                                                 albedo,
@@ -2287,8 +2292,10 @@ private:
         double maxTemperature = std::numeric_limits<double>::lowest();
         for (auto &point : surfaceGrid_.points()) {
             const SurfaceMaterial material = materialForPoint(point.materialId);
-            // Альбедо и теплофизика теперь зависят от материала ячейки.
-            const double albedo = qBound(0.0, material.albedo, 1.0);
+            // Альбедо и теплофизика зависят от материала ячейки, но облака перекрывают
+            // поверхность, поэтому берём максимум между материалом и облаками.
+            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+            const double albedo = qMax(materialAlbedo, cloudAlbedo);
             const double baselineTemperature =
                 interpolateBaselineTemperature(point.latitudeDeg);
             const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
@@ -2765,6 +2772,12 @@ private:
     void updateTemperaturePlot() {
         cancelTemperatureCalculation();
 
+        // График температуры временно отключён: основная модель теперь "Поверхность" с ячейками.
+        // Оставляем только очистку сегментов, чтобы UI не отображал устаревшие кривые.
+        clearTemperatureSegments();
+        return;
+
+#if 0
         if (!hasSolarConstant_) {
             clearTemperatureSegments();
             return;
@@ -3200,6 +3213,7 @@ private:
             }
             return results;
         }));
+#endif
     }
 
     void cancelTemperatureCalculation() {
