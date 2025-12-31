@@ -1881,6 +1881,26 @@ private:
         return defaults;
     }
 
+    QString resolveSurfaceMaterialIdForPoint(const AtmosphereComposition &atmosphere,
+                                             double massEarths,
+                                             double radiusKm) const {
+        const QString planetName = planetComboBox_->currentData(kRolePlanetName).toString();
+        if (planetName == QStringLiteral("Церрера")) {
+            return QStringLiteral("ice");
+        }
+
+        double atmospherePressureAtm = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+        }
+        if (atmospherePressureAtm > 0.0) {
+            return QStringLiteral("desert");
+        }
+
+        // Без атмосферы выбираем лунный реголит как типичный пылевой покров для безвоздушных тел.
+        return QStringLiteral("regolith_moon");
+    }
+
     SubsurfaceModelSettings buildSubsurfaceSettings() const {
         SubsurfaceModelSettings settings;
         if (subsurfaceLayersSpinBox_) {
@@ -1933,6 +1953,25 @@ private:
         resetSurfaceSimulation();
         rebuildSurfaceGrid();
         updateSurfaceHeightLegendFromGrid();
+        AtmosphereComposition atmosphere;
+        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
+        if (atmosphereValue.isValid()) {
+            atmosphere = atmosphereValue.value<AtmosphereComposition>();
+        }
+        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
+        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        const QString baseMaterialId =
+            resolveSurfaceMaterialIdForPoint(atmosphere, massEarths, radiusKm);
+        for (auto &point : surfaceGrid_.points()) {
+            if (surfaceMaxHeightKm_ > 0.0 &&
+                point.heightKm >= 0.75 * surfaceMaxHeightKm_) {
+                // Высотный порог для скальных пород: доля от максимума дает масштабируемый
+                // критерий для разных планетных рельефов.
+                point.materialId = QStringLiteral("rocky");
+            } else {
+                point.materialId = baseMaterialId;
+            }
+        }
         if (surfaceGrid_.points().isEmpty()) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
@@ -1993,13 +2032,6 @@ private:
         const double sinDeclination = std::sin(declinationRadians);
         const double cosDeclination = std::cos(declinationRadians);
 
-        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
-        AtmosphereComposition atmosphere;
-        if (atmosphereValue.isValid()) {
-            atmosphere = atmosphereValue.value<AtmosphereComposition>();
-        }
-        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
-        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         double atmospherePressureAtm = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
