@@ -17,6 +17,7 @@ public:
     void setMapMode(SurfaceMapMode mode);
     void setTemperatureRange(double minK, double maxK);
     void setWindRange(double minMps, double maxMps);
+    void setPressureRange(double minAtm, double maxAtm);
     void setMarkupVisible(bool visible);
 
 signals:
@@ -36,6 +37,7 @@ private:
     QColor temperatureToColor(double temperatureK) const;
     QColor heightToColor(double heightKm) const;
     QColor windToColor(double speedMps) const;
+    QColor pressureToColor(double pressureAtm) const;
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
     QVector3D applyRotation(const QVector3D &v) const;
 
@@ -47,6 +49,8 @@ private:
     double maxHeightKm_ = 5.0;
     double minWindSpeedMps_ = 0.0;
     double maxWindSpeedMps_ = 50.0;
+    double minPressureAtm_ = 0.0;
+    double maxPressureAtm_ = 2.0;
     float yawDeg_ = 0.0f;
     float pitchDeg_ = 0.0f;
     QPoint lastMousePos_;

@@ -121,6 +121,12 @@ void SurfaceMapWidget::setWindRange(double minMps, double maxMps) {
     rebuildImages();
 }
 
+void SurfaceMapWidget::setPressureRange(double minAtm, double maxAtm) {
+    minPressureAtm_ = minAtm;
+    maxPressureAtm_ = maxAtm;
+    rebuildImages();
+}
+
 void SurfaceMapWidget::setInterpolationEnabled(bool enabled) {
     if (interpolationEnabled_ == enabled) {
         return;
@@ -213,6 +219,8 @@ void SurfaceMapWidget::rebuildImages() {
         double maxHeight = minHeight;
         double minWind = grid_->points().first().windSpeedMps;
         double maxWind = minWind;
+        double minPressure = grid_->points().first().pressureAtm;
+        double maxPressure = minPressure;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
@@ -220,6 +228,8 @@ void SurfaceMapWidget::rebuildImages() {
             maxHeight = qMax(maxHeight, point.heightKm);
             minWind = qMin(minWind, point.windSpeedMps);
             maxWind = qMax(maxWind, point.windSpeedMps);
+            minPressure = qMin(minPressure, point.pressureAtm);
+            maxPressure = qMax(maxPressure, point.pressureAtm);
         }
         if (minTemp != maxTemp) {
             minTemperatureK_ = minTemp;
@@ -229,6 +239,8 @@ void SurfaceMapWidget::rebuildImages() {
         maxHeightKm_ = maxHeight;
         minWindSpeedMps_ = minWind;
         maxWindSpeedMps_ = maxWind;
+        minPressureAtm_ = minPressure;
+        maxPressureAtm_ = maxPressure;
     }
 
     const double baseRadius = pointRadiusPx(grid_->pointCount(), size());
@@ -279,6 +291,8 @@ void SurfaceMapWidget::rebuildImages() {
                         sample = points[pointIndex].temperatureK;
                     } else if (mapMode_ == SurfaceMapMode::Height) {
                         sample = points[pointIndex].heightKm;
+                    } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                        sample = points[pointIndex].pressureAtm;
                     } else {
                         sample = points[pointIndex].windSpeedMps;
                     }
@@ -289,6 +303,8 @@ void SurfaceMapWidget::rebuildImages() {
                     scanLine[x] = temperatureToColor(value);
                 } else if (mapMode_ == SurfaceMapMode::Height) {
                     scanLine[x] = heightToColor(value);
+                } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                    scanLine[x] = pressureToColor(value);
                 } else {
                     scanLine[x] = windToColor(value);
                 }
@@ -318,6 +334,8 @@ void SurfaceMapWidget::rebuildImages() {
                     color = temperatureToColor(point.temperatureK);
                 } else if (mapMode_ == SurfaceMapMode::Height) {
                     color = heightToColor(point.heightKm);
+                } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                    color = pressureToColor(point.pressureAtm);
                 } else {
                     color = windToColor(point.windSpeedMps);
                 }
@@ -353,6 +371,8 @@ void SurfaceMapWidget::rebuildImages() {
                         color = temperatureToColor(point.temperatureK);
                     } else if (mapMode_ == SurfaceMapMode::Height) {
                         color = heightToColor(point.heightKm);
+                    } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                        color = pressureToColor(point.pressureAtm);
                     } else {
                         color = windToColor(point.windSpeedMps);
                     }
@@ -425,6 +445,17 @@ QRgb SurfaceMapWidget::windToColor(double speedMps) const {
     const double t = qBound(0.0,
                             (speedMps - minWindSpeedMps_) /
                                 (maxWindSpeedMps_ - minWindSpeedMps_),
+                            1.0);
+    return temperatureColorForRatio(t).rgb();
+}
+
+QRgb SurfaceMapWidget::pressureToColor(double pressureAtm) const {
+    if (qFuzzyCompare(minPressureAtm_, maxPressureAtm_)) {
+        return temperatureColorForRatio(0.5).rgb();
+    }
+    const double t = qBound(0.0,
+                            (pressureAtm - minPressureAtm_) /
+                                (maxPressureAtm_ - minPressureAtm_),
                             1.0);
     return temperatureColorForRatio(t).rgb();
 }

@@ -121,6 +121,8 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
         double maxHeight = minHeight;
         double minWind = grid_->points().first().windSpeedMps;
         double maxWind = minWind;
+        double minPressure = grid_->points().first().pressureAtm;
+        double maxPressure = minPressure;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
@@ -128,6 +130,8 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
             maxHeight = qMax(maxHeight, point.heightKm);
             minWind = qMin(minWind, point.windSpeedMps);
             maxWind = qMax(maxWind, point.windSpeedMps);
+            minPressure = qMin(minPressure, point.pressureAtm);
+            maxPressure = qMax(maxPressure, point.pressureAtm);
         }
         minTemperatureK_ = minTemp;
         maxTemperatureK_ = maxTemp;
@@ -135,6 +139,8 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
         maxHeightKm_ = maxHeight;
         minWindSpeedMps_ = minWind;
         maxWindSpeedMps_ = maxWind;
+        minPressureAtm_ = minPressure;
+        maxPressureAtm_ = maxPressure;
     }
     update();
 }
@@ -156,6 +162,12 @@ void SurfaceGlobeWidget::setTemperatureRange(double minK, double maxK) {
 void SurfaceGlobeWidget::setWindRange(double minMps, double maxMps) {
     minWindSpeedMps_ = minMps;
     maxWindSpeedMps_ = maxMps;
+    update();
+}
+
+void SurfaceGlobeWidget::setPressureRange(double minAtm, double maxAtm) {
+    minPressureAtm_ = minAtm;
+    maxPressureAtm_ = maxAtm;
     update();
 }
 
@@ -209,6 +221,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             globePoint.color = temperatureToColor(point.temperatureK);
         } else if (mapMode_ == SurfaceMapMode::Height) {
             globePoint.color = heightToColor(point.heightKm);
+        } else if (mapMode_ == SurfaceMapMode::Pressure) {
+            globePoint.color = pressureToColor(point.pressureAtm);
         } else {
             globePoint.color = windToColor(point.windSpeedMps);
         }
@@ -263,6 +277,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
                 cellDraw.color = temperatureToColor(cellPoint.temperatureK);
             } else if (mapMode_ == SurfaceMapMode::Height) {
                 cellDraw.color = heightToColor(cellPoint.heightKm);
+            } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                cellDraw.color = pressureToColor(cellPoint.pressureAtm);
             } else {
                 cellDraw.color = windToColor(cellPoint.windSpeedMps);
             }
@@ -357,6 +373,17 @@ QColor SurfaceGlobeWidget::windToColor(double speedMps) const {
     const double t = qBound(0.0,
                             (speedMps - minWindSpeedMps_) /
                                 (maxWindSpeedMps_ - minWindSpeedMps_),
+                            1.0);
+    return temperatureColorForRatio(t);
+}
+
+QColor SurfaceGlobeWidget::pressureToColor(double pressureAtm) const {
+    if (qFuzzyCompare(minPressureAtm_, maxPressureAtm_)) {
+        return temperatureColorForRatio(0.5);
+    }
+    const double t = qBound(0.0,
+                            (pressureAtm - minPressureAtm_) /
+                                (maxPressureAtm_ - minPressureAtm_),
                             1.0);
     return temperatureColorForRatio(t);
 }

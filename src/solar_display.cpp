@@ -14,6 +14,7 @@
 #include "surface_temperature_scale_widget.h"
 #include "surface_height_scale_widget.h"
 #include "surface_wind_scale_widget.h"
+#include "surface_pressure_scale_widget.h"
 #include "surface_map_mode.h"
 #include "surface_advection_model.h"
 #include "surface_pressure_transport_model.h"
@@ -615,6 +616,8 @@ public:
                                          static_cast<int>(SurfaceMapMode::Height));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Ветер"),
                                          static_cast<int>(SurfaceMapMode::Wind));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Давление"),
+                                         static_cast<int>(SurfaceMapMode::Pressure));
         surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
         surfaceViewToggleButton_->setCheckable(true);
         surfaceMarkupCheckBox_ = new QCheckBox(QStringLiteral("Разметка"), this);
@@ -654,10 +657,14 @@ public:
         windScaleWidget_ = new SurfaceWindScaleWidget(this);
         windScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         windScaleWidget_->setMinimumHeight(18);
+        pressureScaleWidget_ = new SurfacePressureScaleWidget(this);
+        pressureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        pressureScaleWidget_->setMinimumHeight(18);
         surfaceLegendScaleStack_ = new QStackedWidget(this);
         surfaceLegendScaleStack_->addWidget(temperatureScaleWidget_);
         surfaceLegendScaleStack_->addWidget(heightScaleWidget_);
         surfaceLegendScaleStack_->addWidget(windScaleWidget_);
+        surfaceLegendScaleStack_->addWidget(pressureScaleWidget_);
         surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
         auto *surfaceLegendTopLayout = new QHBoxLayout();
         surfaceLegendTopLayout->addWidget(surfaceMinTemperatureLabel_);
@@ -1088,6 +1095,7 @@ private:
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
     SurfaceWindScaleWidget *windScaleWidget_ = nullptr;
+    SurfacePressureScaleWidget *pressureScaleWidget_ = nullptr;
     QStackedWidget *surfaceLegendScaleStack_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
@@ -1118,6 +1126,9 @@ private:
     double surfaceMinWindSpeedMps_ = 0.0;
     double surfaceMaxWindSpeedMps_ = 0.0;
     bool hasSurfaceWindRange_ = false;
+    double surfaceMinPressureAtm_ = 0.0;
+    double surfaceMaxPressureAtm_ = 0.0;
+    bool hasSurfacePressureRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
@@ -2165,6 +2176,15 @@ private:
         }
     }
 
+    void applySurfacePressureRangeToViews(double minPressureAtm, double maxPressureAtm) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setPressureRange(minPressureAtm, maxPressureAtm);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setPressureRange(minPressureAtm, maxPressureAtm);
+        }
+    }
+
     void applySurfaceMapMode(SurfaceMapMode mode) {
         surfaceMapMode_ = mode;
         if (surfaceMapWidget_) {
@@ -2262,6 +2282,7 @@ private:
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             updateSurfaceWindLegend(false, 0.0, 0.0);
+            updateSurfacePressureLegend(false, 0.0, 0.0);
             return;
         }
 
@@ -2270,6 +2291,7 @@ private:
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
             updateSurfaceWindLegend(false, 0.0, 0.0);
+            updateSurfacePressureLegend(false, 0.0, 0.0);
             return;
         }
 
@@ -2473,6 +2495,8 @@ private:
             }
         }
 
+        double minPressureAtm = std::numeric_limits<double>::max();
+        double maxPressureAtm = std::numeric_limits<double>::lowest();
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             // Инициализируем поверхностное давление (на уровне рельефа), чтобы дальше
@@ -2486,6 +2510,8 @@ private:
                                                               gravity);
             // Храним поверхностное давление в точке для последующего переноса по ветру.
             point.pressureAtm = qMax(0.0, pressureAtm);
+            minPressureAtm = qMin(minPressureAtm, point.pressureAtm);
+            maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point.materialId);
@@ -2507,6 +2533,12 @@ private:
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+        }
+        if (minPressureAtm <= maxPressureAtm) {
+            applySurfacePressureRangeToViews(minPressureAtm, maxPressureAtm);
+            updateSurfacePressureLegend(true, minPressureAtm, maxPressureAtm);
+        } else {
+            updateSurfacePressureLegend(false, 0.0, 0.0);
         }
     }
 
@@ -2678,6 +2710,8 @@ private:
         }
         const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
         constexpr double kPressureRelaxFactor = 0.1;
+        double minPressureAtm = std::numeric_limits<double>::max();
+        double maxPressureAtm = std::numeric_limits<double>::lowest();
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             const double advectedAtm = advectedPressures.at(i);
@@ -2693,6 +2727,8 @@ private:
                 advectedAtm + (barometricAtm - advectedAtm) * kPressureRelaxFactor;
             // Фиксируем перенесённое поверхностное давление для UI и динамики.
             point.pressureAtm = qMax(0.0, relaxedAtm);
+            minPressureAtm = qMin(minPressureAtm, point.pressureAtm);
+            maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point.materialId);
@@ -2741,6 +2777,12 @@ private:
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
         }
+        if (minPressureAtm <= maxPressureAtm) {
+            applySurfacePressureRangeToViews(minPressureAtm, maxPressureAtm);
+            updateSurfacePressureLegend(true, minPressureAtm, maxPressureAtm);
+        } else {
+            updateSurfacePressureLegend(false, 0.0, 0.0);
+        }
 
         ++surfaceSimState_.hourIndex;
         if (surfaceSimState_.hourIndex >= stepsPerDay) {
@@ -2769,6 +2811,17 @@ private:
             surfaceMaxWindSpeedMps_ = maxWindSpeed;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Wind) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfacePressureLegend(bool hasRange, double minPressureAtm, double maxPressureAtm) {
+        hasSurfacePressureRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinPressureAtm_ = minPressureAtm;
+            surfaceMaxPressureAtm_ = maxPressureAtm;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::Pressure) {
             refreshSurfaceLegend();
         }
     }
@@ -2852,24 +2905,47 @@ private:
             return;
         }
 
-        if (surfaceLegendScaleStack_) {
-            surfaceLegendScaleStack_->setCurrentWidget(windScaleWidget_);
+        if (surfaceMapMode_ == SurfaceMapMode::Wind) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(windScaleWidget_);
+            }
+            if (!hasSurfaceWindRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (windScaleWidget_) {
+                    windScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 м/с").arg(locale.toString(surfaceMinWindSpeedMps_, 'f', 1)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 м/с").arg(locale.toString(surfaceMaxWindSpeedMps_, 'f', 1)));
+            if (windScaleWidget_) {
+                windScaleWidget_->setWindRange(surfaceMinWindSpeedMps_, surfaceMaxWindSpeedMps_);
+            }
+            return;
         }
-        if (!hasSurfaceWindRange_) {
+
+        if (surfaceLegendScaleStack_) {
+            surfaceLegendScaleStack_->setCurrentWidget(pressureScaleWidget_);
+        }
+        if (!hasSurfacePressureRange_) {
             surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
             surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
-            if (windScaleWidget_) {
-                windScaleWidget_->clearRange();
+            if (pressureScaleWidget_) {
+                pressureScaleWidget_->clearRange();
             }
             return;
         }
 
         surfaceMinTemperatureLabel_->setText(
-            QStringLiteral("Мин: %1 м/с").arg(locale.toString(surfaceMinWindSpeedMps_, 'f', 1)));
+            QStringLiteral("Мин: %1 атм").arg(locale.toString(surfaceMinPressureAtm_, 'f', 3)));
         surfaceMaxTemperatureLabel_->setText(
-            QStringLiteral("Макс: %1 м/с").arg(locale.toString(surfaceMaxWindSpeedMps_, 'f', 1)));
-        if (windScaleWidget_) {
-            windScaleWidget_->setWindRange(surfaceMinWindSpeedMps_, surfaceMaxWindSpeedMps_);
+            QStringLiteral("Макс: %1 атм").arg(locale.toString(surfaceMaxPressureAtm_, 'f', 3)));
+        if (pressureScaleWidget_) {
+            pressureScaleWidget_->setPressureRange(surfaceMinPressureAtm_, surfaceMaxPressureAtm_);
         }
     }
 

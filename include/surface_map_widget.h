@@ -19,6 +19,7 @@ public:
     void setMapMode(SurfaceMapMode mode);
     void setTemperatureRange(double minK, double maxK);
     void setWindRange(double minMps, double maxMps);
+    void setPressureRange(double minAtm, double maxAtm);
     void setInterpolationEnabled(bool enabled);
     void setRenderScale(double scale);
     void setInterpolationNeighborCount(int neighborCount);
@@ -37,6 +38,7 @@ private:
     QRgb temperatureToColor(double temperatureK) const;
     QRgb heightToColor(double heightKm) const;
     QRgb windToColor(double speedMps) const;
+    QRgb pressureToColor(double pressureAtm) const;
     int pointIdAt(const QPoint &pixel) const;
     QString formatPointTooltip(const SurfacePoint &point) const;
     double pointRadiusPx(int pointCount, const QSize &imageSize) const;
@@ -55,6 +57,8 @@ private:
     double maxHeightKm_ = 5.0;
     double minWindSpeedMps_ = 0.0;
     double maxWindSpeedMps_ = 50.0;
+    double minPressureAtm_ = 0.0;
+    double maxPressureAtm_ = 2.0;
     bool interpolationEnabled_ = false;
     double renderScale_ = 1.0;
     int neighborCount_ = 8;
