@@ -46,6 +46,8 @@ add_executable(solar_constant
     src/mollweide_projection.cpp
     src/mode_illustration_widget.cpp
     src/mode_illustration_widget.h
+    src/orbit_animation_model.cpp
+    src/orbit_animation_model.h
     src/orbit_segment_calculator.cpp
     src/planet_surface_grid.cpp
     src/planet_presets.cpp

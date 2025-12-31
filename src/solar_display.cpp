@@ -1,5 +1,6 @@
 #include "orbit_segment_calculator.h"
 #include "mode_illustration_widget.h"
+#include "orbit_animation_model.h"
 #include "planet_presets.h"
 #include "segment_selector_widget.h"
 #include "solar_calculator.h"
@@ -90,6 +91,7 @@ constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
+constexpr int kSurfaceOrbitSegmentsPerYear = 360;
 
 struct TemperatureCacheKey {
     double solarConstant = 0.0;
@@ -942,10 +944,9 @@ private:
     struct SurfaceSimulationState {
         int dayIndex = 0;
         int hourIndex = 0;
-        int segmentIndex = 0;
-        double declinationDegrees = 0.0;
     } surfaceSimState_;
-    QVector<OrbitSegment> surfaceSimSegments_;
+    OrbitAnimationModel surfaceOrbitAnimation_;
+    bool surfaceOrbitAnimationInitialized_ = false;
 
     void updateTemperaturePauseUi(bool paused) {
         if (temperaturePauseButton_) {
@@ -995,11 +996,37 @@ private:
     void resetSurfaceSimulation() {
         surfaceSimRunning_ = false;
         surfaceSimState_ = {};
-        surfaceSimSegments_.clear();
+        resetSurfaceOrbitAnimation();
         if (surfaceSimTimer_) {
             surfaceSimTimer_->stop();
         }
         updateSurfaceSimulationUi();
+    }
+
+    void resetSurfaceOrbitAnimation() {
+        if (!planetComboBox_) {
+            surfaceOrbitAnimation_.reset(1.0, 0.0, 0.0, 0.0, kSurfaceOrbitSegmentsPerYear);
+            surfaceOrbitAnimationInitialized_ = true;
+            return;
+        }
+        const double semiMajorAxis = planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble();
+        const double eccentricity = planetComboBox_->currentData(kRoleEccentricity).toDouble();
+        const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
+        const double perihelionArgument =
+            planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
+        surfaceOrbitAnimation_.reset(semiMajorAxis,
+                                     eccentricity,
+                                     obliquity,
+                                     perihelionArgument,
+                                     kSurfaceOrbitSegmentsPerYear);
+        surfaceOrbitAnimationInitialized_ = true;
+    }
+
+    void ensureSurfaceOrbitAnimationReady() {
+        if (surfaceOrbitAnimationInitialized_) {
+            return;
+        }
+        resetSurfaceOrbitAnimation();
     }
 
     void updateSurfacePointStatusDialog() {
@@ -1960,20 +1987,8 @@ private:
         const double substellarLongitudeRadians =
             (rotationMode == RotationMode::TidalLocked) ? 0.0 : -baseHourAngle;
 
-        double declinationDegrees = surfaceSimState_.declinationDegrees;
-        if (lastOrbitSegments_.size() > 0) {
-            const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
-            const double perihelionArgument =
-                planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
-            const double obliquityRadians = qDegreesToRadians(obliquity);
-            const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgument);
-            const int segmentIndex = surfaceSimState_.segmentIndex % lastOrbitSegments_.size();
-            const OrbitSegment &segment = lastOrbitSegments_.at(segmentIndex);
-            // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
-            const double solarLongitude = segment.trueAnomalyRadians + perihelionArgumentRadians;
-            declinationDegrees = qRadiansToDegrees(
-                std::asin(std::sin(obliquityRadians) * std::sin(solarLongitude)));
-        }
+        ensureSurfaceOrbitAnimationReady();
+        const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double declinationRadians = qDegreesToRadians(declinationDegrees);
 
         const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
@@ -1998,12 +2013,11 @@ private:
         const double meridionalTransport = transport * rotBlock;
 
         double segmentSolarConstant = lastSolarConstant_;
-        if (!lastOrbitSegments_.isEmpty() && lastSolarConstantDistanceAU_ > 0.0) {
-            const int segmentIndex = surfaceSimState_.segmentIndex % lastOrbitSegments_.size();
-            const OrbitSegment &segment = lastOrbitSegments_.at(segmentIndex);
+        if (lastSolarConstantDistanceAU_ > 0.0) {
+            const double distanceAU = surfaceOrbitAnimation_.distanceAU();
             segmentSolarConstant =
                 lastSolarConstant_ *
-                std::pow(lastSolarConstantDistanceAU_ / segment.distanceAU, 2.0);
+                std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
         }
         // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
         const double globalAverageInsolation = segmentSolarConstant / 4.0;
@@ -2154,11 +2168,6 @@ private:
             return;
         }
 
-        const double semiMajorAxis = planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble();
-        const double eccentricity = planetComboBox_->currentData(kRoleEccentricity).toDouble();
-        const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
-        const double perihelionArgument =
-            planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
         const RotationMode rotationMode =
             static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
@@ -2175,28 +2184,16 @@ private:
         }
 
         const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
-        const int segmentCount = 12;
-        if (surfaceSimSegments_.size() != segmentCount || surfaceSimSegments_.isEmpty()) {
-            OrbitSegmentCalculator orbitCalculator(semiMajorAxis, eccentricity);
-            surfaceSimSegments_ = orbitCalculator.segments(segmentCount);
-        }
-        if (surfaceSimSegments_.isEmpty()) {
-            return;
-        }
 
-        const int segmentIndex = surfaceSimState_.segmentIndex % surfaceSimSegments_.size();
-        const OrbitSegment &segment = surfaceSimSegments_.at(segmentIndex);
-        const double obliquityRadians = qDegreesToRadians(obliquity);
-        const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgument);
+        ensureSurfaceOrbitAnimationReady();
         // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
-        const double solarLongitude = segment.trueAnomalyRadians + perihelionArgumentRadians;
-        surfaceSimState_.declinationDegrees =
-            qRadiansToDegrees(std::asin(std::sin(obliquityRadians) * std::sin(solarLongitude)));
+        const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
 
         // Инсоляция меняется с расстоянием как 1 / r^2 относительно опорной дистанции.
+        const double distanceAU = surfaceOrbitAnimation_.distanceAU();
         const double segmentSolarConstant =
             lastSolarConstant_ *
-            std::pow(lastSolarConstantDistanceAU_ / segment.distanceAU, 2.0);
+            std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
         const double transport =
             (atmospherePressureAtm > 50.0)
                 ? 0.99
@@ -2220,7 +2217,7 @@ private:
         // Субзвёздная долгота задает меридиан с нулевым часовым углом.
         const double substellarLongitudeRadians =
             (rotationMode == RotationMode::TidalLocked) ? 0.0 : -hourAngle;
-        const double declinationRadians = qDegreesToRadians(surfaceSimState_.declinationDegrees);
+        const double declinationRadians = qDegreesToRadians(declinationDegrees);
 
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
@@ -2261,7 +2258,7 @@ private:
         if (surfaceSimState_.hourIndex >= stepsPerDay) {
             surfaceSimState_.hourIndex = 0;
             ++surfaceSimState_.dayIndex;
-            surfaceSimState_.segmentIndex = (surfaceSimState_.segmentIndex + 1) % segmentCount;
+            surfaceOrbitAnimation_.advanceSegment();
         }
         updateSurfaceSimulationUi();
     }
