@@ -62,6 +62,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            RotationMode rotationMode,
                                                            const AtmosphereComposition &atmosphere,
                                                            double greenhouseOpacity,
+                                                           double presetCloudAlbedo,
                                                            double atmospherePressureAtm,
                                                            double surfaceGravity,
                                                            double planetRadiusKm,
@@ -79,6 +80,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       rotationMode_(rotationMode),
       atmosphere_(atmosphere),
       greenhouseOpacity_(qBound(0.0, greenhouseOpacity, 0.999)),
+      presetCloudAlbedo_(qBound(0.0, presetCloudAlbedo, 1.0)),
       atmospherePressureAtm_(atmospherePressureAtm),
       surfaceGravity_(surfaceGravity),
       planetRadiusKm_(planetRadiusKm),
@@ -381,7 +383,11 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
         }
         const double waterClouds = qMin(0.5, evaporation * 0.28);
-        const double cloudAlbedo = qMin(0.88, pressureClouds + waterClouds);
+        // Сернокислотные облака (H₂SO₄) Венеры отражают больше, чем водные облака,
+        // поэтому учитываем минимум по пресету, даже если испарение воды отсутствует.
+        const double dynamicCloudAlbedo = qMin(0.88, pressureClouds + waterClouds);
+        const double presetCloudAlbedo = qBound(0.0, presetCloudAlbedo_, 0.88);
+        const double cloudAlbedo = qMax(dynamicCloudAlbedo, presetCloudAlbedo);
         const double waterTau = qMin(8.0, evaporation * 1.5);
         double totalTau = baseTau + traceTau + waterTau;
         if (!useAtmosphericModel_ && greenhouseOpacity_ > 0.0) {

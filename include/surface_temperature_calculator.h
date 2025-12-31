@@ -48,6 +48,7 @@ public:
                                  RotationMode rotationMode,
                                  const AtmosphereComposition &atmosphere = AtmosphereComposition{},
                                  double greenhouseOpacity = 0.0,
+                                 double presetCloudAlbedo = 0.0,
                                  double atmospherePressureAtm = 0.0,
                                  double surfaceGravity = 0.0,
                                  double planetRadiusKm = 6371.0,
@@ -114,6 +115,7 @@ private:
     RotationMode rotationMode_ = RotationMode::Normal;
     AtmosphereComposition atmosphere_;
     double greenhouseOpacity_ = 0.0;
+    double presetCloudAlbedo_ = 0.0;
     double atmospherePressureAtm_ = 0.0;
     double surfaceGravity_ = 0.0;
     double planetRadiusKm_ = 6371.0;

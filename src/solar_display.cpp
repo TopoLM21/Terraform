@@ -87,11 +87,12 @@ constexpr int kRoleRadiusKm = Qt::UserRole + 9;
 constexpr int kRoleRotationMode = Qt::UserRole + 10;
 constexpr int kRoleAtmosphere = Qt::UserRole + 11;
 constexpr int kRoleGreenhouseOpacity = Qt::UserRole + 12;
-constexpr int kRoleHeightSourceType = Qt::UserRole + 13;
-constexpr int kRoleHeightmapPath = Qt::UserRole + 14;
-constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 15;
-constexpr int kRoleHeightSeed = Qt::UserRole + 16;
-constexpr int kRoleUseContinentsHeight = Qt::UserRole + 17;
+constexpr int kRoleCloudAlbedo = Qt::UserRole + 13;
+constexpr int kRoleHeightSourceType = Qt::UserRole + 14;
+constexpr int kRoleHeightmapPath = Qt::UserRole + 15;
+constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 16;
+constexpr int kRoleHeightSeed = Qt::UserRole + 17;
+constexpr int kRoleUseContinentsHeight = Qt::UserRole + 18;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -105,6 +106,7 @@ struct TemperatureCacheKey {
     double atmospherePressureAtm = 0.0;
     double surfaceGravity = 0.0;
     double greenhouseOpacity = 0.0;
+    double cloudAlbedo = 0.0;
     double dayLength = 0.0;
     double referenceDistanceAU = 0.0;
     double semiMajorAxis = 0.0;
@@ -133,6 +135,7 @@ struct TemperatureCacheKey {
                atmospherePressureAtm == other.atmospherePressureAtm &&
                surfaceGravity == other.surfaceGravity &&
                greenhouseOpacity == other.greenhouseOpacity &&
+               cloudAlbedo == other.cloudAlbedo &&
                dayLength == other.dayLength &&
                referenceDistanceAU == other.referenceDistanceAU &&
                semiMajorAxis == other.semiMajorAxis &&
@@ -174,6 +177,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.atmospherePressureAtm), seed);
     seed = qHash(hashDoubleBits(key.surfaceGravity), seed);
     seed = qHash(hashDoubleBits(key.greenhouseOpacity), seed);
+    seed = qHash(hashDoubleBits(key.cloudAlbedo), seed);
     seed = qHash(hashDoubleBits(key.dayLength), seed);
     seed = qHash(hashDoubleBits(key.referenceDistanceAU), seed);
     seed = qHash(hashDoubleBits(key.semiMajorAxis), seed);
@@ -374,6 +378,10 @@ public:
             static_cast<int>(RotationMode::TidalLocked));
         heightSeedSpinBox_ = new QSpinBox(this);
         heightSeedSpinBox_->setRange(0, std::numeric_limits<int>::max());
+        cloudAlbedoSpinBox_ = new QDoubleSpinBox(this);
+        cloudAlbedoSpinBox_->setRange(0.0, 1.0);
+        cloudAlbedoSpinBox_->setDecimals(2);
+        cloudAlbedoSpinBox_->setSingleStep(0.05);
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
@@ -429,6 +437,7 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         planetControlsLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
         planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
+        planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
         planetControlsLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
         planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
 
@@ -623,6 +632,7 @@ public:
             syncMaterialWithPlanet();
             syncRotationModeWithPlanet();
             syncHeightSeedWithPlanet();
+            syncCloudAlbedoWithPlanet();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
                 (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -680,6 +690,16 @@ public:
             }
             syncPlanetHeightSeedWithSelection();
             updateSurfaceGridTemperatures();
+        });
+
+        connect(cloudAlbedoSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+                [this](double) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetCloudAlbedoWithSelection();
+            clearTemperatureCache();
+            updateTemperaturePlot();
         });
 
         connect(latitudeStepFastRadio_, &QRadioButton::toggled, this, [this](bool checked) {
@@ -901,6 +921,7 @@ private:
     QComboBox *materialComboBox_ = nullptr;
     QComboBox *rotationModeComboBox_ = nullptr;
     QSpinBox *heightSeedSpinBox_ = nullptr;
+    QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
     ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
     QRadioButton *latitudeStepFastRadio_ = nullptr;
     QRadioButton *latitudeStepSlowRadio_ = nullptr;
@@ -1103,6 +1124,7 @@ private:
         syncMaterialWithPlanet();
         syncRotationModeWithPlanet();
         syncHeightSeedWithPlanet();
+        syncCloudAlbedoWithPlanet();
         updatePlanetActions();
     }
 
@@ -1130,6 +1152,10 @@ private:
         if (heightSeedSpinBox_) {
             const QSignalBlocker seedBlocker(heightSeedSpinBox_);
             heightSeedSpinBox_->setValue(0);
+        }
+        if (cloudAlbedoSpinBox_) {
+            const QSignalBlocker cloudBlocker(cloudAlbedoSpinBox_);
+            cloudAlbedoSpinBox_->setValue(0.0);
         }
         updatePlanetActions();
         updateTemperaturePlot();
@@ -1362,6 +1388,7 @@ private:
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
         planetComboBox_->setItemData(index, QVariant::fromValue(planet.atmosphere), kRoleAtmosphere);
         planetComboBox_->setItemData(index, planet.greenhouseOpacity, kRoleGreenhouseOpacity);
+        planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
                                      kRoleHeightSourceType);
         planetComboBox_->setItemData(index, planet.heightmapPath, kRoleHeightmapPath);
@@ -1442,6 +1469,11 @@ private:
         greenhouseValidator->setLocale(QLocale::C);
         greenhouseOpacityInput->setValidator(greenhouseValidator);
 
+        auto *cloudAlbedoInput = new QDoubleSpinBox(&dialog);
+        cloudAlbedoInput->setRange(0.0, 1.0);
+        cloudAlbedoInput->setDecimals(2);
+        cloudAlbedoInput->setSingleStep(0.05);
+
         auto *heightSeedInput = new QSpinBox(&dialog);
         heightSeedInput->setRange(0, std::numeric_limits<int>::max());
         heightSeedInput->setValue(0);
@@ -1457,6 +1489,7 @@ private:
         formLayout->addRow(QStringLiteral("Аргумент перицентра (°):"), perihelionArgumentInput);
         formLayout->addRow(QStringLiteral("Парниковая непрозрачность (0..1):"),
                            greenhouseOpacityInput);
+        formLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoInput);
         formLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedInput);
 
         auto *materialInput = new QComboBox(&dialog);
@@ -1506,8 +1539,8 @@ private:
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
                 [&dialog, nameInput, axisInput, dayLengthInput, massInput, radiusInput,
                  eccentricityInput, obliquityInput, perihelionArgumentInput,
-                 greenhouseOpacityInput, heightSeedInput, materialInput, rotationModeInput,
-                 atmosphereInput, this]() {
+                 greenhouseOpacityInput, cloudAlbedoInput, heightSeedInput, materialInput,
+                 rotationModeInput, atmosphereInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -1571,6 +1604,7 @@ private:
                     return;
                 }
             }
+            const double cloudAlbedo = cloudAlbedoInput->value();
 
             const int existingIndex = findPlanetIndexByName(name);
             const QString materialId = materialInput->currentData().toString();
@@ -1581,7 +1615,7 @@ private:
             const AtmosphereComposition composition = atmosphereInput->composition(false);
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
-                                composition, greenhouseOpacity, tidallyLocked};
+                                composition, greenhouseOpacity, cloudAlbedo, tidallyLocked};
             preset.heightSeed = heightSeed;
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
@@ -1606,6 +1640,7 @@ private:
                 planetComboBox_->setItemData(existingIndex, atmosphereValue, kRoleAtmosphere);
                 planetComboBox_->setItemData(existingIndex, preset.greenhouseOpacity,
                                              kRoleGreenhouseOpacity);
+                planetComboBox_->setItemData(existingIndex, preset.cloudAlbedo, kRoleCloudAlbedo);
                 planetComboBox_->setItemData(existingIndex,
                                              static_cast<int>(preset.heightSourceType),
                                              kRoleHeightSourceType);
@@ -1694,6 +1729,17 @@ private:
         heightSeedSpinBox_->setValue(heightSeed);
     }
 
+    void syncCloudAlbedoWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !cloudAlbedoSpinBox_) {
+            return;
+        }
+
+        const double cloudAlbedo = planetComboBox_->itemData(index, kRoleCloudAlbedo).toDouble();
+        const QSignalBlocker blocker(cloudAlbedoSpinBox_);
+        cloudAlbedoSpinBox_->setValue(cloudAlbedo);
+    }
+
     void syncPlanetMaterialWithSelection() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0) {
@@ -1716,6 +1762,14 @@ private:
             return;
         }
         planetComboBox_->setItemData(index, heightSeedSpinBox_->value(), kRoleHeightSeed);
+    }
+
+    void syncPlanetCloudAlbedoWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !cloudAlbedoSpinBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(index, cloudAlbedoSpinBox_->value(), kRoleCloudAlbedo);
     }
 
     void updateRotationModeIllustration() {
@@ -2764,6 +2818,8 @@ private:
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         const double greenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        const double cloudAlbedo =
+            planetComboBox_->currentData(kRoleCloudAlbedo).toDouble();
         const HeightSourceType heightSourceType =
             static_cast<HeightSourceType>(planetComboBox_->currentData(kRoleHeightSourceType)
                                               .toInt());
@@ -2796,6 +2852,7 @@ private:
                                             atmospherePressureAtm,
                                             surfaceGravity,
                                             greenhouseOpacity,
+                                            cloudAlbedo,
                                             dayLength,
                                             referenceDistanceAU,
                                             semiMajorAxis,
@@ -2823,6 +2880,7 @@ private:
                                                       atmosphereSignature(surfaceOnlyAtmosphere),
                                                       0.0,
                                                       surfaceGravity,
+                                                      0.0,
                                                       0.0,
                                                       dayLength,
                                                       referenceDistanceAU,
@@ -2871,6 +2929,7 @@ private:
                                                                   dayLength,
                                                                   rotationMode,
                                                                   surfaceOnlyAtmosphere,
+                                                                  0.0,
                                                                   0.0,
                                                                   0.0,
                                                                   surfaceGravity,
@@ -3040,6 +3099,7 @@ private:
         // При наличии атмосферы включаем расширенную модель с парниковым слоем и циркуляцией.
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength,
                                                 rotationMode, atmosphere, greenhouseOpacity,
+                                                cloudAlbedo,
                                                 atmospherePressureAtm,
                                                 surfaceGravity,
                                                 radiusKm,
