@@ -39,6 +39,7 @@ public:
 
     const QVector<double> &temperatures() const;
     double surfaceTemperatureKelvin() const;
+    double topLayerHeatCapacity() const;
 
     void stepImplicit(double netSurfaceFlux, double dtSeconds);
 

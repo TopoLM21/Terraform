@@ -51,8 +51,26 @@ double SurfacePointState::emittedFlux() const {
 void SurfacePointState::updateTemperature(double absorbedFlux,
                                           double emittedFlux,
                                           double dtSeconds) {
-    // Поток на границе = absorbedFlux - emittedFlux.
-    const double netFlux = absorbedFlux - emittedFlux;
+    Q_UNUSED(emittedFlux)
+    const double surfaceTemperature = temperatureKelvin();
+    const double emittedNow = kStefanBoltzmannConstant * std::pow(surfaceTemperature, 4.0) *
+        (1.0 - greenhouseOpacity_);
+    // Линеаризованный радиационный поток:
+    // F_rad(T) ≈ F_rad(T_n) + (dF/dT)|_{T_n} (T - T_n),
+    // dF/dT = 4 * sigma * (1 - tau) * T_n^3.
+    // Тогда неявная стабилизация даёт
+    // F_eff = (F_in - F_rad(T_n)) / (1 + alpha), alpha = (dF/dT) * dt / C,
+    // где C = rho * c * dz0 - теплоёмкость верхнего слоя.
+    // При alpha > 1 подавляется смена знака потока между шагами и исчезают
+    // осцилляции температуры из-за слишком сильной радиации.
+    const double heatCapacity = solver_.topLayerHeatCapacity();
+    const double radiativeDerivative =
+        4.0 * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 3.0) *
+        (1.0 - greenhouseOpacity_);
+    const double alpha = (heatCapacity > 0.0)
+        ? (radiativeDerivative * dtSeconds / heatCapacity)
+        : 0.0;
+    const double netFlux = (absorbedFlux - emittedNow) / (1.0 + qMax(0.0, alpha));
     solver_.stepImplicit(netFlux, dtSeconds);
     clampProfile();
 }

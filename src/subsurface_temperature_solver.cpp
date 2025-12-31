@@ -66,6 +66,15 @@ double SubsurfaceTemperatureSolver::surfaceTemperatureKelvin() const {
     return temperatures_.first();
 }
 
+double SubsurfaceTemperatureSolver::topLayerHeatCapacity() const {
+    const auto &dz = grid_.layerThicknessesMeters();
+    if (dz.isEmpty()) {
+        return 0.0;
+    }
+    const double volumetricHeatCapacity = qMax(kMinHeatCapacity, density_ * specificHeat_);
+    return volumetricHeatCapacity * dz.first();
+}
+
 void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtSeconds) {
     if (temperatures_.isEmpty() || dtSeconds <= 0.0) {
         return;
