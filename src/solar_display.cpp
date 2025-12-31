@@ -2199,6 +2199,15 @@ private:
             segmentSource = &lastTemperatureSegmentsSurfaceOnly_.first();
         }
 
+        const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        double atmospherePressureAtm = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+        }
+
+        bool hasTemperatureRange = true;
+        double minTemperature = std::numeric_limits<double>::max();
+        double maxTemperature = std::numeric_limits<double>::lowest();
         if (!summarySource && !segmentSource) {
             for (auto &point : surfaceGrid_.points()) {
                 const SurfaceMaterial material = materialForPoint(point.materialId);
@@ -2214,62 +2223,81 @@ private:
                                                 material,
                                                 stateDefaults->subsurfaceSettings);
             }
-            applySurfaceGridToViews();
-            updateSurfaceTemperatureLegend(false, 0.0, 0.0);
-            updateSurfaceWindLegend(false, 0.0, 0.0);
-            return;
-        }
+            hasTemperatureRange = false;
+        } else {
+            const RotationMode rotationMode =
+                static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
+            const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
+            const double phase =
+                2.0 * M_PI *
+                (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
+                static_cast<double>(stepsPerDay);
+            const double baseHourAngle =
+                (rotationMode == RotationMode::TidalLocked) ? 0.0 : (phase - M_PI);
+            // Субзвёздная долгота - долгота, где часовой угол равен нулю.
+            // Для приливной синхронизации она фиксирована в системе долгот карты.
+            const double substellarLongitudeRadians =
+                (rotationMode == RotationMode::TidalLocked) ? 0.0 : -baseHourAngle;
 
-        const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
-        const RotationMode rotationMode =
-            static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
-        const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
-        const double phase =
-            2.0 * M_PI *
-            (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
-            static_cast<double>(stepsPerDay);
-        const double baseHourAngle =
-            (rotationMode == RotationMode::TidalLocked) ? 0.0 : (phase - M_PI);
-        // Субзвёздная долгота - долгота, где часовой угол равен нулю.
-        // Для приливной синхронизации она фиксирована в системе долгот карты.
-        const double substellarLongitudeRadians =
-            (rotationMode == RotationMode::TidalLocked) ? 0.0 : -baseHourAngle;
+            ensureSurfaceOrbitAnimationReady();
+            const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
+            const double declinationRadians = qDegreesToRadians(declinationDegrees);
+            const double sinDeclination = std::sin(declinationRadians);
+            const double cosDeclination = std::cos(declinationRadians);
 
-        ensureSurfaceOrbitAnimationReady();
-        const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
-        const double declinationRadians = qDegreesToRadians(declinationDegrees);
-        const double sinDeclination = std::sin(declinationRadians);
-        const double cosDeclination = std::cos(declinationRadians);
+            const double transport =
+                (atmospherePressureAtm > 50.0)
+                    ? 0.99
+                    : (atmospherePressureAtm > 0.001
+                           ? qMin(1.0, 0.15 * std::log(atmospherePressureAtm * 100.0 + 1.0))
+                           : 0.0);
+            const double rotBlock =
+                (dayLengthDays < 2.0 && atmospherePressureAtm < 10.0) ? 0.65 : 1.0;
+            const double meridionalTransport = transport * rotBlock;
 
-        double atmospherePressureAtm = 0.0;
-        if (massEarths > 0.0 && radiusKm > 0.0) {
-            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
-        }
-        const double transport =
-            (atmospherePressureAtm > 50.0)
-                ? 0.99
-                : (atmospherePressureAtm > 0.001
-                       ? qMin(1.0, 0.15 * std::log(atmospherePressureAtm * 100.0 + 1.0))
-                       : 0.0);
-        const double rotBlock =
-            (dayLengthDays < 2.0 && atmospherePressureAtm < 10.0) ? 0.65 : 1.0;
-        const double meridionalTransport = transport * rotBlock;
+            double segmentSolarConstant = lastSolarConstant_;
+            if (lastSolarConstantDistanceAU_ > 0.0) {
+                const double distanceAU = surfaceOrbitAnimation_.distanceAU();
+                segmentSolarConstant =
+                    lastSolarConstant_ *
+                    std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
+            }
+            // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
+            const double globalAverageInsolation = segmentSolarConstant / 4.0;
+            const double timeStepSeconds = 3600.0;
 
-        double segmentSolarConstant = lastSolarConstant_;
-        if (lastSolarConstantDistanceAU_ > 0.0) {
-            const double distanceAU = surfaceOrbitAnimation_.distanceAU();
-            segmentSolarConstant =
-                lastSolarConstant_ *
-                std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
-        }
-        // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
-        const double globalAverageInsolation = segmentSolarConstant / 4.0;
-        const double timeStepSeconds = 3600.0;
+            auto interpolateBaselineTemperature = [summarySource, segmentSource](double latitudeDeg) {
+                // Базовая температура зависит от широты и используется как старт для мгновенного шага.
+                if (summarySource) {
+                    const auto &points = *summarySource;
+                    auto interpolate = [&points, latitudeDeg](auto valueForPoint) {
+                        if (points.size() == 1) {
+                            return valueForPoint(points.first());
+                        }
+                        if (latitudeDeg <= points.first().latitudeDegrees) {
+                            return valueForPoint(points.first());
+                        }
+                        if (latitudeDeg >= points.last().latitudeDegrees) {
+                            return valueForPoint(points.last());
+                        }
+                        for (int i = 1; i < points.size(); ++i) {
+                            if (latitudeDeg <= points[i].latitudeDegrees) {
+                                const auto &lower = points[i - 1];
+                                const auto &upper = points[i];
+                                const double span = upper.latitudeDegrees - lower.latitudeDegrees;
+                                const double t =
+                                    span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
+                                return valueForPoint(lower) + t * (valueForPoint(upper) - valueForPoint(lower));
+                            }
+                        }
+                        return valueForPoint(points.last());
+                    };
+                    return interpolate([](const TemperatureSummaryPoint &point) {
+                        return point.meanAnnualKelvin;
+                    });
+                }
 
-        auto interpolateBaselineTemperature = [summarySource, segmentSource](double latitudeDeg) {
-            // Базовая температура зависит от широты и используется как старт для мгновенного шага.
-            if (summarySource) {
-                const auto &points = *summarySource;
+                const auto &points = *segmentSource;
                 auto interpolate = [&points, latitudeDeg](auto valueForPoint) {
                     if (points.size() == 1) {
                         return valueForPoint(points.first());
@@ -2292,75 +2320,46 @@ private:
                     }
                     return valueForPoint(points.last());
                 };
-                return interpolate([](const TemperatureSummaryPoint &point) {
-                    return point.meanAnnualKelvin;
+                return interpolate([](const TemperatureRangePoint &point) {
+                    return point.meanDailyKelvin;
                 });
-            }
-
-            const auto &points = *segmentSource;
-            auto interpolate = [&points, latitudeDeg](auto valueForPoint) {
-                if (points.size() == 1) {
-                    return valueForPoint(points.first());
-                }
-                if (latitudeDeg <= points.first().latitudeDegrees) {
-                    return valueForPoint(points.first());
-                }
-                if (latitudeDeg >= points.last().latitudeDegrees) {
-                    return valueForPoint(points.last());
-                }
-                for (int i = 1; i < points.size(); ++i) {
-                    if (latitudeDeg <= points[i].latitudeDegrees) {
-                        const auto &lower = points[i - 1];
-                        const auto &upper = points[i];
-                        const double span = upper.latitudeDegrees - lower.latitudeDegrees;
-                        const double t =
-                            span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
-                        return valueForPoint(lower) + t * (valueForPoint(upper) - valueForPoint(lower));
-                    }
-                }
-                return valueForPoint(points.last());
             };
-            return interpolate([](const TemperatureRangePoint &point) {
-                return point.meanDailyKelvin;
-            });
-        };
 
-        double minTemperature = std::numeric_limits<double>::max();
-        double maxTemperature = std::numeric_limits<double>::lowest();
-        for (auto &point : surfaceGrid_.points()) {
-            const SurfaceMaterial material = materialForPoint(point.materialId);
-            // Альбедо и теплофизика зависят от материала ячейки, но облака перекрывают
-            // поверхность, поэтому берём максимум между материалом и облаками.
-            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
-            const double albedo = qMax(materialAlbedo, cloudAlbedo);
-            const double baselineTemperature =
-                interpolateBaselineTemperature(point.latitudeDeg);
-            const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
-            const double cosZenith =
-                point.sinLatitude * sinDeclination +
-                point.cosLatitude * cosDeclination * std::cos(localHourAngle);
-            // Синхронизация формул инициализации и шага нужна, чтобы при старте
-            // не было скачков температуры и мерцания на освещенной стороне.
-            const double localInsolation =
-                segmentSolarConstant * qMax(0.0, cosZenith);
-            const double blendedInsolation =
-                localInsolation * (1.0 - meridionalTransport) +
-                globalAverageInsolation * meridionalTransport;
+            for (auto &point : surfaceGrid_.points()) {
+                const SurfaceMaterial material = materialForPoint(point.materialId);
+                // Альбедо и теплофизика зависят от материала ячейки, но облака перекрывают
+                // поверхность, поэтому берём максимум между материалом и облаками.
+                const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+                const double albedo = qMax(materialAlbedo, cloudAlbedo);
+                const double baselineTemperature =
+                    interpolateBaselineTemperature(point.latitudeDeg);
+                const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
+                const double cosZenith =
+                    point.sinLatitude * sinDeclination +
+                    point.cosLatitude * cosDeclination * std::cos(localHourAngle);
+                // Синхронизация формул инициализации и шага нужна, чтобы при старте
+                // не было скачков температуры и мерцания на освещенной стороне.
+                const double localInsolation =
+                    segmentSolarConstant * qMax(0.0, cosZenith);
+                const double blendedInsolation =
+                    localInsolation * (1.0 - meridionalTransport) +
+                    globalAverageInsolation * meridionalTransport;
 
-            SurfacePointState state(baselineTemperature,
-                                    albedo,
-                                    stateDefaults->greenhouseOpacity,
-                                    stateDefaults->minTemperatureKelvin,
-                                    material,
-                                    stateDefaults->subsurfaceSettings);
-            const double absorbedFlux = state.absorbedFlux(blendedInsolation);
-            const double emittedFlux = state.emittedFlux();
-            state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
-            point.state = state;
-            // Обновляем поверхностную температуру для карт и переноса.
-            point.temperatureK = point.state.temperatureKelvin();
-            minTemperature = qMin(minTemperature, point.temperatureK);
-            maxTemperature = qMax(maxTemperature, point.temperatureK);
+                SurfacePointState state(baselineTemperature,
+                                        albedo,
+                                        stateDefaults->greenhouseOpacity,
+                                        stateDefaults->minTemperatureKelvin,
+                                        material,
+                                        stateDefaults->subsurfaceSettings);
+                const double absorbedFlux = state.absorbedFlux(blendedInsolation);
+                const double emittedFlux = state.emittedFlux();
+                state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
+                point.state = state;
+                // Обновляем поверхностную температуру для карт и переноса.
+                point.temperatureK = point.state.temperatureKelvin();
+                minTemperature = qMin(minTemperature, point.temperatureK);
+                maxTemperature = qMax(maxTemperature, point.temperatureK);
+            }
         }
 
         double surfaceGravity = 0.0;
@@ -2373,6 +2372,7 @@ private:
         for (auto &point : surfaceGrid_.points()) {
             // Инициализируем поверхностное давление (на уровне рельефа), чтобы дальше
             // переносить его ветром без пересчёта из всей атмосферы каждый тик.
+            // Это нужно и в fallback-ветке, чтобы карта давления/ветра не оставалась с нулями.
             const double pressureAtm =
                 AtmosphericPressureModel::pressureAtHeightAtm(atmospherePressureAtm,
                                                               point.heightKm * 1000.0,
@@ -2385,7 +2385,7 @@ private:
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
 
         applySurfaceGridToViews();
-        if (minTemperature <= maxTemperature) {
+        if (hasTemperatureRange && minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
         } else {
