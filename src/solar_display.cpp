@@ -455,6 +455,19 @@ public:
 
         atmosphereWidget_ = new AtmosphereWidget(this, false);
         atmosphereWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        connect(atmosphereWidget_, &AtmosphereWidget::compositionChanged, this,
+                [this](const AtmosphereComposition &composition) {
+                    if (!planetComboBox_) {
+                        return;
+                    }
+                    const int currentIndex = planetComboBox_->currentIndex();
+                    if (currentIndex < 0) {
+                        return;
+                    }
+                    planetComboBox_->setItemData(
+                        currentIndex, QVariant::fromValue(composition), kRoleAtmosphere);
+                    updateSurfaceGridTemperatures();
+                });
 
         auto *starsPanelLayout = new QVBoxLayout();
         starsPanelLayout->addWidget(primaryGroupBox_);
