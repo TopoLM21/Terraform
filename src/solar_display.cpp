@@ -521,6 +521,14 @@ public:
                                          static_cast<int>(SurfaceMapMode::Wind));
         surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
         surfaceViewToggleButton_->setCheckable(true);
+        surfaceMarkupCheckBox_ = new QCheckBox(QStringLiteral("Разметка"), this);
+        surfaceMarkupCheckBox_->setChecked(true);
+        surfaceGlobeWidget_->setMarkupVisible(surfaceMarkupCheckBox_->isChecked());
+        connect(surfaceMarkupCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+            if (surfaceGlobeWidget_) {
+                surfaceGlobeWidget_->setMarkupVisible(checked);
+            }
+        });
         subsurfaceLayersSpinBox_ = new QSpinBox(this);
         subsurfaceLayersSpinBox_->setRange(1, 200);
         subsurfaceLayersSpinBox_->setValue(24);
@@ -570,6 +578,7 @@ public:
         surfaceControlLayout->addWidget(new QLabel(QStringLiteral("Карта:"), this));
         surfaceControlLayout->addWidget(surfaceMapModeComboBox_);
         surfaceControlLayout->addWidget(surfaceViewToggleButton_);
+        surfaceControlLayout->addWidget(surfaceMarkupCheckBox_);
         surfaceControlLayout->addStretch();
         auto *surfaceLegendBottomLayout = new QHBoxLayout();
         surfaceLegendBottomLayout->addStretch();
@@ -975,6 +984,7 @@ private:
     QCheckBox *surfaceSeamlessCheckBox_ = nullptr;
     QComboBox *surfaceMapModeComboBox_ = nullptr;
     QPushButton *surfaceViewToggleButton_ = nullptr;
+    QCheckBox *surfaceMarkupCheckBox_ = nullptr;
     QSpinBox *subsurfaceLayersSpinBox_ = nullptr;
     QDoubleSpinBox *subsurfaceTopThicknessSpinBox_ = nullptr;
     QDoubleSpinBox *subsurfaceDepthSpinBox_ = nullptr;
