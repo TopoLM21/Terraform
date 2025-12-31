@@ -68,6 +68,7 @@
 #include <QtWidgets/QWidget>
 
 #include <atomic>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -98,6 +99,101 @@ constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
 constexpr int kSurfaceOrbitSegmentsPerYear = 360;
+constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
+constexpr double kEarthAreaKm2 = 510072000.0;
+constexpr double kDefaultSurfaceRoughness = 20.0;
+constexpr double kDefaultBasinShape = 3.5;
+constexpr double kEarthWaterGigatons = 1.4e9;
+
+struct TraceGasSpec {
+    const char *id;
+    double greenhousePower;
+};
+
+constexpr std::array<TraceGasSpec, 4> kTraceGases = {{
+    {"ch4", 0.5},
+    {"nh3", 1.5},
+    {"sf6", 300.0},
+    {"nf3", 250.0},
+}};
+
+double gasMassGigatons(const AtmosphereComposition &atmosphere, const QString &gasId) {
+    return qMax(0.0, atmosphere.massGigatons(gasId));
+}
+
+double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
+    // В текущем UI нет явного управления гидросферой, поэтому применяем мягкую эвристику:
+    // океаническую поверхность считаем водной, остальные материалы — сухими.
+    if (material.id == QLatin1String("ocean")) {
+        return kEarthWaterGigatons;
+    }
+    return 0.0;
+}
+
+double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
+                                     const SurfaceMaterial &material,
+                                     double pressureAtm,
+                                     double planetRadiusKm,
+                                     double blendedInsolation,
+                                     double manualGreenhouseOpacity,
+                                     bool useAtmosphericModel) {
+    const double safeRadiusKm = qMax(0.1, planetRadiusKm);
+    const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
+    const double colDensity = 1.0 / qMax(1.0, areaScale);
+    const double co2Mass = gasMassGigatons(atmosphere, QStringLiteral("co2"));
+
+    // tau_CO2 = ln(1 + M_CO2 * colDensity * power * 0.001) * broadening,
+    // где broadening учитывает расширение линий при росте давления.
+    const double broadening = std::pow(qMax(0.5, pressureAtm * 2.0), 0.32);
+    const double baseTau =
+        std::log(1.0 + co2Mass * colDensity * 0.02 * 0.001) * broadening;
+    double traceTau = 0.0;
+    for (const auto &spec : kTraceGases) {
+        const double traceMass = gasMassGigatons(atmosphere, QLatin1String(spec.id));
+        traceTau += (traceMass / qMax(1.0, areaScale)) * spec.greenhousePower * 1e-6 *
+                    broadening;
+    }
+
+    const double waterGigatons = estimateSurfaceWaterGigatons(material);
+    const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
+    const double avgDepth = (planetAreaKm2 > 0.0) ? waterGigatons / planetAreaKm2 : 0.0;
+    double potentialCoverage = 0.0;
+    if (waterGigatons > 0.0) {
+        const double fillFactor = (avgDepth * kDefaultBasinShape) / kDefaultSurfaceRoughness;
+        potentialCoverage = 1.0 - std::exp(-fillFactor * 3.0);
+    }
+    potentialCoverage = qBound(0.0, potentialCoverage, 1.0);
+
+    // Давление также усиливает облачность: давление выше порога повышает отражение.
+    const double pressureClouds =
+        pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
+    const double albedo = qBound(0.0, material.albedo, 1.0);
+    const double surfAlbedoPre =
+        (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
+    const double tEffPre =
+        std::pow((blendedInsolation * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
+                     (4.0 * kStefanBoltzmannConstant),
+                 0.25);
+    const double tBasePre =
+        tEffPre * std::pow(1.0 + 0.75 * (baseTau + traceTau), 0.25);
+
+    double evaporation = 0.0;
+    if (potentialCoverage > 0.0 && tBasePre > 263.0) {
+        evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
+    }
+    const double waterTau = qMin(8.0, evaporation * 1.5);
+    double totalTau = baseTau + traceTau + waterTau;
+    if (!useAtmosphericModel && manualGreenhouseOpacity > 0.0) {
+        // Дополнительная непрозрачность, когда атмосферная модель выключена,
+        // но задана парниковая "шторка" вручную.
+        totalTau += -std::log(qMax(1e-6, 1.0 - manualGreenhouseOpacity));
+    }
+
+    // Приводим оптическую толщину к коэффициенту парникового эффекта для SurfacePointState.
+    const double greenhouseOpacity =
+        (totalTau > 0.0) ? (1.0 - 1.0 / (1.0 + 0.75 * totalTau)) : 0.0;
+    return qBound(0.0, greenhouseOpacity, 0.999);
+}
 
 struct TemperatureCacheKey {
     double solarConstant = 0.0;
@@ -2204,11 +2300,24 @@ private:
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
         }
+        const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
+        double surfaceGravity = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            const double radiusMeters = radiusKm * 1000.0;
+            const double planetMassKg = massEarths * kEarthMassKg;
+            surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
+        }
+        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+        const double manualGreenhouseOpacity = stateDefaults->greenhouseOpacity;
 
         bool hasTemperatureRange = true;
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
+        QVector<double> blendedInsolations;
+        blendedInsolations.reserve(surfaceGrid_.points().size());
         if (!summarySource && !segmentSource) {
+            const double fallbackInsolation =
+                (lastSolarConstant_ > 0.0) ? (lastSolarConstant_ / 4.0) : 0.0;
             for (auto &point : surfaceGrid_.points()) {
                 const SurfaceMaterial material = materialForPoint(point.materialId);
                 // Альбедо и теплофизика зависят от материала ячейки, но облака перекрывают
@@ -2222,6 +2331,7 @@ private:
                                                 stateDefaults->minTemperatureKelvin,
                                                 material,
                                                 stateDefaults->subsurfaceSettings);
+                blendedInsolations.push_back(fallbackInsolation);
             }
             hasTemperatureRange = false;
         } else {
@@ -2355,6 +2465,7 @@ private:
                 const double emittedFlux = state.emittedFlux();
                 state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
                 point.state = state;
+                blendedInsolations.push_back(blendedInsolation);
                 // Обновляем поверхностную температуру для карт и переноса.
                 point.temperatureK = point.state.temperatureKelvin();
                 minTemperature = qMin(minTemperature, point.temperatureK);
@@ -2362,14 +2473,8 @@ private:
             }
         }
 
-        double surfaceGravity = 0.0;
-        if (massEarths > 0.0 && radiusKm > 0.0) {
-            const double radiusMeters = radiusKm * 1000.0;
-            const double planetMassKg = massEarths * kEarthMassKg;
-            surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
-        }
-        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
-        for (auto &point : surfaceGrid_.points()) {
+        for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
             // Инициализируем поверхностное давление (на уровне рельефа), чтобы дальше
             // переносить его ветром без пересчёта из всей атмосферы каждый тик.
             // Это нужно и в fallback-ветке, чтобы карта давления/ветра не оставалась с нулями.
@@ -2381,6 +2486,18 @@ private:
                                                               gravity);
             // Храним поверхностное давление в точке для последующего переноса по ветру.
             point.pressureAtm = qMax(0.0, pressureAtm);
+            const double blendedInsolation =
+                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const double localGreenhouseOpacity =
+                computeLocalGreenhouseOpacity(atmosphere,
+                                              material,
+                                              point.pressureAtm,
+                                              radiusKm,
+                                              blendedInsolation,
+                                              manualGreenhouseOpacity,
+                                              useAtmosphericModel);
+            point.state.setGreenhouseOpacity(localGreenhouseOpacity);
         }
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
 
@@ -2430,8 +2547,8 @@ private:
             return;
         }
 
-        const auto material = currentMaterial();
-        if (!material) {
+        const auto defaultMaterial = currentMaterial();
+        if (!defaultMaterial) {
             return;
         }
 
@@ -2453,6 +2570,20 @@ private:
             const double planetMassKg = massEarths * kEarthMassKg;
             surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
+        const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
+        const double manualGreenhouseOpacity =
+            planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+
+        QHash<QString, SurfaceMaterial> materialsById;
+        const auto materials = surfaceMaterials();
+        materialsById.reserve(materials.size());
+        for (const auto &material : materials) {
+            materialsById.insert(material.id, material);
+        }
+        const auto materialForPoint = [&materialsById, &defaultMaterial](const QString &materialId) {
+            const auto it = materialsById.constFind(materialId);
+            return it != materialsById.cend() ? *it : *defaultMaterial;
+        };
 
         const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
 
@@ -2492,6 +2623,8 @@ private:
         const double sinDeclination = std::sin(declinationRadians);
         const double cosDeclination = std::cos(declinationRadians);
 
+        QVector<double> blendedInsolations;
+        blendedInsolations.reserve(surfaceGrid_.points().size());
         for (auto &point : surfaceGrid_.points()) {
             const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
             const double cosZenith =
@@ -2503,6 +2636,7 @@ private:
             const double blendedInsolation =
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
+            blendedInsolations.push_back(blendedInsolation);
 
             const double absorbedFlux = point.state.absorbedFlux(blendedInsolation);
             const double emittedFlux = point.state.emittedFlux();
@@ -2559,6 +2693,18 @@ private:
                 advectedAtm + (barometricAtm - advectedAtm) * kPressureRelaxFactor;
             // Фиксируем перенесённое поверхностное давление для UI и динамики.
             point.pressureAtm = qMax(0.0, relaxedAtm);
+            const double blendedInsolation =
+                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const double localGreenhouseOpacity =
+                computeLocalGreenhouseOpacity(atmosphere,
+                                              material,
+                                              point.pressureAtm,
+                                              radiusKm,
+                                              blendedInsolation,
+                                              manualGreenhouseOpacity,
+                                              useAtmosphericModel);
+            point.state.setGreenhouseOpacity(localGreenhouseOpacity);
         }
 
         SurfaceAdvectionModel advectionModel;
