@@ -13,9 +13,12 @@
 #include "surface_point_status_dialog.h"
 #include "surface_temperature_scale_widget.h"
 #include "surface_height_scale_widget.h"
+#include "surface_wind_scale_widget.h"
 #include "surface_map_mode.h"
+#include "wind_field_model.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
+#include "atmospheric_pressure_model.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -490,6 +493,8 @@ public:
                                          static_cast<int>(SurfaceMapMode::Temperature));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Высота"),
                                          static_cast<int>(SurfaceMapMode::Height));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Ветер"),
+                                         static_cast<int>(SurfaceMapMode::Wind));
         surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
         surfaceViewToggleButton_->setCheckable(true);
         subsurfaceLayersSpinBox_ = new QSpinBox(this);
@@ -518,9 +523,13 @@ public:
         heightScaleWidget_ = new SurfaceHeightScaleWidget(this);
         heightScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         heightScaleWidget_->setMinimumHeight(18);
+        windScaleWidget_ = new SurfaceWindScaleWidget(this);
+        windScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        windScaleWidget_->setMinimumHeight(18);
         surfaceLegendScaleStack_ = new QStackedWidget(this);
         surfaceLegendScaleStack_->addWidget(temperatureScaleWidget_);
         surfaceLegendScaleStack_->addWidget(heightScaleWidget_);
+        surfaceLegendScaleStack_->addWidget(windScaleWidget_);
         surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
         auto *surfaceLegendTopLayout = new QHBoxLayout();
         surfaceLegendTopLayout->addWidget(surfaceMinTemperatureLabel_);
@@ -921,6 +930,7 @@ private:
     QComboBox *subsurfaceBoundaryComboBox_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
+    SurfaceWindScaleWidget *windScaleWidget_ = nullptr;
     QStackedWidget *surfaceLegendScaleStack_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
@@ -948,6 +958,9 @@ private:
     double surfaceMinHeightKm_ = 0.0;
     double surfaceMaxHeightKm_ = 0.0;
     bool hasSurfaceHeightRange_ = false;
+    double surfaceMinWindSpeedMps_ = 0.0;
+    double surfaceMaxWindSpeedMps_ = 0.0;
+    bool hasSurfaceWindRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
@@ -1953,6 +1966,15 @@ private:
         }
     }
 
+    void applySurfaceWindRangeToViews(double minWindSpeed, double maxWindSpeed) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setWindRange(minWindSpeed, maxWindSpeed);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setWindRange(minWindSpeed, maxWindSpeed);
+        }
+    }
+
     void applySurfaceMapMode(SurfaceMapMode mode) {
         surfaceMapMode_ = mode;
         if (surfaceMapWidget_) {
@@ -1962,6 +1984,68 @@ private:
             surfaceGlobeWidget_->setMapMode(mode);
         }
         refreshSurfaceLegend();
+    }
+
+    void updateSurfaceWindField(const AtmosphereComposition &atmosphere,
+                                double atmospherePressureAtm,
+                                double dayLengthDays,
+                                double surfaceGravity) {
+        if (surfaceGrid_.points().isEmpty()) {
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+            return;
+        }
+
+        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+        QVector<double> pressuresAtm;
+        QVector<double> temperatures;
+        pressuresAtm.reserve(surfaceGrid_.points().size());
+        temperatures.reserve(surfaceGrid_.points().size());
+        for (auto &point : surfaceGrid_.points()) {
+            const double pressureAtm =
+                AtmosphericPressureModel::pressureAtHeightAtm(atmospherePressureAtm,
+                                                              point.heightKm * 1000.0,
+                                                              point.temperatureK,
+                                                              atmosphere,
+                                                              gravity);
+            point.pressureAtm = pressureAtm;
+            pressuresAtm.push_back(pressureAtm);
+            temperatures.push_back(point.temperatureK);
+        }
+
+        WindFieldModel windModel;
+        const QVector<WindVector> wind =
+            windModel.buildField(surfaceGrid_,
+                                 pressuresAtm,
+                                 temperatures,
+                                 qMax(0.0, dayLengthDays) * 86400.0,
+                                 2);
+        if (wind.size() != surfaceGrid_.points().size()) {
+            for (auto &point : surfaceGrid_.points()) {
+                point.windEastMps = 0.0;
+                point.windNorthMps = 0.0;
+                point.windSpeedMps = 0.0;
+            }
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+            return;
+        }
+
+        double minWind = std::numeric_limits<double>::max();
+        double maxWind = std::numeric_limits<double>::lowest();
+        for (int i = 0; i < wind.size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
+            point.windEastMps = wind.at(i).eastMps;
+            point.windNorthMps = wind.at(i).northMps;
+            point.windSpeedMps = std::hypot(point.windEastMps, point.windNorthMps);
+            minWind = qMin(minWind, point.windSpeedMps);
+            maxWind = qMax(maxWind, point.windSpeedMps);
+        }
+
+        if (minWind <= maxWind) {
+            applySurfaceWindRangeToViews(minWind, maxWind);
+            updateSurfaceWindLegend(true, minWind, maxWind);
+        } else {
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+        }
     }
 
     void updateSurfaceGridTemperatures() {
@@ -1990,6 +2074,7 @@ private:
         if (surfaceGrid_.points().isEmpty()) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceWindLegend(false, 0.0, 0.0);
             return;
         }
 
@@ -1997,6 +2082,7 @@ private:
         if (!stateDefaults) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceWindLegend(false, 0.0, 0.0);
             return;
         }
 
@@ -2037,6 +2123,7 @@ private:
             }
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceWindLegend(false, 0.0, 0.0);
             return;
         }
 
@@ -2180,6 +2267,14 @@ private:
             maxTemperature = qMax(maxTemperature, point.temperatureK);
         }
 
+        double surfaceGravity = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            const double radiusMeters = radiusKm * 1000.0;
+            const double planetMassKg = massEarths * kEarthMassKg;
+            surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
+        }
+        updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
+
         applySurfaceGridToViews();
         if (minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
@@ -2242,8 +2337,12 @@ private:
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         double atmospherePressureAtm = 0.0;
+        double surfaceGravity = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+            const double radiusMeters = radiusKm * 1000.0;
+            const double planetMassKg = massEarths * kEarthMassKg;
+            surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
 
         const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
@@ -2307,6 +2406,8 @@ private:
             maxTemperature = qMax(maxTemperature, point.temperatureK);
         }
 
+        updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
+
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
         applySurfaceGridToViews();
         if (minTemperature <= maxTemperature) {
@@ -2332,6 +2433,17 @@ private:
             surfaceMaxTemperatureK_ = maxTemperature;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Temperature) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceWindLegend(bool hasRange, double minWindSpeed, double maxWindSpeed) {
+        hasSurfaceWindRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinWindSpeedMps_ = minWindSpeed;
+            surfaceMaxWindSpeedMps_ = maxWindSpeed;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::Wind) {
             refreshSurfaceLegend();
         }
     }
@@ -2392,24 +2504,47 @@ private:
             return;
         }
 
-        if (surfaceLegendScaleStack_) {
-            surfaceLegendScaleStack_->setCurrentWidget(heightScaleWidget_);
+        if (surfaceMapMode_ == SurfaceMapMode::Height) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(heightScaleWidget_);
+            }
+            if (!hasSurfaceHeightRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (heightScaleWidget_) {
+                    heightScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 км").arg(locale.toString(surfaceMinHeightKm_, 'f', 1)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 км").arg(locale.toString(surfaceMaxHeightKm_, 'f', 1)));
+            if (heightScaleWidget_) {
+                heightScaleWidget_->setHeightRange(surfaceMinHeightKm_, surfaceMaxHeightKm_);
+            }
+            return;
         }
-        if (!hasSurfaceHeightRange_) {
+
+        if (surfaceLegendScaleStack_) {
+            surfaceLegendScaleStack_->setCurrentWidget(windScaleWidget_);
+        }
+        if (!hasSurfaceWindRange_) {
             surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
             surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
-            if (heightScaleWidget_) {
-                heightScaleWidget_->clearRange();
+            if (windScaleWidget_) {
+                windScaleWidget_->clearRange();
             }
             return;
         }
 
         surfaceMinTemperatureLabel_->setText(
-            QStringLiteral("Мин: %1 км").arg(locale.toString(surfaceMinHeightKm_, 'f', 1)));
+            QStringLiteral("Мин: %1 м/с").arg(locale.toString(surfaceMinWindSpeedMps_, 'f', 1)));
         surfaceMaxTemperatureLabel_->setText(
-            QStringLiteral("Макс: %1 км").arg(locale.toString(surfaceMaxHeightKm_, 'f', 1)));
-        if (heightScaleWidget_) {
-            heightScaleWidget_->setHeightRange(surfaceMinHeightKm_, surfaceMaxHeightKm_);
+            QStringLiteral("Макс: %1 м/с").arg(locale.toString(surfaceMaxWindSpeedMps_, 'f', 1)));
+        if (windScaleWidget_) {
+            windScaleWidget_->setWindRange(surfaceMinWindSpeedMps_, surfaceMaxWindSpeedMps_);
         }
     }
 

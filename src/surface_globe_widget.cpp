@@ -72,16 +72,22 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
         double maxTemp = minTemp;
         double minHeight = grid_->points().first().heightKm;
         double maxHeight = minHeight;
+        double minWind = grid_->points().first().windSpeedMps;
+        double maxWind = minWind;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
             minHeight = qMin(minHeight, point.heightKm);
             maxHeight = qMax(maxHeight, point.heightKm);
+            minWind = qMin(minWind, point.windSpeedMps);
+            maxWind = qMax(maxWind, point.windSpeedMps);
         }
         minTemperatureK_ = minTemp;
         maxTemperatureK_ = maxTemp;
         minHeightKm_ = minHeight;
         maxHeightKm_ = maxHeight;
+        minWindSpeedMps_ = minWind;
+        maxWindSpeedMps_ = maxWind;
     }
     update();
 }
@@ -97,6 +103,12 @@ void SurfaceGlobeWidget::setMapMode(SurfaceMapMode mode) {
 void SurfaceGlobeWidget::setTemperatureRange(double minK, double maxK) {
     minTemperatureK_ = minK;
     maxTemperatureK_ = maxK;
+    update();
+}
+
+void SurfaceGlobeWidget::setWindRange(double minMps, double maxMps) {
+    minWindSpeedMps_ = minMps;
+    maxWindSpeedMps_ = maxMps;
     update();
 }
 
@@ -138,9 +150,13 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         globePoint.z = normal.z();
         globePoint.pointIndex = pointIndex;
         // Освещение отключено по требованию отображения без теней и подсветок.
-        globePoint.color = (mapMode_ == SurfaceMapMode::Temperature)
-                               ? temperatureToColor(point.temperatureK)
-                               : heightToColor(point.heightKm);
+        if (mapMode_ == SurfaceMapMode::Temperature) {
+            globePoint.color = temperatureToColor(point.temperatureK);
+        } else if (mapMode_ == SurfaceMapMode::Height) {
+            globePoint.color = heightToColor(point.heightKm);
+        } else {
+            globePoint.color = windToColor(point.windSpeedMps);
+        }
         visiblePoints.push_back(globePoint);
         projectedPoints_.push_back(ProjectedPoint{projected, pointIndex});
     }
@@ -188,9 +204,13 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             cellDraw.path = path;
             cellDraw.depth = depthSum / static_cast<double>(clipped.size());
             const SurfacePoint &cellPoint = grid_->points().at(cell.pointIndex);
-            cellDraw.color = (mapMode_ == SurfaceMapMode::Temperature)
-                                 ? temperatureToColor(cellPoint.temperatureK)
-                                 : heightToColor(cellPoint.heightKm);
+            if (mapMode_ == SurfaceMapMode::Temperature) {
+                cellDraw.color = temperatureToColor(cellPoint.temperatureK);
+            } else if (mapMode_ == SurfaceMapMode::Height) {
+                cellDraw.color = heightToColor(cellPoint.heightKm);
+            } else {
+                cellDraw.color = windToColor(cellPoint.windSpeedMps);
+            }
             visibleCells.push_back(cellDraw);
         }
 
@@ -217,6 +237,17 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     const double dotRadius = pointRadiusPx(visiblePoints.size(), sphereRadius);
     lastPointRadiusPx_ = dotRadius;
 
+}
+
+QColor SurfaceGlobeWidget::windToColor(double speedMps) const {
+    if (qFuzzyCompare(minWindSpeedMps_, maxWindSpeedMps_)) {
+        return temperatureColorForRatio(0.5);
+    }
+    const double t = qBound(0.0,
+                            (speedMps - minWindSpeedMps_) /
+                                (maxWindSpeedMps_ - minWindSpeedMps_),
+                            1.0);
+    return temperatureColorForRatio(t);
 }
 
 void SurfaceGlobeWidget::mousePressEvent(QMouseEvent *event) {

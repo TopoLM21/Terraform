@@ -20,5 +20,7 @@ private:
     QLabel *longitudeValueLabel_ = nullptr;
     QLabel *temperatureValueLabel_ = nullptr;
     QLabel *heightValueLabel_ = nullptr;
+    QLabel *pressureValueLabel_ = nullptr;
+    QLabel *windValueLabel_ = nullptr;
     QLabel *materialValueLabel_ = nullptr;
 };
