@@ -39,6 +39,10 @@ void SurfacePointState::setTemperatureKelvin(double temperatureKelvin) {
     solver_.setInitialTemperature(qMax(minTemperatureKelvin_, temperatureKelvin));
 }
 
+void SurfacePointState::setGreenhouseOpacity(double greenhouseOpacity) {
+    greenhouseOpacity_ = qBound(0.0, greenhouseOpacity, 0.999);
+}
+
 double SurfacePointState::absorbedFlux(double solarIrradiance) const {
     return solarIrradiance * (1.0 - albedo_);
 }
