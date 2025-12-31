@@ -604,6 +604,16 @@ public:
         rightTabs->addTab(plotGroupBox, tr("Температура"));
         rightTabs->addTab(atmosphereWidget_, tr("Атмосфера"));
         rightTabs->addTab(surfaceMapContainer, tr("Поверхность"));
+        connect(rightTabs, &QTabWidget::currentChanged, this,
+                [this, rightTabs, surfaceMapContainer](int) {
+                    if (rightTabs->currentWidget() != surfaceMapContainer) {
+                        return;
+                    }
+                    // Пересчитываем поверхность только при первом открытии вкладки.
+                    if (surfaceGrid_.points().isEmpty()) {
+                        updateSurfaceGridTemperatures();
+                    }
+                });
 
         auto *rightLayout = new QVBoxLayout();
         rightLayout->addWidget(rightTabs, 1);
