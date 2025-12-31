@@ -48,6 +48,10 @@ double SurfaceTemperatureState::emittedFlux() const {
            (1.0 - greenhouseOpacity_);
 }
 
+double SurfaceTemperatureState::topLayerHeatCapacityJPerM2K() const {
+    return solver_.topLayerHeatCapacity();
+}
+
 void SurfaceTemperatureState::updateTemperature(double absorbedFlux,
                                                 double emittedFlux,
                                                 double dtSeconds) {
@@ -70,6 +74,11 @@ void SurfaceTemperatureState::updateTemperature(double absorbedFlux,
         ? (radiativeDerivative * dtSeconds / heatCapacity)
         : 0.0;
     const double netFlux = (absorbedFlux - emittedNow) / (1.0 + qMax(0.0, alpha));
+    solver_.stepImplicit(netFlux, dtSeconds);
+    clampProfile();
+}
+
+void SurfaceTemperatureState::applySurfaceFlux(double netFlux, double dtSeconds) {
     solver_.stepImplicit(netFlux, dtSeconds);
     clampProfile();
 }

@@ -3,6 +3,7 @@
 #include "atmospheric_pressure_model.h"
 #include "surface_height_model.h"
 #include "surface_temperature_state.h"
+#include "surface_atmosphere_coupler.h"
 
 #include <QtCore/QThread>
 #include <QtCore/QtMath>
@@ -23,6 +24,10 @@ constexpr double kDefaultBasinShape = 3.5;
 constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kDailyTimeSteps = 96;
 constexpr int kSpinUpDays = 6;
+constexpr double kDryAirSpecificHeatJPerKgK = 1004.0;
+constexpr double kEarthGravityMPerS2 = 9.80665;
+constexpr double kStandardPressurePa = 101325.0;
+constexpr double kDefaultHeatTransferWPerM2K = 8.0;
 
 struct TraceGasSpec {
     const char *id;
@@ -435,6 +440,16 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                                       absFloor,
                                       material_,
                                       subsurfaceSettings_);
+        const double gravity = (surfaceGravity_ > 0.0) ? surfaceGravity_ : kEarthGravityMPerS2;
+        const double columnMassKgPerM2 =
+            (pressureAtm > 0.0) ? (pressureAtm * kStandardPressurePa / gravity) : 0.0;
+        const double airHeatCapacity = columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
+        AtmosphericCellState airState(tBase, airHeatCapacity);
+        // Коэффициент теплообмена h_c в Вт/(м^2·К) связывает поверхность и воздух.
+        // В реальности он зависит от ветра, давления и турбулентности; здесь масштабируем
+        // от давления, чтобы тонкая атмосфера слабее влияла на поверхность.
+        const double couplingScale = qBound(0.0, pressureAtm, 1.0);
+        SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K * couplingScale);
 
         const int totalSteps = stepsPerDay * (spinUpDays + 1);
         double tMin = state.temperatureKelvin();
@@ -465,6 +480,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             const double absorbedFlux = state.absorbedFlux(blendedInsolation);
             const double emittedFlux = state.emittedFlux();
             state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
+            coupler.exchangeSensibleHeat(state, airState, timeStepSeconds);
 
             if (step >= stepsPerDay * spinUpDays) {
                 const double temp = state.temperatureKelvin();
