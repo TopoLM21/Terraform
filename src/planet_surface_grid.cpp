@@ -19,6 +19,19 @@ double degreesToRadians(double degrees) {
     return degrees * kPi / 180.0;
 }
 
+void setPointLatLonRadians(SurfacePoint *point, double latitudeRad, double longitudeRad) {
+    point->latitudeDeg = radiansToDegrees(latitudeRad);
+    point->longitudeDeg = radiansToDegrees(longitudeRad);
+    point->latitudeRadians = latitudeRad;
+    point->longitudeRadians = longitudeRad;
+    point->sinLatitude = qSin(latitudeRad);
+    point->cosLatitude = qCos(latitudeRad);
+}
+
+void setPointLatLonDegrees(SurfacePoint *point, double latitudeDeg, double longitudeDeg) {
+    setPointLatLonRadians(point, degreesToRadians(latitudeDeg), degreesToRadians(longitudeDeg));
+}
+
 struct GridVertex {
     QVector3D position;
     QVector<int> adjacentCells;
@@ -113,8 +126,7 @@ void PlanetSurfaceGrid::generateFibonacciPoints(int pointCount) {
         const double longitude = qAtan2(qSin(kGoldenAngle * i), qCos(kGoldenAngle * i));
 
         SurfacePoint point;
-        point.latitudeDeg = radiansToDegrees(latitude);
-        point.longitudeDeg = radiansToDegrees(longitude);
+        setPointLatLonRadians(&point, latitude, longitude);
         point.radiusKm = radiusKm_;
         points_.push_back(point);
     }
@@ -265,8 +277,7 @@ void PlanetSurfaceGrid::rebuildIcosahedronCells(int subdivisionLevel) {
         const SurfaceVertex latLon = cartesianToLatLon(centroid);
 
         SurfacePoint point;
-        point.latitudeDeg = latLon.latitudeDeg;
-        point.longitudeDeg = latLon.longitudeDeg;
+        setPointLatLonDegrees(&point, latLon.latitudeDeg, latLon.longitudeDeg);
         point.radiusKm = radiusKm_;
         points_.push_back(point);
 

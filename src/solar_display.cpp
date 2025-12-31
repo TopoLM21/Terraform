@@ -1990,6 +1990,8 @@ private:
         ensureSurfaceOrbitAnimationReady();
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double declinationRadians = qDegreesToRadians(declinationDegrees);
+        const double sinDeclination = std::sin(declinationRadians);
+        const double cosDeclination = std::cos(declinationRadians);
 
         const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
         AtmosphereComposition atmosphere;
@@ -2087,13 +2089,10 @@ private:
         for (auto &point : surfaceGrid_.points()) {
             const double baselineTemperature =
                 interpolateBaselineTemperature(point.latitudeDeg);
-            const double latitudeRadians = qDegreesToRadians(point.latitudeDeg);
-            const double longitudeRadians = qDegreesToRadians(point.longitudeDeg);
-            const double localHourAngle = longitudeRadians - substellarLongitudeRadians;
+            const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
             const double cosZenith =
-                std::sin(latitudeRadians) * std::sin(declinationRadians) +
-                std::cos(latitudeRadians) * std::cos(declinationRadians) *
-                    std::cos(localHourAngle);
+                point.sinLatitude * sinDeclination +
+                point.cosLatitude * cosDeclination * std::cos(localHourAngle);
             // Синхронизация формул инициализации и шага нужна, чтобы при старте
             // не было скачков температуры и мерцания на освещенной стороне.
             const double localInsolation =
@@ -2218,17 +2217,16 @@ private:
         const double substellarLongitudeRadians =
             (rotationMode == RotationMode::TidalLocked) ? 0.0 : -hourAngle;
         const double declinationRadians = qDegreesToRadians(declinationDegrees);
+        const double sinDeclination = std::sin(declinationRadians);
+        const double cosDeclination = std::cos(declinationRadians);
 
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
         for (auto &point : surfaceGrid_.points()) {
-            const double latitudeRadians = qDegreesToRadians(point.latitudeDeg);
-            const double longitudeRadians = qDegreesToRadians(point.longitudeDeg);
-            const double localHourAngle = longitudeRadians - substellarLongitudeRadians;
+            const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
             const double cosZenith =
-                std::sin(latitudeRadians) * std::sin(declinationRadians) +
-                std::cos(latitudeRadians) * std::cos(declinationRadians) *
-                    std::cos(localHourAngle);
+                point.sinLatitude * sinDeclination +
+                point.cosLatitude * cosDeclination * std::cos(localHourAngle);
             // S_inst = S0 * cos(zenith) при освещении, иначе 0.
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
