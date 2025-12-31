@@ -1985,6 +1985,17 @@ private:
             return;
         }
 
+        QHash<QString, SurfaceMaterial> materialsById;
+        const auto materials = surfaceMaterials();
+        materialsById.reserve(materials.size());
+        for (const auto &material : materials) {
+            materialsById.insert(material.id, material);
+        }
+        const auto materialForPoint = [&materialsById, &stateDefaults](const QString &materialId) {
+            const auto it = materialsById.constFind(materialId);
+            return it != materialsById.cend() ? *it : stateDefaults->material;
+        };
+
         // Вкладка «Поверхность» всегда использует модель поверхности без атмосферных поправок.
         const QVector<TemperatureSummaryPoint> *summarySource = nullptr;
         if (!temperatureSummarySurfaceOnly_.isEmpty()) {
@@ -1998,12 +2009,15 @@ private:
 
         if (!summarySource && !segmentSource) {
             for (auto &point : surfaceGrid_.points()) {
+                const SurfaceMaterial material = materialForPoint(point.materialId);
+                // Альбедо и теплофизика теперь зависят от материала ячейки.
+                const double albedo = qBound(0.0, material.albedo, 1.0);
                 point.temperatureK = stateDefaults->minTemperatureKelvin;
                 point.state = SurfacePointState(point.temperatureK,
-                                                stateDefaults->albedo,
+                                                albedo,
                                                 stateDefaults->greenhouseOpacity,
                                                 stateDefaults->minTemperatureKelvin,
-                                                stateDefaults->material,
+                                                material,
                                                 stateDefaults->subsurfaceSettings);
             }
             applySurfaceGridToViews();
@@ -2119,6 +2133,9 @@ private:
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
         for (auto &point : surfaceGrid_.points()) {
+            const SurfaceMaterial material = materialForPoint(point.materialId);
+            // Альбедо и теплофизика теперь зависят от материала ячейки.
+            const double albedo = qBound(0.0, material.albedo, 1.0);
             const double baselineTemperature =
                 interpolateBaselineTemperature(point.latitudeDeg);
             const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
@@ -2134,10 +2151,10 @@ private:
                 globalAverageInsolation * meridionalTransport;
 
             SurfacePointState state(baselineTemperature,
-                                    stateDefaults->albedo,
+                                    albedo,
                                     stateDefaults->greenhouseOpacity,
                                     stateDefaults->minTemperatureKelvin,
-                                    stateDefaults->material,
+                                    material,
                                     stateDefaults->subsurfaceSettings);
             const double absorbedFlux = state.absorbedFlux(blendedInsolation);
             const double emittedFlux = state.emittedFlux();
