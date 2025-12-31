@@ -27,7 +27,7 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Долгота (°):"), longitudeValueLabel_);
     layout->addRow(QStringLiteral("Температура (K):"), temperatureValueLabel_);
     layout->addRow(QStringLiteral("Высота (км):"), heightValueLabel_);
-    layout->addRow(QStringLiteral("Давление (атм):"), pressureValueLabel_);
+    layout->addRow(QStringLiteral("Поверхностное давление (атм):"), pressureValueLabel_);
     layout->addRow(QStringLiteral("Скорость ветра (м/с):"), windValueLabel_);
     layout->addRow(QStringLiteral("Материал:"), materialValueLabel_);
 }

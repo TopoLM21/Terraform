@@ -2259,6 +2259,7 @@ private:
             const double emittedFlux = state.emittedFlux();
             state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             point.state = state;
+            // Обновляем поверхностную температуру для карт и переноса.
             point.temperatureK = point.state.temperatureKelvin();
             minTemperature = qMin(minTemperature, point.temperatureK);
             maxTemperature = qMax(maxTemperature, point.temperatureK);
@@ -2280,6 +2281,7 @@ private:
                                                               point.temperatureK,
                                                               atmosphere,
                                                               gravity);
+            // Храним поверхностное давление в точке для последующего переноса по ветру.
             point.pressureAtm = qMax(0.0, pressureAtm);
         }
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
@@ -2408,6 +2410,7 @@ private:
             const double emittedFlux = point.state.emittedFlux();
             // Применяем шаговый радиационный баланс для состояния точки.
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
+            // Обновляем поверхностную температуру до переноса в соседние точки.
             point.temperatureK = point.state.temperatureKelvin();
         }
 
@@ -2440,6 +2443,7 @@ private:
                                                   0.0);
         if (advectedPressures.size() == surfaceGrid_.points().size()) {
             for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+                // Фиксируем перенесённое поверхностное давление для UI и динамики.
                 surfaceGrid_.points()[i].pressureAtm = advectedPressures.at(i);
             }
         }
@@ -2462,12 +2466,15 @@ private:
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             point.state.setTemperatureKelvin(advectedTemperatures.at(i));
+            // Температура после переноса хранится как поверхностная величина.
             point.temperatureK = point.state.temperatureKelvin();
             minTemperature = qMin(minTemperature, point.temperatureK);
             maxTemperature = qMax(maxTemperature, point.temperatureK);
         }
 
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
+        // Также обновляем виджеты, чтобы в них попали обновлённые поверхностные
+        // температура и давление после шага переноса.
         applySurfaceGridToViews();
         if (minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
