@@ -15,6 +15,7 @@
 #include "surface_height_scale_widget.h"
 #include "surface_wind_scale_widget.h"
 #include "surface_map_mode.h"
+#include "surface_advection_model.h"
 #include "wind_field_model.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
@@ -2383,8 +2384,6 @@ private:
         const double sinDeclination = std::sin(declinationRadians);
         const double cosDeclination = std::cos(declinationRadians);
 
-        double minTemperature = std::numeric_limits<double>::max();
-        double maxTemperature = std::numeric_limits<double>::lowest();
         for (auto &point : surfaceGrid_.points()) {
             const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
             const double cosZenith =
@@ -2402,11 +2401,44 @@ private:
             // Применяем шаговый радиационный баланс для состояния точки.
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             point.temperatureK = point.state.temperatureKelvin();
-            minTemperature = qMin(minTemperature, point.temperatureK);
-            maxTemperature = qMax(maxTemperature, point.temperatureK);
         }
 
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
+
+        QVector<double> temperatures;
+        QVector<double> windEast;
+        QVector<double> windNorth;
+        temperatures.reserve(surfaceGrid_.points().size());
+        windEast.reserve(surfaceGrid_.points().size());
+        windNorth.reserve(surfaceGrid_.points().size());
+        for (const auto &point : surfaceGrid_.points()) {
+            temperatures.push_back(point.temperatureK);
+            windEast.push_back(point.windEastMps);
+            windNorth.push_back(point.windNorthMps);
+        }
+
+        SurfaceAdvectionModel advectionModel;
+        QVector<double> advectedTemperatures =
+            advectionModel.advectTemperature(surfaceGrid_,
+                                             temperatures,
+                                             windEast,
+                                             windNorth,
+                                             timeStepSeconds,
+                                             1,
+                                             1.0);
+        if (advectedTemperatures.size() != surfaceGrid_.points().size()) {
+            advectedTemperatures = temperatures;
+        }
+
+        double minTemperature = std::numeric_limits<double>::max();
+        double maxTemperature = std::numeric_limits<double>::lowest();
+        for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
+            point.state.setTemperatureKelvin(advectedTemperatures.at(i));
+            point.temperatureK = point.state.temperatureKelvin();
+            minTemperature = qMin(minTemperature, point.temperatureK);
+            maxTemperature = qMax(maxTemperature, point.temperatureK);
+        }
 
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
         applySurfaceGridToViews();
