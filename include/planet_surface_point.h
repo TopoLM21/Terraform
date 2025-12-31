@@ -8,6 +8,10 @@
 struct SurfacePoint {
     double latitudeDeg = 0.0;
     double longitudeDeg = 0.0;
+    double latitudeRadians = 0.0;
+    double longitudeRadians = 0.0;
+    double sinLatitude = 0.0;
+    double cosLatitude = 1.0;
     double radiusKm = 0.0;
     double temperatureK = 0.0;
     // Состояние хранится отдельно для каждой точки, чтобы учитывать локальную
