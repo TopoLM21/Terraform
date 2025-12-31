@@ -107,6 +107,11 @@ struct TemperatureCacheKey {
     double obliquity = 0.0;
     double perihelionArgument = 0.0;
     double planetRadiusKm = 0.0;
+    HeightSourceType heightSourceType = HeightSourceType::Procedural;
+    QString heightmapPath;
+    double heightmapScaleKm = 0.0;
+    quint32 heightSeed = 0;
+    bool useContinentsHeight = false;
     int subsurfaceLayers = 0;
     double subsurfaceTopThicknessMeters = 0.0;
     double subsurfaceDepthMeters = 0.0;
@@ -130,6 +135,11 @@ struct TemperatureCacheKey {
                obliquity == other.obliquity &&
                perihelionArgument == other.perihelionArgument &&
                planetRadiusKm == other.planetRadiusKm &&
+               heightSourceType == other.heightSourceType &&
+               heightmapPath == other.heightmapPath &&
+               heightmapScaleKm == other.heightmapScaleKm &&
+               heightSeed == other.heightSeed &&
+               useContinentsHeight == other.useContinentsHeight &&
                subsurfaceLayers == other.subsurfaceLayers &&
                subsurfaceTopThicknessMeters == other.subsurfaceTopThicknessMeters &&
                subsurfaceDepthMeters == other.subsurfaceDepthMeters &&
@@ -166,6 +176,11 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.obliquity), seed);
     seed = qHash(hashDoubleBits(key.perihelionArgument), seed);
     seed = qHash(hashDoubleBits(key.planetRadiusKm), seed);
+    seed = qHash(static_cast<int>(key.heightSourceType), seed);
+    seed = qHash(key.heightmapPath, seed);
+    seed = qHash(hashDoubleBits(key.heightmapScaleKm), seed);
+    seed = qHash(static_cast<quint32>(key.heightSeed), seed);
+    seed = qHash(key.useContinentsHeight, seed);
     seed = qHash(key.subsurfaceLayers, seed);
     seed = qHash(hashDoubleBits(key.subsurfaceTopThicknessMeters), seed);
     seed = qHash(hashDoubleBits(key.subsurfaceDepthMeters), seed);
@@ -2548,6 +2563,17 @@ private:
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         const double greenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        const HeightSourceType heightSourceType =
+            static_cast<HeightSourceType>(planetComboBox_->currentData(kRoleHeightSourceType)
+                                              .toInt());
+        const QString heightmapPath =
+            planetComboBox_->currentData(kRoleHeightmapPath).toString();
+        const double heightmapScaleKm =
+            planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
+        const quint32 heightSeed =
+            planetComboBox_->currentData(kRoleHeightSeed).toUInt();
+        const bool useContinentsHeight =
+            planetComboBox_->currentData(kRoleUseContinentsHeight).toBool();
         double atmospherePressureAtm = 0.0;
         double surfaceGravity = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
@@ -2578,6 +2604,11 @@ private:
                                             // Радиус влияет на столбовую плотность и водный баланс, поэтому он
                                             // должен входить в ключ кэша температурных расчётов.
                                             radiusKm,
+                                            heightSourceType,
+                                            heightmapPath,
+                                            heightmapScaleKm,
+                                            heightSeed,
+                                            useContinentsHeight,
                                             subsurfaceSettings.layerCount,
                                             subsurfaceSettings.topLayerThicknessMeters,
                                             subsurfaceSettings.bottomDepthMeters,
@@ -2601,6 +2632,11 @@ private:
                                                       // Радиус влияет на столбовую плотность и водный баланс, поэтому он
                                                       // должен входить в ключ кэша температурных расчётов.
                                                       radiusKm,
+                                                      heightSourceType,
+                                                      heightmapPath,
+                                                      heightmapScaleKm,
+                                                      heightSeed,
+                                                      useContinentsHeight,
                                                       subsurfaceSettings.layerCount,
                                                       subsurfaceSettings.topLayerThicknessMeters,
                                                       subsurfaceSettings.bottomDepthMeters,
@@ -2617,6 +2653,11 @@ private:
              surfaceGravity,
              radiusKm,
              subsurfaceSettings,
+             heightSourceType,
+             heightmapPath,
+             heightmapScaleKm,
+             heightSeed,
+             useContinentsHeight,
              latitudePointCount,
              referenceDistanceAU,
              obliquity,
@@ -2635,6 +2676,11 @@ private:
                                                                   radiusKm,
                                                                   false,
                                                                   8,
+                                                                  heightSourceType,
+                                                                  heightmapPath,
+                                                                  heightmapScaleKm,
+                                                                  heightSeed,
+                                                                  useContinentsHeight,
                                                                   subsurfaceSettings);
                 startTemperatureElapsedUi(requestId, QPointer<QProgressDialog>());
                 auto *surfaceWatcher =
@@ -2798,6 +2844,11 @@ private:
                                                 radiusKm,
                                                 hasAtmosphere,
                                                 8,
+                                                heightSourceType,
+                                                heightmapPath,
+                                                heightmapScaleKm,
+                                                heightSeed,
+                                                useContinentsHeight,
                                                 subsurfaceSettings);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,

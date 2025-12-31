@@ -53,6 +53,11 @@ public:
                                  double planetRadiusKm = 6371.0,
                                  bool useAtmosphericModel = false,
                                  int meridionalTransportSteps = 8,
+                                 HeightSourceType heightSourceType = HeightSourceType::Procedural,
+                                 const QString &heightmapPath = QString(),
+                                 double heightmapScaleKm = 0.0,
+                                 quint32 heightSeed = 0,
+                                 bool useContinentsHeight = false,
                                  const SubsurfaceModelSettings &subsurfaceSettings =
                                      SubsurfaceModelSettings{});
 
@@ -114,5 +119,10 @@ private:
     double planetRadiusKm_ = 6371.0;
     bool useAtmosphericModel_ = false;
     int meridionalTransportSteps_ = 8;
+    HeightSourceType heightSourceType_ = HeightSourceType::Procedural;
+    QString heightmapPath_;
+    double heightmapScaleKm_ = 0.0;
+    quint32 heightSeed_ = 0;
+    bool useContinentsHeight_ = false;
     SubsurfaceModelSettings subsurfaceSettings_;
 };

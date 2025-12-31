@@ -1,5 +1,7 @@
 #include "surface_temperature_calculator.h"
 
+#include "atmospheric_pressure_model.h"
+#include "surface_height_model.h"
 #include "surface_temperature_state.h"
 
 #include <QtCore/QThread>
@@ -60,6 +62,11 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            double planetRadiusKm,
                                                            bool useAtmosphericModel,
                                                            int meridionalTransportSteps,
+                                                           HeightSourceType heightSourceType,
+                                                           const QString &heightmapPath,
+                                                           double heightmapScaleKm,
+                                                           quint32 heightSeed,
+                                                           bool useContinentsHeight,
                                                            const SubsurfaceModelSettings &subsurfaceSettings)
     : solarConstant_(solarConstant),
       material_(material),
@@ -72,6 +79,11 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       planetRadiusKm_(planetRadiusKm),
       useAtmosphericModel_(useAtmosphericModel),
       meridionalTransportSteps_(qMax(1, meridionalTransportSteps)),
+      heightSourceType_(heightSourceType),
+      heightmapPath_(heightmapPath),
+      heightmapScaleKm_(heightmapScaleKm),
+      heightSeed_(heightSeed),
+      useContinentsHeight_(useContinentsHeight),
       subsurfaceSettings_(subsurfaceSettings) {}
 
 void SurfaceTemperatureCalculator::setMeridionalTransportSteps(int steps) {
@@ -253,7 +265,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
     const double surfaceGravity = qMax(0.0, surfaceGravity_);
     const double totalGas = atmosphere_.totalMassGigatons();
-    const double pressureAtm =
+    const double seaLevelPressureAtm =
         (totalGas > 0.0)
             ? (totalGas / kEarthAtmosphereMassGt) * (surfaceGravity / 9.8) / areaScale
             : 0.0;
@@ -268,72 +280,13 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     }
     potentialCoverage = qBound(0.0, potentialCoverage, 1.0);
 
-    // Модель оптической толщины повторяет формулы из React-кода:
-    // tau_CO2 = ln(1 + M_CO2 * colDensity * power * 0.001) * broadening,
-    // где broadening учитывает расширение линий при росте давления.
     const double colDensity = 1.0 / qMax(1.0, areaScale);
-    const double broadening = std::pow(qMax(0.5, pressureAtm * 2.0), 0.32);
-    const double baseTau =
-        std::log(1.0 + co2Mass * colDensity * 0.02 * 0.001) * broadening;
-    double traceTau = 0.0;
-    for (const auto &spec : kTraceGases) {
-        const double traceMass = gasMassGigatons(atmosphere_, QLatin1String(spec.id));
-        traceTau += (traceMass / qMax(1.0, areaScale)) * spec.greenhousePower * 1e-6 *
-                    broadening;
-    }
-
     const double albedo = qBound(0.0, material_.albedo, 1.0);
-    double pressureClouds = pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
-    const double surfAlbedoPre =
-        (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
-    const double tEffPre =
-        std::pow((segmentSolarConstant * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
-                     (4.0 * kStefanBoltzmannConstant),
+    const double baseRadiativeTemp =
+        std::pow((segmentSolarConstant * (1.0 - albedo)) / (4.0 * kStefanBoltzmannConstant),
                  0.25);
-    const double tBasePre =
-        tEffPre * std::pow(1.0 + 0.75 * (baseTau + traceTau), 0.25);
-
-    double evaporation = 0.0;
-    if (potentialCoverage > 0.0 && tBasePre > 263.0) {
-        evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
-    }
-    const double waterClouds = qMin(0.5, evaporation * 0.28);
-    const double cloudAlbedo = qMin(0.88, pressureClouds + waterClouds);
-    const double waterTau = qMin(8.0, evaporation * 1.5);
-    double totalTau = baseTau + traceTau + waterTau;
-    if (!useAtmosphericModel_ && greenhouseOpacity_ > 0.0) {
-        // Дополнительная непрозрачность, когда атмосферная модель выключена,
-        // но задана парниковая "шторка" вручную.
-        totalTau += -std::log(qMax(1e-6, 1.0 - greenhouseOpacity_));
-    }
-    const double ghMult = std::pow(1.0 + 0.75 * totalTau, 0.25);
-    // Приводим оптическую толщину к коэффициенту парникового эффекта для модели
-    // SurfaceTemperatureState: в стационаре T^4 ∝ 1 / (1 - G).
-    const double greenhouseOpacity =
-        (totalTau > 0.0) ? (1.0 - 1.0 / (1.0 + 0.75 * totalTau)) : 0.0;
-
-    const double transport =
-        (pressureAtm > 50.0)
-            ? 0.99
-            : (pressureAtm > 0.001
-                   ? qMin(1.0, 0.15 * std::log(pressureAtm * 100.0 + 1.0))
-                   : 0.0);
-    const double rotBlock =
-        (dayLengthDays_ < 2.0 && pressureAtm < 10.0) ? 0.65 : 1.0;
-    const double meridionalTransport = transport * rotBlock;
-
-    double dynamicSurfAlbedo = albedo * (1.0 - potentialCoverage);
-    if (tBasePre < 260.0) {
-        dynamicSurfAlbedo += potentialCoverage * 0.70;
-    } else {
-        dynamicSurfAlbedo += potentialCoverage * 0.06;
-    }
-    const double finalAlbedo = qMax(dynamicSurfAlbedo, cloudAlbedo);
-    const double tEff =
-        std::pow((segmentSolarConstant * (1.0 - finalAlbedo)) /
-                     (4.0 * kStefanBoltzmannConstant),
-                 0.25);
-    const double tGlobalAvg = tEff * ghMult;
+    const SurfaceHeightModel heightModel(heightSourceType_, heightmapPath_, heightmapScaleKm_,
+                                         heightSeed_, useContinentsHeight_);
 
     const bool isTidallyLocked = rotationMode_ == RotationMode::TidalLocked;
     // Подбираем число шагов по длительности суток, чтобы шаг по времени не разрастался
@@ -383,6 +336,82 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                  std::sin(hourAngleLimit)) /
             kPi;
         const bool hasInsolation = dailyFactor > 0.0;
+
+        // Высоту берём из карты рельефа на меридиане 0°, переводя километры в метры.
+        const double heightMeters = heightModel.heightKmAt(axisDegrees, 0.0) * 1000.0;
+        // Давление по барометрической формуле рассчитываем от уровня моря с учётом высоты.
+        const double pressureAtm = AtmosphericPressureModel::pressureAtHeightAtm(
+            seaLevelPressureAtm,
+            heightMeters,
+            qMax(1.0, baseRadiativeTemp),
+            atmosphere_,
+            surfaceGravity);
+
+        // Модель оптической толщины повторяет формулы из React-кода:
+        // tau_CO2 = ln(1 + M_CO2 * colDensity * power * 0.001) * broadening,
+        // где broadening учитывает расширение линий при росте давления.
+        const double broadening = std::pow(qMax(0.5, pressureAtm * 2.0), 0.32);
+        const double baseTau =
+            std::log(1.0 + co2Mass * colDensity * 0.02 * 0.001) * broadening;
+        double traceTau = 0.0;
+        for (const auto &spec : kTraceGases) {
+            const double traceMass = gasMassGigatons(atmosphere_, QLatin1String(spec.id));
+            traceTau += (traceMass / qMax(1.0, areaScale)) * spec.greenhousePower * 1e-6 *
+                        broadening;
+        }
+
+        double pressureClouds =
+            pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
+        const double surfAlbedoPre =
+            (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
+        const double tEffPre =
+            std::pow((segmentSolarConstant * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
+                         (4.0 * kStefanBoltzmannConstant),
+                     0.25);
+        const double tBasePre =
+            tEffPre * std::pow(1.0 + 0.75 * (baseTau + traceTau), 0.25);
+
+        double evaporation = 0.0;
+        if (potentialCoverage > 0.0 && tBasePre > 263.0) {
+            evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
+        }
+        const double waterClouds = qMin(0.5, evaporation * 0.28);
+        const double cloudAlbedo = qMin(0.88, pressureClouds + waterClouds);
+        const double waterTau = qMin(8.0, evaporation * 1.5);
+        double totalTau = baseTau + traceTau + waterTau;
+        if (!useAtmosphericModel_ && greenhouseOpacity_ > 0.0) {
+            // Дополнительная непрозрачность, когда атмосферная модель выключена,
+            // но задана парниковая "шторка" вручную.
+            totalTau += -std::log(qMax(1e-6, 1.0 - greenhouseOpacity_));
+        }
+        const double ghMult = std::pow(1.0 + 0.75 * totalTau, 0.25);
+        // Приводим оптическую толщину к коэффициенту парникового эффекта для модели
+        // SurfaceTemperatureState: в стационаре T^4 ∝ 1 / (1 - G).
+        const double greenhouseOpacity =
+            (totalTau > 0.0) ? (1.0 - 1.0 / (1.0 + 0.75 * totalTau)) : 0.0;
+
+        const double transport =
+            (pressureAtm > 50.0)
+                ? 0.99
+                : (pressureAtm > 0.001
+                       ? qMin(1.0, 0.15 * std::log(pressureAtm * 100.0 + 1.0))
+                       : 0.0);
+        const double rotBlock =
+            (dayLengthDays_ < 2.0 && pressureAtm < 10.0) ? 0.65 : 1.0;
+        const double meridionalTransport = transport * rotBlock;
+
+        double dynamicSurfAlbedo = albedo * (1.0 - potentialCoverage);
+        if (tBasePre < 260.0) {
+            dynamicSurfAlbedo += potentialCoverage * 0.70;
+        } else {
+            dynamicSurfAlbedo += potentialCoverage * 0.06;
+        }
+        const double finalAlbedo = qMax(dynamicSurfAlbedo, cloudAlbedo);
+        const double tEff =
+            std::pow((segmentSolarConstant * (1.0 - finalAlbedo)) /
+                         (4.0 * kStefanBoltzmannConstant),
+                     0.25);
+        const double tGlobalAvg = tEff * ghMult;
 
         const double tLatRad =
             std::pow(qMax(0.1,

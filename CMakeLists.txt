@@ -37,8 +37,10 @@ add_executable(solar_constant
     include/surface_globe_widget.h
     include/surface_point_status_dialog.h
     include/temperature_color_scale.h
+    src/atmospheric_pressure_model.h
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
+    src/atmospheric_pressure_model.cpp
     src/atmospheric_radiation_model.cpp
     src/atmospheric_circulation_model.cpp
     src/atmospheric_lapse_rate_model.cpp
