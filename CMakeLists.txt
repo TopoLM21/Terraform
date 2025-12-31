@@ -11,6 +11,7 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent Charts)
 add_executable(solar_constant
     include/atmosphere_chart_widget.h
     include/atmosphere_model.h
+    include/atmospheric_cell_state.h
     include/atmospheric_radiation_model.h
     include/atmospheric_circulation_model.h
     include/atmospheric_lapse_rate_model.h
@@ -36,8 +37,10 @@ add_executable(solar_constant
     include/surface_heightmap.h
     include/surface_globe_widget.h
     include/surface_point_status_dialog.h
+    include/surface_atmosphere_coupler.h
     include/temperature_color_scale.h
     src/atmospheric_pressure_model.h
+    src/atmospheric_cell_state.cpp
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
     src/atmospheric_pressure_model.cpp
@@ -66,6 +69,7 @@ add_executable(solar_constant
     src/surface_point_status_dialog.cpp
     src/surface_point_state.cpp
     src/surface_height_scale_widget.cpp
+    src/surface_atmosphere_coupler.cpp
     src/surface_temperature_calculator.cpp
     src/surface_temperature_scale_widget.cpp
     src/surface_temperature_state.cpp
