@@ -103,6 +103,7 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
             if (chartWidget_) {
                 chartWidget_->setComposition(composition(true));
             }
+            emit compositionChanged(composition(true));
             return;
         }
         if (item->column() == kColumnPressure) {
@@ -112,6 +113,7 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
             if (chartWidget_) {
                 chartWidget_->setComposition(composition(true));
             }
+            emit compositionChanged(composition(true));
         }
     });
 
