@@ -2539,11 +2539,26 @@ private:
                                                   timeStepSeconds,
                                                   1,
                                                   0.0);
-        if (advectedPressures.size() == surfaceGrid_.points().size()) {
-            for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
-                // Фиксируем перенесённое поверхностное давление для UI и динамики.
-                surfaceGrid_.points()[i].pressureAtm = advectedPressures.at(i);
-            }
+        if (advectedPressures.size() != surfaceGrid_.points().size()) {
+            advectedPressures = pressuresAtm;
+        }
+        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+        constexpr double kPressureRelaxFactor = 0.1;
+        for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
+            const double advectedAtm = advectedPressures.at(i);
+            // Барометрическая релаксация возвращает поле давления к
+            // физически согласованному профилю P(z) при текущей температуре.
+            const double barometricAtm =
+                AtmosphericPressureModel::pressureAtHeightAtm(atmospherePressureAtm,
+                                                              point.heightKm * 1000.0,
+                                                              point.temperatureK,
+                                                              atmosphere,
+                                                              gravity);
+            const double relaxedAtm =
+                advectedAtm + (barometricAtm - advectedAtm) * kPressureRelaxFactor;
+            // Фиксируем перенесённое поверхностное давление для UI и динамики.
+            point.pressureAtm = qMax(0.0, relaxedAtm);
         }
 
         SurfaceAdvectionModel advectionModel;
