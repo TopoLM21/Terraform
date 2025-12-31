@@ -618,7 +618,8 @@ public:
         QThreadPool::globalInstance()->setMaxThreadCount(
             qMax(1, QThread::idealThreadCount() - 1));
 
-        connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this, rightTabs, surfaceMapContainer](int) {
             cancelTemperatureCalculation();
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
@@ -630,6 +631,9 @@ public:
             updatePlanetOrbitLabels();
             updateLatitudePointsDefault();
             syncMaterialWithPlanet();
+            if (rightTabs->currentWidget() == surfaceMapContainer) {
+                updateSurfaceGridTemperatures();
+            }
             syncRotationModeWithPlanet();
             syncHeightSeedWithPlanet();
             syncCloudAlbedoWithPlanet();
