@@ -16,6 +16,7 @@
 #include "surface_wind_scale_widget.h"
 #include "surface_map_mode.h"
 #include "surface_advection_model.h"
+#include "surface_pressure_transport_model.h"
 #include "wind_field_model.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
@@ -1991,25 +1992,20 @@ private:
                                 double atmospherePressureAtm,
                                 double dayLengthDays,
                                 double surfaceGravity) {
+        Q_UNUSED(atmosphere)
+        Q_UNUSED(atmospherePressureAtm)
+        Q_UNUSED(surfaceGravity)
         if (surfaceGrid_.points().isEmpty()) {
             updateSurfaceWindLegend(false, 0.0, 0.0);
             return;
         }
 
-        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
         QVector<double> pressuresAtm;
         QVector<double> temperatures;
         pressuresAtm.reserve(surfaceGrid_.points().size());
         temperatures.reserve(surfaceGrid_.points().size());
         for (auto &point : surfaceGrid_.points()) {
-            const double pressureAtm =
-                AtmosphericPressureModel::pressureAtHeightAtm(atmospherePressureAtm,
-                                                              point.heightKm * 1000.0,
-                                                              point.temperatureK,
-                                                              atmosphere,
-                                                              gravity);
-            point.pressureAtm = pressureAtm;
-            pressuresAtm.push_back(pressureAtm);
+            pressuresAtm.push_back(qMax(0.0, point.pressureAtm));
             temperatures.push_back(point.temperatureK);
         }
 
@@ -2274,6 +2270,18 @@ private:
             const double planetMassKg = massEarths * kEarthMassKg;
             surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
+        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+        for (auto &point : surfaceGrid_.points()) {
+            // Инициализируем поверхностное давление (на уровне рельефа), чтобы дальше
+            // переносить его ветром без пересчёта из всей атмосферы каждый тик.
+            const double pressureAtm =
+                AtmosphericPressureModel::pressureAtHeightAtm(atmospherePressureAtm,
+                                                              point.heightKm * 1000.0,
+                                                              point.temperatureK,
+                                                              atmosphere,
+                                                              gravity);
+            point.pressureAtm = qMax(0.0, pressureAtm);
+        }
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
 
         applySurfaceGridToViews();
@@ -2406,15 +2414,34 @@ private:
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
 
         QVector<double> temperatures;
+        QVector<double> pressuresAtm;
         QVector<double> windEast;
         QVector<double> windNorth;
         temperatures.reserve(surfaceGrid_.points().size());
+        pressuresAtm.reserve(surfaceGrid_.points().size());
         windEast.reserve(surfaceGrid_.points().size());
         windNorth.reserve(surfaceGrid_.points().size());
         for (const auto &point : surfaceGrid_.points()) {
             temperatures.push_back(point.temperatureK);
+            pressuresAtm.push_back(qMax(0.0, point.pressureAtm));
             windEast.push_back(point.windEastMps);
             windNorth.push_back(point.windNorthMps);
+        }
+
+        // Переносим поверхностное давление (уровень рельефа) по полю ветра.
+        SurfacePressureTransportModel pressureTransportModel;
+        QVector<double> advectedPressures =
+            pressureTransportModel.advectPressure(surfaceGrid_,
+                                                  pressuresAtm,
+                                                  windEast,
+                                                  windNorth,
+                                                  timeStepSeconds,
+                                                  1,
+                                                  0.0);
+        if (advectedPressures.size() == surfaceGrid_.points().size()) {
+            for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+                surfaceGrid_.points()[i].pressureAtm = advectedPressures.at(i);
+            }
         }
 
         SurfaceAdvectionModel advectionModel;
