@@ -17,6 +17,7 @@ public:
     void setMapMode(SurfaceMapMode mode);
     void setTemperatureRange(double minK, double maxK);
     void setWindRange(double minMps, double maxMps);
+    void setMarkupVisible(bool visible);
 
 signals:
     void pointClicked(int pointIndex);
@@ -52,4 +53,5 @@ private:
     bool isDragging_ = false;
     QVector<ProjectedPoint> projectedPoints_;
     double lastPointRadiusPx_ = 0.0;
+    bool markupVisible_ = false;
 };

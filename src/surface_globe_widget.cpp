@@ -26,6 +26,11 @@ struct GlobeCell {
     QColor color;
 };
 
+struct ClippedSegment {
+    QVector3D start;
+    QVector3D end;
+};
+
 QVector3D latLonToCartesian(double latitudeDeg, double longitudeDeg) {
     const double latRad = qDegreesToRadians(latitudeDeg);
     const double lonRad = qDegreesToRadians(longitudeDeg);
@@ -59,6 +64,48 @@ QVector<QVector3D> clipPolygonAgainstZ(const QVector<QVector3D> &input) {
         prevInside = currentInside;
     }
     return output;
+}
+
+bool clipLineSegmentAgainstZ(const QVector3D &a, const QVector3D &b, ClippedSegment *segment) {
+    const bool aInside = a.z() > 0.0f;
+    const bool bInside = b.z() > 0.0f;
+    if (!aInside && !bInside) {
+        return false;
+    }
+    QVector3D start = a;
+    QVector3D end = b;
+    if (aInside != bInside) {
+        const float t = (0.0f - a.z()) / (b.z() - a.z());
+        const QVector3D intersection = a + t * (b - a);
+        if (aInside) {
+            end = intersection;
+        } else {
+            start = intersection;
+        }
+    }
+    segment->start = start;
+    segment->end = end;
+    return true;
+}
+
+QVector<QVector3D> buildLongitudeLine(double longitudeDeg, int segments) {
+    QVector<QVector3D> points;
+    points.reserve(segments + 1);
+    for (int i = 0; i <= segments; ++i) {
+        const double latitude = -90.0 + 180.0 * (static_cast<double>(i) / segments);
+        points.push_back(latLonToCartesian(latitude, longitudeDeg));
+    }
+    return points;
+}
+
+QVector<QVector3D> buildLatitudeLine(double latitudeDeg, int segments) {
+    QVector<QVector3D> points;
+    points.reserve(segments + 1);
+    for (int i = 0; i <= segments; ++i) {
+        const double longitude = -180.0 + 360.0 * (static_cast<double>(i) / segments);
+        points.push_back(latLonToCartesian(latitudeDeg, longitude));
+    }
+    return points;
 }
 } // namespace
 
@@ -109,6 +156,14 @@ void SurfaceGlobeWidget::setTemperatureRange(double minK, double maxK) {
 void SurfaceGlobeWidget::setWindRange(double minMps, double maxMps) {
     minWindSpeedMps_ = minMps;
     maxWindSpeedMps_ = maxMps;
+    update();
+}
+
+void SurfaceGlobeWidget::setMarkupVisible(bool visible) {
+    if (markupVisible_ == visible) {
+        return;
+    }
+    markupVisible_ = visible;
     update();
 }
 
@@ -237,6 +292,62 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     const double dotRadius = pointRadiusPx(visiblePoints.size(), sphereRadius);
     lastPointRadiusPx_ = dotRadius;
 
+    if (markupVisible_) {
+        const QColor markupColor(255, 255, 255, 160);
+        QPen markupPen(markupColor, qMax(1.0, sphereRadius * 0.004));
+        markupPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(markupPen);
+        painter.setBrush(Qt::NoBrush);
+
+        const int lineSegments = 72;
+        const QVector<QVector3D> equator = buildLatitudeLine(0.0, lineSegments);
+        const QVector<QVector3D> meridianA = buildLongitudeLine(0.0, lineSegments);
+        const QVector<QVector3D> meridianB = buildLongitudeLine(90.0, lineSegments);
+
+        const auto drawLineStrip = [&](const QVector<QVector3D> &line) {
+            if (line.size() < 2) {
+                return;
+            }
+            for (int i = 1; i < line.size(); ++i) {
+                const QVector3D start = applyRotation(line[i - 1]);
+                const QVector3D end = applyRotation(line[i]);
+                ClippedSegment segment;
+                if (!clipLineSegmentAgainstZ(start, end, &segment)) {
+                    continue;
+                }
+                const QPointF p1(center.x() + segment.start.x() * sphereRadius,
+                                 center.y() - segment.start.y() * sphereRadius);
+                const QPointF p2(center.x() + segment.end.x() * sphereRadius,
+                                 center.y() - segment.end.y() * sphereRadius);
+                painter.drawLine(p1, p2);
+            }
+        };
+
+        drawLineStrip(equator);
+        drawLineStrip(meridianB);
+
+        // Линия через полюса выделена отдельно, чтобы отличаться от прочей разметки.
+        QPen polarPen(QColor(180, 220, 255, 200), qMax(1.0, sphereRadius * 0.0045));
+        polarPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(polarPen);
+        drawLineStrip(meridianA);
+
+        // Ось вращения рисуем как прямую через центр сферы.
+        const QVector3D rotationAxis = applyRotation(QVector3D(0.0f, 1.0f, 0.0f));
+        QPen axisPen(QColor(255, 220, 128, 200), qMax(1.0, sphereRadius * 0.005));
+        axisPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(axisPen);
+        const QVector3D axisStart = -rotationAxis;
+        const QVector3D axisEnd = rotationAxis;
+        ClippedSegment axisSegment;
+        if (clipLineSegmentAgainstZ(axisStart, axisEnd, &axisSegment)) {
+            const QPointF p1(center.x() + axisSegment.start.x() * sphereRadius,
+                             center.y() - axisSegment.start.y() * sphereRadius);
+            const QPointF p2(center.x() + axisSegment.end.x() * sphereRadius,
+                             center.y() - axisSegment.end.y() * sphereRadius);
+            painter.drawLine(p1, p2);
+        }
+    }
 }
 
 QColor SurfaceGlobeWidget::windToColor(double speedMps) const {
