@@ -843,11 +843,15 @@ public:
             updateSurfaceGridTemperatures();
         });
 
-        connect(latitudeStepFastRadio_, &QRadioButton::toggled, this, [this](bool checked) {
+        connect(latitudeStepFastRadio_, &QRadioButton::toggled, this,
+                [this, rightTabs, surfaceMapContainer](bool checked) {
             if (!checked) {
                 return;
             }
             latitudePointsManuallySet_ = true;
+            if (rightTabs->currentWidget() == surfaceMapContainer) {
+                updateSurfaceGridTemperatures();
+            }
             clearTemperatureCache();
             updateTemperaturePlot();
         });
@@ -914,11 +918,15 @@ public:
                                                       : QStringLiteral("3D вид"));
         });
 
-        connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this, [this](bool checked) {
+        connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this,
+                [this, rightTabs, surfaceMapContainer](bool checked) {
             if (!checked) {
                 return;
             }
             latitudePointsManuallySet_ = true;
+            if (rightTabs->currentWidget() == surfaceMapContainer) {
+                updateSurfaceGridTemperatures();
+            }
             clearTemperatureCache();
             updateTemperaturePlot();
         });
