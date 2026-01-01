@@ -281,7 +281,10 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
         const double mountains = ridgedFbmNoise(noisePoint, 3.8, 5);
 
         // Высота суши складывается из равнин и гор, чтобы избежать гауссовского вида.
-        const double landHeightKm = plains * 1.5 + hills * 1.4 + mountains * 4.2;
+        const double landHeightRawKm = plains * 1.5 + hills * 1.4 + mountains * 4.2;
+        // Приводим диапазон процедурного рельефа к заданному разбросу (6 км по высоте).
+        // Сумма коэффициентов даёт максимум ~7.1 км, поэтому масштабируем до половины диапазона.
+        const double landHeightKm = landHeightRawKm / 7.1 * 3.0;
         if (!hasSeaLevel_) {
             // Для планет без уровня моря нельзя "смешивать" океан: вся поверхность считается сушей.
             return qMax(0.0, landHeightKm);
@@ -290,7 +293,8 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
         // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
         const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.22) / 0.6, 1.0));
         // Базовый уровень океана: отрицательный, чтобы было "морское дно".
-        const double oceanDepthKm = -6.0;
+        // Ограничиваем глубину половиной диапазона, чтобы суммарный разброс не превышал 6 км.
+        const double oceanDepthKm = -3.0;
         // Маска плавно смешивает океан и сушу в километрах.
         return lerp(oceanDepthKm, landHeightKm, landMask);
     }
@@ -304,8 +308,8 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
 
     // Нормируем суммарный сигнал: крупный рельеф доминирует, детализация лишь подчёркивает форму.
     const double normalized = qBound(-1.0, (continents * 2.0 - 1.0) + detail * 0.15, 1.0);
-    // Масштабируем в километры, чтобы получить реалистичный диапазон высот (-9..+9 км).
-    double heightKm = normalized * 9.0;
+    // Масштабируем в километры, чтобы получить диапазон высот (-3..+3 км).
+    double heightKm = normalized * 3.0;
     if (!hasSeaLevel_) {
         // Без океанов отрицательные высоты превращают рельеф в несуществующие впадины.
         heightKm = qMax(0.0, heightKm);
