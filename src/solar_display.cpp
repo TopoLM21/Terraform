@@ -22,6 +22,7 @@
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
 #include "atmospheric_pressure_model.h"
+#include "atmosphere_model.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -2323,6 +2324,11 @@ private:
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
         }
         const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
+        const double localSeaLevelPressureAtm =
+            calculateCellPressureAtmFromKg(atmosphere.totalMassKg(),
+                                           massEarths,
+                                           radiusKm,
+                                           surfaceGrid_.pointAreaKm2());
         double surfaceGravity = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
             const double radiusMeters = radiusKm * 1000.0;
@@ -2502,8 +2508,9 @@ private:
             // Инициализируем поверхностное давление (на уровне рельефа), чтобы дальше
             // переносить его ветром без пересчёта из всей атмосферы каждый тик.
             // Это нужно и в fallback-ветке, чтобы карта давления/ветра не оставалась с нулями.
+            // Масса газового столба в ячейке пропорциональна её площади, поэтому P = (m_cell * g) / area_cell.
             const double pressureAtm =
-                AtmosphericPressureModel::pressureAtHeightAtm(atmospherePressureAtm,
+                AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
                                                               point.heightKm * 1000.0,
                                                               point.temperatureK,
                                                               atmosphere,
@@ -2602,6 +2609,11 @@ private:
             const double planetMassKg = massEarths * kEarthMassKg;
             surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
+        const double localSeaLevelPressureAtm =
+            calculateCellPressureAtmFromKg(atmosphere.totalMassKg(),
+                                           massEarths,
+                                           radiusKm,
+                                           surfaceGrid_.pointAreaKm2());
         const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
         const double manualGreenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
@@ -2718,7 +2730,7 @@ private:
             // Барометрическая релаксация возвращает поле давления к
             // физически согласованному профилю P(z) при текущей температуре.
             const double barometricAtm =
-                AtmosphericPressureModel::pressureAtHeightAtm(atmospherePressureAtm,
+                AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
                                                               point.heightKm * 1000.0,
                                                               point.temperatureK,
                                                               atmosphere,
