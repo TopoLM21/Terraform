@@ -2058,13 +2058,16 @@ private:
             planetComboBox_->currentData(kRoleHeightmapPath).toString();
         const double heightmapScaleKm =
             planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
+        const QString materialId =
+            planetComboBox_->currentData(kRoleMaterialId).toString();
         // Seed влияет только на HeightSourceType::Procedural.
         const quint32 heightSeed =
             planetComboBox_->currentData(kRoleHeightSeed).toUInt();
         const bool useContinentsHeight =
             planetComboBox_->currentData(kRoleUseContinentsHeight).toBool();
+        const bool hasSeaLevel = materialId == QLatin1String("ocean");
         surfaceGrid_.setHeightSource(heightSource, heightmapPath, heightmapScaleKm,
-                                     heightSeed, useContinentsHeight);
+                                     heightSeed, useContinentsHeight, hasSeaLevel);
 
         if (radiusKm <= 0.0) {
             surfaceGrid_.generateIcosahedronGrid(0);

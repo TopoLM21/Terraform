@@ -278,6 +278,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             : 0.0;
     const double co2Mass = gasMassGigatons(atmosphere_, QStringLiteral("co2"));
     const double waterGigatons = estimateSurfaceWaterGigatons(material_);
+    const bool hasSeaLevel = waterGigatons > 0.0;
     const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
     const double avgDepth = (planetAreaKm2 > 0.0) ? waterGigatons / planetAreaKm2 : 0.0;
     double potentialCoverage = 0.0;
@@ -293,7 +294,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         std::pow((segmentSolarConstant * (1.0 - albedo)) / (4.0 * kStefanBoltzmannConstant),
                  0.25);
     const SurfaceHeightModel heightModel(heightSourceType_, heightmapPath_, heightmapScaleKm_,
-                                         heightSeed_, useContinentsHeight_);
+                                         heightSeed_, useContinentsHeight_, hasSeaLevel);
 
     const bool isTidallyLocked = rotationMode_ == RotationMode::TidalLocked;
     // Подбираем число шагов по длительности суток, чтобы шаг по времени не разрастался
