@@ -96,6 +96,30 @@ double calculatePressureAtmFromKg(double massKg, double planetMassEarths, double
     return pressurePascal / kPascalPerAtm;
 }
 
+double calculateCellPressureAtmFromKg(double totalMassKg,
+                                      double planetMassEarths,
+                                      double radiusKm,
+                                      double cellAreaKm2) {
+    if (totalMassKg <= 0.0 || planetMassEarths <= 0.0 || radiusKm <= 0.0 || cellAreaKm2 <= 0.0) {
+        return 0.0;
+    }
+
+    const double radiusMeters = radiusKm * 1000.0;
+    const double planetMassKg = planetMassEarths * kEarthMassKg;
+    const double cellAreaMeters2 = cellAreaKm2 * 1e6;
+
+    // g = G * M / R^2
+    const double surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
+
+    // Масса столба над ячейкой пропорциональна площади: m_cell = m_total * (area_cell / total_area).
+    const double totalArea = 4.0 * M_PI * radiusMeters * radiusMeters;
+    const double cellMassKg = totalMassKg * (cellAreaMeters2 / totalArea);
+
+    // P = (m_cell * g) / area_cell
+    const double pressurePascal = (cellMassKg * surfaceGravity) / cellAreaMeters2;
+    return pressurePascal / kPascalPerAtm;
+}
+
 double calculateAtmosphereMassKgFromPressureAtm(double pressureAtm,
                                                 double planetMassEarths,
                                                 double radiusKm) {
