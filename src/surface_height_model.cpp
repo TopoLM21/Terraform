@@ -274,26 +274,25 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
         // Низкочастотный шум разбивает сплошные пятна и равномерно распределяет материки.
         const double breakup = 0.5 + 0.5 * fbmNoise(noisePoint, 0.85, 4);
         const double continentNoise = qBound(0.0, continentSpots * 0.65 + breakup * 0.35, 1.0);
-        // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
-        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.22) / 0.6, 1.0));
-
         // Гладкие равнины: средняя частота, небольшой вклад амплитуды.
         const double plains = 0.5 + 0.5 * fbmNoise(noisePoint, 1.6, 4);
         const double hills = 0.5 + 0.5 * fbmNoise(noisePoint, 3.4, 4);
         // Ridged noise даёт хребты: инверсия модуля шумового сигнала подчёркивает пики.
         const double mountains = ridgedFbmNoise(noisePoint, 3.8, 5);
 
-        // Базовый уровень океана: отрицательный, чтобы было "морское дно".
-        const double oceanDepthKm = -6.0;
         // Высота суши складывается из равнин и гор, чтобы избежать гауссовского вида.
         const double landHeightKm = plains * 1.5 + hills * 1.4 + mountains * 4.2;
-        // Маска плавно смешивает океан и сушу в километрах.
-        double heightKm = lerp(oceanDepthKm, landHeightKm, landMask);
         if (!hasSeaLevel_) {
-            // Без океана нельзя иметь "морское дно": фиксируем высоты только выше нуля.
-            heightKm = qMax(0.0, heightKm);
+            // Для планет без уровня моря нельзя "смешивать" океан: вся поверхность считается сушей.
+            return qMax(0.0, landHeightKm);
         }
-        return heightKm;
+
+        // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
+        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.22) / 0.6, 1.0));
+        // Базовый уровень океана: отрицательный, чтобы было "морское дно".
+        const double oceanDepthKm = -6.0;
+        // Маска плавно смешивает океан и сушу в километрах.
+        return lerp(oceanDepthKm, landHeightKm, landMask);
     }
 
     const double continentA = ridgedFbmNoise(noisePoint, 0.7, 4);
