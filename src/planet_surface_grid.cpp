@@ -2,6 +2,7 @@
 #include "surface_height_model.h"
 
 #include <algorithm>
+#include <limits>
 
 #include <QHash>
 #include <QVector3D>
@@ -333,5 +334,16 @@ void PlanetSurfaceGrid::applyHeightModel() {
                                    heightSeed_, useContinentsHeight_, hasSeaLevel_);
     for (auto &point : points_) {
         point.heightKm = heightModel.heightKmAt(point.latitudeDeg, point.longitudeDeg);
+    }
+    double minHeight = std::numeric_limits<double>::max();
+    for (const auto &point : points_) {
+        minHeight = std::min(minHeight, point.heightKm);
+    }
+    if (minHeight < 0.0) {
+        // Global shift enforces "negative heights forbidden" so pressure model stays stable.
+        const double heightShift = -minHeight;
+        for (auto &point : points_) {
+            point.heightKm += heightShift;
+        }
     }
 }
