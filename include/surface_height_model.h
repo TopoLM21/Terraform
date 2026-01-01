@@ -16,7 +16,8 @@ public:
                        const QString &heightmapPath,
                        double heightmapScaleKm,
                        quint32 heightSeed,
-                       bool useContinentsHeight);
+                       bool useContinentsHeight,
+                       bool hasSeaLevel);
     double heightKmAt(double latitudeDeg, double longitudeDeg) const;
 
 private:
@@ -26,6 +27,7 @@ private:
     SurfaceHeightmap heightmap_;
     quint32 heightSeed_ = 0;
     bool useContinentsHeight_ = false;
+    bool hasSeaLevel_ = true;
     mutable std::array<QVector3D, kContinentCount> continentCenters_{};
     mutable bool continentCentersValid_ = false;
     mutable quint32 continentCentersSeed_ = 0;

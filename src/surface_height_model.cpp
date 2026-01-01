@@ -165,10 +165,12 @@ SurfaceHeightModel::SurfaceHeightModel(HeightSourceType sourceType,
                                        const QString &heightmapPath,
                                        double heightmapScaleKm,
                                        quint32 heightSeed,
-                                       bool useContinentsHeight)
+                                       bool useContinentsHeight,
+                                       bool hasSeaLevel)
     : sourceType_(sourceType),
       heightSeed_(heightSeed),
-      useContinentsHeight_(useContinentsHeight) {
+      useContinentsHeight_(useContinentsHeight),
+      hasSeaLevel_(hasSeaLevel) {
     if (sourceType_ == HeightSourceType::HeightmapEquirectangular) {
         if (!heightmap_.loadFromFile(heightmapPath, heightmapScaleKm)) {
             sourceType_ = HeightSourceType::Procedural;
@@ -232,7 +234,13 @@ void SurfaceHeightModel::rebuildContinentCentersCache() const {
 
 double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) const {
     if (sourceType_ == HeightSourceType::HeightmapEquirectangular && heightmap_.isValid()) {
-        return heightmap_.heightKmAt(latitudeDeg, longitudeDeg);
+        const double heightKm = heightmap_.heightKmAt(latitudeDeg, longitudeDeg);
+        if (!hasSeaLevel_) {
+            // Без уровня моря отрицательные отметки не имеют физического смысла,
+            // поэтому держим рельеф не ниже нуля.
+            return qMax(0.0, heightKm);
+        }
+        return heightKm;
     }
 
     const QVector3D p = unitSpherePoint(latitudeDeg, longitudeDeg);
@@ -280,7 +288,12 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
         // Высота суши складывается из равнин и гор, чтобы избежать гауссовского вида.
         const double landHeightKm = plains * 1.5 + hills * 1.4 + mountains * 4.2;
         // Маска плавно смешивает океан и сушу в километрах.
-        return lerp(oceanDepthKm, landHeightKm, landMask);
+        double heightKm = lerp(oceanDepthKm, landHeightKm, landMask);
+        if (!hasSeaLevel_) {
+            // Без океана нельзя иметь "морское дно": фиксируем высоты только выше нуля.
+            heightKm = qMax(0.0, heightKm);
+        }
+        return heightKm;
     }
 
     const double continentA = ridgedFbmNoise(noisePoint, 0.7, 4);
@@ -293,5 +306,10 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
     // Нормируем суммарный сигнал: крупный рельеф доминирует, детализация лишь подчёркивает форму.
     const double normalized = qBound(-1.0, (continents * 2.0 - 1.0) + detail * 0.15, 1.0);
     // Масштабируем в километры, чтобы получить реалистичный диапазон высот (-9..+9 км).
-    return normalized * 9.0;
+    double heightKm = normalized * 9.0;
+    if (!hasSeaLevel_) {
+        // Без океанов отрицательные высоты превращают рельеф в несуществующие впадины.
+        heightKm = qMax(0.0, heightKm);
+    }
+    return heightKm;
 }
