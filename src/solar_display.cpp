@@ -2696,10 +2696,14 @@ private:
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel);
             point.state.setGreenhouseOpacity(localGreenhouseOpacity);
+            // Воздух интегрируется по времени, иначе он будет “сбрасываться” каждый тик.
+            // Поэтому используем предыдущее значение, а базу только для первичной инициализации.
             const double initialAirTemperature =
-                (i < baselineAirTemperatures.size())
-                    ? baselineAirTemperatures.at(i)
-                    : point.temperatureK;
+                (point.airTemperatureK > 0.0)
+                    ? point.airTemperatureK
+                    : ((i < baselineAirTemperatures.size())
+                           ? baselineAirTemperatures.at(i)
+                           : point.temperatureK);
             point.airTemperatureK =
                 estimateAirTemperatureKelvin(point.state,
                                              point.pressureAtm,
