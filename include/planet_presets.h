@@ -44,11 +44,11 @@ struct PlanetPreset {
     bool tidallyLocked = false;
     // Источник высот поверхности.
     HeightSourceType heightSourceType = HeightSourceType::Procedural;
-    // Путь к equirectangular heightmap (строго 2:1).
+    // Путь к equirectangular heightmap (строго 2:1), используется только для HeightmapEquirectangular.
     QString heightmapPath;
     // Масштаб высот в километрах: значение 1.0 соответствует диапазону (-1..+1) км.
     double heightmapScaleKm = 0.0;
-    // Seed для процедурного рельефа (для heightmap игнорируется).
+    // Seed для процедурного рельефа.
     quint32 heightSeed = 0;
     // Процедурный режим "continents" (маска суши + горы/равнины).
     bool useContinentsHeight = false;
