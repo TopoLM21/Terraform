@@ -1547,11 +1547,17 @@ private:
             planetEccentricityLabel_->setText(QStringLiteral("—"));
             planetObliquityLabel_->setText(QStringLiteral("—"));
             planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
+            if (surfaceGlobeWidget_) {
+                surfaceGlobeWidget_->setAxisTiltDegrees(0.0);
+            }
             return;
         }
         planetEccentricityLabel_->setText(formatEccentricity(eccentricity.toDouble()));
         planetObliquityLabel_->setText(formatAngle(obliquity.toDouble()));
         planetPerihelionArgumentLabel_->setText(formatAngle(perihelionArgument.toDouble()));
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setAxisTiltDegrees(obliquity.toDouble());
+        }
     }
 
     bool hasPrimaryInputs() const {
