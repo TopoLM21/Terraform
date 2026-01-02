@@ -2292,12 +2292,21 @@ private:
         }
 
         AtmosphericCellState airState(qMax(0.0, initialAirTemperature), airHeatCapacity);
-        // Берём копию состояния поверхности, чтобы не менять расчётную температуру карты
-        // при оценке теплообмена с воздухом.
-        SurfacePointState surfaceCopy = surfaceState;
         const double couplingScale = qBound(0.0, pressureAtm, 1.0);
-        SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K * couplingScale);
-        coupler.exchangeSensibleHeat(surfaceCopy, airState, timeStepSeconds);
+        const double heatTransfer = kDefaultHeatTransferWPerM2K * couplingScale;
+        if (heatTransfer <= 0.0 || timeStepSeconds <= 0.0) {
+            return airState.airTemperatureKelvin();
+        }
+
+        // Оцениваем изменение температуры воздуха без изменения поверхности,
+        // чтобы не модифицировать вычисленное состояние карты.
+        const double surfaceTemperature = surfaceState.temperatureKelvin();
+        const double airTemperature = airState.airTemperatureKelvin();
+        const double fluxWPerM2 = heatTransfer * (surfaceTemperature - airTemperature);
+        const double maxStableDt = 0.5 * airHeatCapacity / heatTransfer;
+        const double stableDt = qMin(timeStepSeconds, maxStableDt);
+        const double airDelta = fluxWPerM2 * stableDt / airHeatCapacity;
+        airState.setAirTemperatureKelvin(airTemperature + airDelta);
         return airState.airTemperatureKelvin();
     }
 
