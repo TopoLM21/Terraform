@@ -59,6 +59,7 @@ public:
                                  double heightmapScaleKm = 0.0,
                                  quint32 heightSeed = 0,
                                  bool useContinentsHeight = false,
+                                 bool useFlatHeight = false,
                                  const SubsurfaceModelSettings &subsurfaceSettings =
                                      SubsurfaceModelSettings{});
 
@@ -126,5 +127,6 @@ private:
     double heightmapScaleKm_ = 0.0;
     quint32 heightSeed_ = 0;
     bool useContinentsHeight_ = false;
+    bool useFlatHeight_ = false;
     SubsurfaceModelSettings subsurfaceSettings_;
 };

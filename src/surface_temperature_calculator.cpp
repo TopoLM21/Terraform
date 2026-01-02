@@ -73,6 +73,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            double heightmapScaleKm,
                                                            quint32 heightSeed,
                                                            bool useContinentsHeight,
+                                                           bool useFlatHeight,
                                                            const SubsurfaceModelSettings &subsurfaceSettings)
     : solarConstant_(solarConstant),
       material_(material),
@@ -91,6 +92,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       heightmapScaleKm_(heightmapScaleKm),
       heightSeed_(heightSeed),
       useContinentsHeight_(useContinentsHeight),
+      useFlatHeight_(useFlatHeight),
       subsurfaceSettings_(subsurfaceSettings) {}
 
 void SurfaceTemperatureCalculator::setMeridionalTransportSteps(int steps) {
@@ -346,7 +348,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const bool hasInsolation = dailyFactor > 0.0;
 
         // Высоту берём из карты рельефа на меридиане 0°, переводя километры в метры.
-        const double heightMeters = heightModel.heightKmAt(axisDegrees, 0.0) * 1000.0;
+        // При принудительном обнулении высоты игнорируем рельеф, чтобы все расчёты
+        // давления и температуры оставались на уровне моря.
+        const double heightMeters =
+            useFlatHeight_ ? 0.0 : (heightModel.heightKmAt(axisDegrees, 0.0) * 1000.0);
         // Давление по барометрической формуле рассчитываем от уровня моря с учётом высоты.
         const double pressureAtm = AtmosphericPressureModel::pressureAtHeightAtm(
             seaLevelPressureAtm,
