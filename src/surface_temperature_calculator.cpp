@@ -4,6 +4,7 @@
 #include "surface_height_model.h"
 #include "surface_temperature_state.h"
 #include "surface_atmosphere_coupler.h"
+#include "atmospheric_radiation_model.h"
 
 #include <QtCore/QThread>
 #include <QtCore/QtMath>
@@ -399,6 +400,19 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const double dynamicCloudAlbedo = qMin(0.88, pressureClouds + waterClouds);
         const double presetCloudAlbedo = qBound(0.0, presetCloudAlbedo_, 0.88);
         const double cloudAlbedo = qMax(dynamicCloudAlbedo, presetCloudAlbedo);
+        // Коэффициент прохождения коротковолнового излучения через облака:
+        // альбедо описывает отражение в космос, а оставшаяся часть частично
+        // поглощается/рассеивается в облачном слое (особенно для H₂SO₄ облаков Венеры).
+        double cloudShortwaveTransmission = 1.0 - cloudAlbedo;
+        if (cloudAlbedo > 0.7) {
+            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            cloudShortwaveTransmission *= 0.2;
+        }
+        cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+        // Атмосферное поглощение SW оцениваем через простую модель оптической толщины.
+        const AtmosphericRadiationModel radiationModel(atmosphere_, pressureAtm, tBasePre);
+        const double shortwaveTransmission =
+            radiationModel.incomingTransmission() * cloudShortwaveTransmission;
         const double waterTau = qMin(8.0, evaporation * 1.5);
         double totalTau = baseTau + traceTau + waterTau;
         if (!useAtmosphericModel_ && greenhouseOpacity_ > 0.0) {
@@ -492,14 +506,16 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                 std::sin(latitudeRadians) * std::sin(declinationRadians) +
                 std::cos(latitudeRadians) * std::cos(declinationRadians) *
                     std::cos(hourAngle);
-            // Суточная инсоляция до учета альбедо.
+            // Суточная инсоляция до учета альбедо поверхности и поглощения атмосферы/облаков.
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
             const double blendedInsolation =
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
 
-            const double absorbedFlux = state.absorbedFlux(blendedInsolation);
+            // До поверхности доходит только прошедший через атмосферу и облака поток.
+            const double transmittedInsolation = blendedInsolation * shortwaveTransmission;
+            const double absorbedFlux = state.absorbedFlux(transmittedInsolation);
             const double emittedFlux = state.emittedFlux();
             state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             coupler.exchangeSensibleHeat(state, airState, timeStepSeconds);
