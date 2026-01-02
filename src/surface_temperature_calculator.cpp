@@ -309,8 +309,8 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * 86400.0;
     const double timeStepSeconds =
         (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
-    // Глобальный средний поток перед альбедо: отражение применяется в SurfaceTemperatureState,
-    // чтобы избежать повторного учета в суточной итерации.
+    // Глобальный средний поток на границе атмосферы (TOA): альбедо поверхности применяется
+    // позже в SurfaceTemperatureState, а планетарное альбедо используется в ТОА-балансе.
     const double globalAverageInsolation = segmentSolarConstant / 4.0;
 
     for (int i = 0; i < latitudePoints; ++i) {
@@ -377,10 +377,13 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
 
         double pressureClouds =
             pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
-        const double surfAlbedoPre =
+        const double surfaceAlbedoPre =
             (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
+        // Планетарное (TOA) альбедо учитывает отражение облаками до поверхности.
+        const double planetaryAlbedoPre =
+            pressureClouds + (1.0 - pressureClouds) * surfaceAlbedoPre;
         const double tEffPre =
-            std::pow((segmentSolarConstant * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
+            std::pow((segmentSolarConstant * (1.0 - planetaryAlbedoPre)) /
                          (4.0 * kStefanBoltzmannConstant),
                      0.25);
         const double tBasePre =
@@ -419,22 +422,25 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             (dayLengthDays_ < 2.0 && pressureAtm < 10.0) ? 0.65 : 1.0;
         const double meridionalTransport = transport * rotBlock;
 
-        double dynamicSurfAlbedo = albedo * (1.0 - potentialCoverage);
+        double surfaceAlbedo = albedo * (1.0 - potentialCoverage);
         if (tBasePre < 260.0) {
-            dynamicSurfAlbedo += potentialCoverage * 0.70;
+            surfaceAlbedo += potentialCoverage * 0.70;
         } else {
-            dynamicSurfAlbedo += potentialCoverage * 0.06;
+            surfaceAlbedo += potentialCoverage * 0.06;
         }
-        const double finalAlbedo = qMax(dynamicSurfAlbedo, cloudAlbedo);
+        // Планетарное (TOA) альбедо складывается из облачного отражения и доли,
+        // прошедшей к поверхности и обратно.
+        const double planetaryAlbedo = cloudAlbedo + (1.0 - cloudAlbedo) * surfaceAlbedo;
         const double tEff =
-            std::pow((segmentSolarConstant * (1.0 - finalAlbedo)) /
+            // TOA-баланс: используем планетарное альбедо, а не альбедо поверхности.
+            std::pow((segmentSolarConstant * (1.0 - planetaryAlbedo)) /
                          (4.0 * kStefanBoltzmannConstant),
                      0.25);
         const double tGlobalAvg = tEff * ghMult;
 
         const double tLatRad =
             std::pow(qMax(0.1,
-                          segmentSolarConstant * (1.0 - finalAlbedo) * dailyFactor) /
+                          segmentSolarConstant * (1.0 - planetaryAlbedo) * dailyFactor) /
                          kStefanBoltzmannConstant,
                      0.25) *
             ghMult;
@@ -449,7 +455,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         // S_inst = S0 * cos(zenith) при освещении, иначе 0.
         // Поток смешивается с глобальным средним, чтобы имитировать меридиональный перенос.
         SurfaceTemperatureState state(tBase,
-                                      finalAlbedo,
+                                      // Альбедо поверхности влияет только на локальное поглощение,
+                                      // а планетарное применяется в ТОА-балансе выше.
+                                      surfaceAlbedo,
                                       greenhouseOpacity,
                                       absFloor,
                                       material_,
