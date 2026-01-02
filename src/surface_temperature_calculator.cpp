@@ -518,6 +518,22 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             const double absorbedFlux = state.absorbedFlux(transmittedInsolation);
             const double emittedFlux = state.emittedFlux();
             state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
+            // Радиационный баланс атмосферы:
+            // Q_sw_air = S_blend * T_cloud * (1 - T_atm), где T_atm = incomingTransmission().
+            // Q_lw_air = F_surf * (1 - T_lw), где T_lw = outgoingTransmission().
+            // Потоки в Вт/м^2 переводим в ΔT: ΔT = (Q * Δt) / C_air.
+            const double shortwaveAbsorbedByAir =
+                blendedInsolation * cloudShortwaveTransmission *
+                (1.0 - radiationModel.incomingTransmission());
+            const double longwaveAbsorbedByAir =
+                emittedFlux * (1.0 - radiationModel.outgoingTransmission());
+            const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveAbsorbedByAir;
+            if (airHeatCapacity > 0.0) {
+                const double airDeltaTemp =
+                    airRadiativeHeatingFlux * timeStepSeconds / airHeatCapacity;
+                airState.setAirTemperatureKelvin(
+                    airState.airTemperatureKelvin() + airDeltaTemp);
+            }
             coupler.exchangeSensibleHeat(state, airState, timeStepSeconds);
 
             if (step >= stepsPerDay * spinUpDays) {
