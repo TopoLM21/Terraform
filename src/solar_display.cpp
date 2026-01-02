@@ -22,6 +22,7 @@
 #include "wind_field_model.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
+#include "atmospheric_radiation_model.h"
 #include "atmospheric_pressure_model.h"
 #include "atmospheric_cell_state.h"
 #include "atmosphere_model.h"
@@ -2280,6 +2281,9 @@ private:
                                         double pressureAtm,
                                         double gravity,
                                         double initialAirTemperature,
+                                        double blendedInsolation,
+                                        double cloudShortwaveTransmission,
+                                        const AtmosphericRadiationModel &radiationModel,
                                         double timeStepSeconds) const {
         if (pressureAtm <= 0.0 || gravity <= 0.0) {
             return surfaceState.temperatureKelvin();
@@ -2294,7 +2298,25 @@ private:
         AtmosphericCellState airState(qMax(0.0, initialAirTemperature), airHeatCapacity);
         const double couplingScale = qBound(0.0, pressureAtm, 1.0);
         const double heatTransfer = kDefaultHeatTransferWPerM2K * couplingScale;
-        if (heatTransfer <= 0.0 || timeStepSeconds <= 0.0) {
+        if (timeStepSeconds <= 0.0) {
+            return airState.airTemperatureKelvin();
+        }
+
+        // Радиационный нагрев воздуха:
+        // Q_sw_air = S_blend * T_cloud * (1 - T_atm), где T_atm = incomingTransmission().
+        // Q_lw_air = F_surf * (1 - T_lw), где T_lw = outgoingTransmission().
+        const double emittedFlux = surfaceState.emittedFlux();
+        const double shortwaveAbsorbedByAir =
+            blendedInsolation * cloudShortwaveTransmission *
+            (1.0 - radiationModel.incomingTransmission());
+        const double longwaveAbsorbedByAir =
+            emittedFlux * (1.0 - radiationModel.outgoingTransmission());
+        const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveAbsorbedByAir;
+        const double airRadiativeDelta =
+            airRadiativeHeatingFlux * timeStepSeconds / airHeatCapacity;
+        airState.setAirTemperatureKelvin(airState.airTemperatureKelvin() + airRadiativeDelta);
+
+        if (heatTransfer <= 0.0) {
             return airState.airTemperatureKelvin();
         }
 
@@ -2507,6 +2529,13 @@ private:
         QVector<double> baselineAirTemperatures;
         baselineAirTemperatures.reserve(surfaceGrid_.points().size());
         const double timeStepSeconds = 3600.0;
+        // Коэффициент прохождения коротковолнового излучения через облака.
+        double cloudShortwaveTransmission = 1.0 - cloudAlbedo;
+        if (cloudAlbedo > 0.7) {
+            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            cloudShortwaveTransmission *= 0.2;
+        }
+        cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
         if (!summarySource && !segmentSource) {
             const double fallbackInsolation =
                 (lastSolarConstant_ > 0.0) ? (lastSolarConstant_ / 4.0) : 0.0;
@@ -2704,11 +2733,17 @@ private:
                     : ((i < baselineAirTemperatures.size())
                            ? baselineAirTemperatures.at(i)
                            : point.temperatureK);
+            const AtmosphericRadiationModel radiationModel(atmosphere,
+                                                           point.pressureAtm,
+                                                           point.state.temperatureKelvin());
             point.airTemperatureK =
                 estimateAirTemperatureKelvin(point.state,
                                              point.pressureAtm,
                                              gravity,
                                              initialAirTemperature,
+                                             blendedInsolation,
+                                             cloudShortwaveTransmission,
+                                             radiationModel,
                                              timeStepSeconds);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
@@ -2806,6 +2841,8 @@ private:
         const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
         const double manualGreenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        const double cloudAlbedo =
+            qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
 
         QHash<QString, SurfaceMaterial> materialsById;
         const auto materials = surfaceMaterials();
@@ -2843,6 +2880,13 @@ private:
 
         // Один тик = 1 час планетарных суток, ускорение реализовано уменьшением интервала таймера.
         const double timeStepSeconds = 3600.0;
+        // Коэффициент прохождения коротковолнового излучения через облака.
+        double cloudShortwaveTransmission = 1.0 - cloudAlbedo;
+        if (cloudAlbedo > 0.7) {
+            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            cloudShortwaveTransmission *= 0.2;
+        }
+        cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
         const double phase =
             2.0 * M_PI *
             (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
@@ -2970,11 +3014,19 @@ private:
             maxTemperature = qMax(maxTemperature, point.temperatureK);
             const double initialAirTemperature =
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
+            const double blendedInsolation =
+                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const AtmosphericRadiationModel radiationModel(atmosphere,
+                                                           point.pressureAtm,
+                                                           point.state.temperatureKelvin());
             point.airTemperatureK =
                 estimateAirTemperatureKelvin(point.state,
                                              point.pressureAtm,
                                              gravity,
                                              initialAirTemperature,
+                                             blendedInsolation,
+                                             cloudShortwaveTransmission,
+                                             radiationModel,
                                              timeStepSeconds);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
