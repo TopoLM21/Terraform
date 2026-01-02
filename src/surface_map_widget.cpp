@@ -109,14 +109,6 @@ void SurfaceMapWidget::setMapMode(SurfaceMapMode mode) {
     rebuildImages();
 }
 
-void SurfaceMapWidget::setSubsurfaceLayerIndex(int layerIndex) {
-    if (subsurfaceLayerIndex_ == layerIndex) {
-        return;
-    }
-    subsurfaceLayerIndex_ = qMax(0, layerIndex);
-    rebuildImages();
-}
-
 void SurfaceMapWidget::setTemperatureRange(double minK, double maxK) {
     minTemperatureK_ = minK;
     maxTemperatureK_ = maxK;
@@ -297,8 +289,6 @@ void SurfaceMapWidget::rebuildImages() {
                     double sample = 0.0;
                     if (mapMode_ == SurfaceMapMode::Temperature) {
                         sample = points[pointIndex].temperatureK;
-                    } else if (mapMode_ == SurfaceMapMode::SubsurfaceLayer) {
-                        sample = subsurfaceLayerTemperature(points[pointIndex]);
                     } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
                         sample = points[pointIndex].airTemperatureK;
                     } else if (mapMode_ == SurfaceMapMode::Height) {
@@ -312,7 +302,6 @@ void SurfaceMapWidget::rebuildImages() {
                 }
 
                 if (mapMode_ == SurfaceMapMode::Temperature ||
-                    mapMode_ == SurfaceMapMode::SubsurfaceLayer ||
                     mapMode_ == SurfaceMapMode::AirTemperature) {
                     scanLine[x] = temperatureToColor(value);
                 } else if (mapMode_ == SurfaceMapMode::Height) {
@@ -346,8 +335,6 @@ void SurfaceMapWidget::rebuildImages() {
                 QRgb color = 0;
                 if (mapMode_ == SurfaceMapMode::Temperature) {
                     color = temperatureToColor(point.temperatureK);
-                } else if (mapMode_ == SurfaceMapMode::SubsurfaceLayer) {
-                    color = temperatureToColor(subsurfaceLayerTemperature(point));
                 } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
                     color = temperatureToColor(point.airTemperatureK);
                 } else if (mapMode_ == SurfaceMapMode::Height) {
@@ -387,8 +374,6 @@ void SurfaceMapWidget::rebuildImages() {
                     QRgb color = 0;
                     if (mapMode_ == SurfaceMapMode::Temperature) {
                         color = temperatureToColor(point.temperatureK);
-                    } else if (mapMode_ == SurfaceMapMode::SubsurfaceLayer) {
-                        color = temperatureToColor(subsurfaceLayerTemperature(point));
                     } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
                         color = temperatureToColor(point.airTemperatureK);
                     } else if (mapMode_ == SurfaceMapMode::Height) {
@@ -480,15 +465,6 @@ QRgb SurfaceMapWidget::pressureToColor(double pressureAtm) const {
                                 (maxPressureAtm_ - minPressureAtm_),
                             1.0);
     return temperatureColorForRatio(t).rgb();
-}
-
-double SurfaceMapWidget::subsurfaceLayerTemperature(const SurfacePoint &point) const {
-    const auto &profile = point.state.solver().temperatures();
-    if (profile.isEmpty()) {
-        return point.temperatureK;
-    }
-    const int index = qBound(0, subsurfaceLayerIndex_, profile.size() - 1);
-    return profile.at(index);
 }
 
 int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
