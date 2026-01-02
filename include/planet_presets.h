@@ -50,6 +50,8 @@ struct PlanetPreset {
     double heightmapScaleKm = 0.0;
     // Seed для процедурного рельефа.
     quint32 heightSeed = 0;
+    // Управляет разделением суши и океана (морской уровень), не зависит от материала.
+    bool hasSeaLevel = false;
     // Процедурный режим "continents" (маска суши + горы/равнины).
     bool useContinentsHeight = false;
 };

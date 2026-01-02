@@ -54,14 +54,14 @@ QVector<PlanetPreset> solarSystemPresets() {
         // Например, у Венеры солнечные сутки ~116.75, а 243 дня — сидерическое вращение.
         {QStringLiteral("Меркурий"), 0.39, 176.0, 0.2056, 0.03, 29.12, 0.0553, 2439.7,
          QStringLiteral("regolith_mercury"), AtmosphereComposition{}, 0.0, 0.0, false,
-         HeightSourceType::Procedural, QString(), 0.0, 1001u, true},
+         HeightSourceType::Procedural, QString(), 0.0, 1001u, false, true},
         {QStringLiteral("Венера"), 0.72, 116.75, 0.0068, 177.36, 54.88, 0.815, 6051.8,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(92.0, 0.815, 6051.8, {{QStringLiteral("co2"), 1.0}}),
          0.99,
          0.75,
          false,
-         HeightSourceType::Procedural, QString(), 0.0, 1002u, true},
+         HeightSourceType::Procedural, QString(), 0.0, 1002u, true, true},
         {QStringLiteral("Земля"), 1.00, 1.0, 0.0167, 23.44, 102.94, 1.0, 6371.0,
          QStringLiteral("ocean"),
          atmosphereByPressureAtm(
@@ -81,10 +81,11 @@ QVector<PlanetPreset> solarSystemPresets() {
          QString(),
          0.0,
          31003u,
+         true,
          true},
         {QStringLiteral("Луна"), 1.00, 29.5, 0.0549, 6.68, 0.0, 0.0123, 1737.4,
          QStringLiteral("regolith_moon"), AtmosphereComposition{}, 0.0, 0.0, false,
-         HeightSourceType::Procedural, QString(), 0.0, 1004u, true},
+         HeightSourceType::Procedural, QString(), 0.0, 1004u, false, true},
         {QStringLiteral("Марс"), 1.52, 1.03, 0.0934, 25.19, 286.5, 0.107, 3389.5,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(0.006, 0.107, 3389.5, {{QStringLiteral("co2"), 1.0}}),
@@ -95,10 +96,11 @@ QVector<PlanetPreset> solarSystemPresets() {
          QString(),
          0.0,
          31005u,
+         true,
          true},
         {QStringLiteral("Церрера"), 2.77, 0.38, 0.0758, 4.0, 73.6, 0.00015, 473.0,
          QStringLiteral("ice"), AtmosphereComposition{}, 0.0, 0.0, false,
-         HeightSourceType::Procedural, QString(), 0.0, 1006u, true},
+         HeightSourceType::Procedural, QString(), 0.0, 1006u, false, true},
     };
 }
 
@@ -122,6 +124,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          QString(),
          0.0,
          2001u,
+         true,
          true},
         {QStringLiteral("Планета 2"), 0.40, 2.4, 0.003, 11.94, 21.12, 0.4317, 4710.0,
          QStringLiteral("desert"),
@@ -141,6 +144,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          QString(),
          0.0,
          2002u,
+         true,
          true},
         {QStringLiteral("Планета 3"), 0.51, 1.4, 0.0001, -8.84, 343.60, 0.5173, 4979.0,
          QStringLiteral("desert"),
@@ -160,6 +164,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          QString(),
          0.0,
          2003u,
+         true,
          true},
     };
 }

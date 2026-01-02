@@ -96,7 +96,8 @@ constexpr int kRoleHeightmapPath = Qt::UserRole + 15;
 constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 16;
 constexpr int kRoleHeightSeed = Qt::UserRole + 17;
 constexpr int kRoleUseContinentsHeight = Qt::UserRole + 18;
-constexpr int kRoleFlatHeight = Qt::UserRole + 19;
+constexpr int kRoleHasSeaLevel = Qt::UserRole + 19;
+constexpr int kRoleFlatHeight = Qt::UserRole + 20;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -218,6 +219,7 @@ struct TemperatureCacheKey {
     double heightmapScaleKm = 0.0;
     quint32 heightSeed = 0;
     bool useContinentsHeight = false;
+    bool hasSeaLevel = false;
     bool useFlatHeight = false;
     int subsurfaceLayers = 0;
     double subsurfaceTopThicknessMeters = 0.0;
@@ -248,6 +250,7 @@ struct TemperatureCacheKey {
                heightmapScaleKm == other.heightmapScaleKm &&
                heightSeed == other.heightSeed &&
                useContinentsHeight == other.useContinentsHeight &&
+               hasSeaLevel == other.hasSeaLevel &&
                useFlatHeight == other.useFlatHeight &&
                subsurfaceLayers == other.subsurfaceLayers &&
                subsurfaceTopThicknessMeters == other.subsurfaceTopThicknessMeters &&
@@ -291,6 +294,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.heightmapScaleKm), seed);
     seed = qHash(static_cast<quint32>(key.heightSeed), seed);
     seed = qHash(key.useContinentsHeight, seed);
+    seed = qHash(key.hasSeaLevel, seed);
     seed = qHash(key.useFlatHeight, seed);
     seed = qHash(key.subsurfaceLayers, seed);
     seed = qHash(hashDoubleBits(key.subsurfaceTopThicknessMeters), seed);
@@ -1585,6 +1589,7 @@ private:
         planetComboBox_->setItemData(index, planet.heightmapScaleKm, kRoleHeightmapScaleKm);
         planetComboBox_->setItemData(index, planet.heightSeed, kRoleHeightSeed);
         planetComboBox_->setItemData(index, planet.useContinentsHeight, kRoleUseContinentsHeight);
+        planetComboBox_->setItemData(index, planet.hasSeaLevel, kRoleHasSeaLevel);
         planetComboBox_->setItemData(index, false, kRoleFlatHeight);
     }
 
@@ -1804,10 +1809,15 @@ private:
             const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
             const quint32 heightSeed = static_cast<quint32>(heightSeedInput->value());
             const AtmosphereComposition composition = atmosphereInput->composition(false);
+            const bool existingHasSeaLevel =
+                existingIndex >= 0
+                    ? planetComboBox_->itemData(existingIndex, kRoleHasSeaLevel).toBool()
+                    : false;
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
                                 composition, greenhouseOpacity, cloudAlbedo, tidallyLocked};
             preset.heightSeed = heightSeed;
+            preset.hasSeaLevel = existingHasSeaLevel;
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -1841,6 +1851,7 @@ private:
                 planetComboBox_->setItemData(existingIndex, preset.heightSeed, kRoleHeightSeed);
                 planetComboBox_->setItemData(existingIndex, preset.useContinentsHeight,
                                              kRoleUseContinentsHeight);
+                planetComboBox_->setItemData(existingIndex, preset.hasSeaLevel, kRoleHasSeaLevel);
                 planetComboBox_->setItemData(existingIndex,
                                              planetComboBox_->itemData(existingIndex, kRoleFlatHeight),
                                              kRoleFlatHeight);
@@ -2136,8 +2147,6 @@ private:
             planetComboBox_->currentData(kRoleHeightmapPath).toString();
         const double heightmapScaleKm =
             planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
-        const QString materialId =
-            planetComboBox_->currentData(kRoleMaterialId).toString();
         // Seed влияет только на HeightSourceType::Procedural.
         const quint32 heightSeed =
             planetComboBox_->currentData(kRoleHeightSeed).toUInt();
@@ -2145,7 +2154,10 @@ private:
             planetComboBox_->currentData(kRoleUseContinentsHeight).toBool();
         const bool useFlatHeight =
             planetComboBox_->currentData(kRoleFlatHeight).toBool();
-        const bool hasSeaLevel = materialId == QLatin1String("ocean");
+        // Уровень моря задаётся пресетом, чтобы отделение суши/океана не зависело
+        // от выбранного материала (например, у Венеры остаются "океаны" даже на песке).
+        const bool hasSeaLevel =
+            planetComboBox_->currentData(kRoleHasSeaLevel).toBool();
         surfaceGrid_.setHeightSource(heightSource, heightmapPath, heightmapScaleKm,
                                      heightSeed, useContinentsHeight, hasSeaLevel);
 
@@ -3219,6 +3231,8 @@ private:
             planetComboBox_->currentData(kRoleHeightSeed).toUInt();
         const bool useContinentsHeight =
             planetComboBox_->currentData(kRoleUseContinentsHeight).toBool();
+        const bool hasSeaLevel =
+            planetComboBox_->currentData(kRoleHasSeaLevel).toBool();
         double atmospherePressureAtm = 0.0;
         double surfaceGravity = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
@@ -3255,6 +3269,7 @@ private:
                                             heightmapScaleKm,
                                             heightSeed,
                                             useContinentsHeight,
+                                            hasSeaLevel,
                                             useFlatHeight,
                                             subsurfaceSettings.layerCount,
                                             subsurfaceSettings.topLayerThicknessMeters,
@@ -3285,6 +3300,7 @@ private:
                                                       heightmapScaleKm,
                                                       heightSeed,
                                                       useContinentsHeight,
+                                                      hasSeaLevel,
                                                       useFlatHeight,
                                                       subsurfaceSettings.layerCount,
                                                       subsurfaceSettings.topLayerThicknessMeters,
@@ -3307,6 +3323,7 @@ private:
              heightmapScaleKm,
              heightSeed,
              useContinentsHeight,
+             hasSeaLevel,
              useFlatHeight,
              latitudePointCount,
              referenceDistanceAU,
@@ -3332,6 +3349,7 @@ private:
                                                                   heightmapScaleKm,
                                                                   heightSeed,
                                                                   useContinentsHeight,
+                                                                  hasSeaLevel,
                                                                   useFlatHeight,
                                                                   subsurfaceSettings);
                 startTemperatureElapsedUi(requestId, QPointer<QProgressDialog>());
@@ -3502,6 +3520,7 @@ private:
                                                 heightmapScaleKm,
                                                 heightSeed,
                                                 useContinentsHeight,
+                                                hasSeaLevel,
                                                 useFlatHeight,
                                                 subsurfaceSettings);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);

@@ -73,6 +73,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            double heightmapScaleKm,
                                                            quint32 heightSeed,
                                                            bool useContinentsHeight,
+                                                           bool hasSeaLevel,
                                                            bool useFlatHeight,
                                                            const SubsurfaceModelSettings &subsurfaceSettings)
     : solarConstant_(solarConstant),
@@ -92,6 +93,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       heightmapScaleKm_(heightmapScaleKm),
       heightSeed_(heightSeed),
       useContinentsHeight_(useContinentsHeight),
+      hasSeaLevel_(hasSeaLevel),
       useFlatHeight_(useFlatHeight),
       subsurfaceSettings_(subsurfaceSettings) {}
 
@@ -280,7 +282,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             : 0.0;
     const double co2Mass = gasMassGigatons(atmosphere_, QStringLiteral("co2"));
     const double waterGigatons = estimateSurfaceWaterGigatons(material_);
-    const bool hasSeaLevel = waterGigatons > 0.0;
+    const bool hasSeaLevel = hasSeaLevel_;
     const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
     const double avgDepth = (planetAreaKm2 > 0.0) ? waterGigatons / planetAreaKm2 : 0.0;
     double potentialCoverage = 0.0;
