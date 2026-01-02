@@ -96,6 +96,7 @@ constexpr int kRoleHeightmapPath = Qt::UserRole + 15;
 constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 16;
 constexpr int kRoleHeightSeed = Qt::UserRole + 17;
 constexpr int kRoleUseContinentsHeight = Qt::UserRole + 18;
+constexpr int kRoleFlatHeight = Qt::UserRole + 19;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -217,6 +218,7 @@ struct TemperatureCacheKey {
     double heightmapScaleKm = 0.0;
     quint32 heightSeed = 0;
     bool useContinentsHeight = false;
+    bool useFlatHeight = false;
     int subsurfaceLayers = 0;
     double subsurfaceTopThicknessMeters = 0.0;
     double subsurfaceDepthMeters = 0.0;
@@ -246,6 +248,7 @@ struct TemperatureCacheKey {
                heightmapScaleKm == other.heightmapScaleKm &&
                heightSeed == other.heightSeed &&
                useContinentsHeight == other.useContinentsHeight &&
+               useFlatHeight == other.useFlatHeight &&
                subsurfaceLayers == other.subsurfaceLayers &&
                subsurfaceTopThicknessMeters == other.subsurfaceTopThicknessMeters &&
                subsurfaceDepthMeters == other.subsurfaceDepthMeters &&
@@ -288,6 +291,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.heightmapScaleKm), seed);
     seed = qHash(static_cast<quint32>(key.heightSeed), seed);
     seed = qHash(key.useContinentsHeight, seed);
+    seed = qHash(key.useFlatHeight, seed);
     seed = qHash(key.subsurfaceLayers, seed);
     seed = qHash(hashDoubleBits(key.subsurfaceTopThicknessMeters), seed);
     seed = qHash(hashDoubleBits(key.subsurfaceDepthMeters), seed);
@@ -476,6 +480,10 @@ public:
             static_cast<int>(RotationMode::TidalLocked));
         heightSeedSpinBox_ = new QSpinBox(this);
         heightSeedSpinBox_->setRange(0, std::numeric_limits<int>::max());
+        flatHeightButton_ = new QPushButton(QStringLiteral("Обнулить высоту"), this);
+        flatHeightButton_->setCheckable(true);
+        flatHeightButton_->setEnabled(false);
+        updateFlatHeightButtonText(false);
         cloudAlbedoSpinBox_ = new QDoubleSpinBox(this);
         cloudAlbedoSpinBox_->setRange(0.0, 1.0);
         cloudAlbedoSpinBox_->setDecimals(2);
@@ -535,6 +543,7 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         planetControlsLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
         planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
+        planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), flatHeightButton_);
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
         planetControlsLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
         planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
@@ -772,6 +781,7 @@ public:
             }
             syncRotationModeWithPlanet();
             syncHeightSeedWithPlanet();
+            syncFlatHeightWithPlanet();
             syncCloudAlbedoWithPlanet();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
@@ -829,6 +839,16 @@ public:
                 return;
             }
             syncPlanetHeightSeedWithSelection();
+            updateSurfaceGridTemperatures();
+        });
+
+        connect(flatHeightButton_, &QPushButton::toggled, this, [this](bool checked) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetFlatHeightWithSelection(checked);
+            clearTemperatureCache();
+            updateTemperaturePlot();
             updateSurfaceGridTemperatures();
         });
 
@@ -1070,6 +1090,7 @@ private:
     QComboBox *materialComboBox_ = nullptr;
     QComboBox *rotationModeComboBox_ = nullptr;
     QSpinBox *heightSeedSpinBox_ = nullptr;
+    QPushButton *flatHeightButton_ = nullptr;
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
     ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
     QRadioButton *latitudeStepFastRadio_ = nullptr;
@@ -1152,6 +1173,14 @@ private:
     } surfaceSimState_;
     OrbitAnimationModel surfaceOrbitAnimation_;
     bool surfaceOrbitAnimationInitialized_ = false;
+
+    void updateFlatHeightButtonText(bool useFlatHeight) {
+        if (!flatHeightButton_) {
+            return;
+        }
+        flatHeightButton_->setText(useFlatHeight ? QStringLiteral("Вернуть высоту")
+                                                 : QStringLiteral("Обнулить высоту"));
+    }
 
     void updateTemperaturePauseUi(bool paused) {
         if (temperaturePauseButton_) {
@@ -1278,6 +1307,7 @@ private:
         syncMaterialWithPlanet();
         syncRotationModeWithPlanet();
         syncHeightSeedWithPlanet();
+        syncFlatHeightWithPlanet();
         syncCloudAlbedoWithPlanet();
         updatePlanetActions();
     }
@@ -1306,6 +1336,12 @@ private:
         if (heightSeedSpinBox_) {
             const QSignalBlocker seedBlocker(heightSeedSpinBox_);
             heightSeedSpinBox_->setValue(0);
+        }
+        if (flatHeightButton_) {
+            const QSignalBlocker flatBlocker(flatHeightButton_);
+            flatHeightButton_->setChecked(false);
+            flatHeightButton_->setEnabled(false);
+            updateFlatHeightButtonText(false);
         }
         if (cloudAlbedoSpinBox_) {
             const QSignalBlocker cloudBlocker(cloudAlbedoSpinBox_);
@@ -1549,6 +1585,7 @@ private:
         planetComboBox_->setItemData(index, planet.heightmapScaleKm, kRoleHeightmapScaleKm);
         planetComboBox_->setItemData(index, planet.heightSeed, kRoleHeightSeed);
         planetComboBox_->setItemData(index, planet.useContinentsHeight, kRoleUseContinentsHeight);
+        planetComboBox_->setItemData(index, false, kRoleFlatHeight);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -1804,6 +1841,9 @@ private:
                 planetComboBox_->setItemData(existingIndex, preset.heightSeed, kRoleHeightSeed);
                 planetComboBox_->setItemData(existingIndex, preset.useContinentsHeight,
                                              kRoleUseContinentsHeight);
+                planetComboBox_->setItemData(existingIndex,
+                                             planetComboBox_->itemData(existingIndex, kRoleFlatHeight),
+                                             kRoleFlatHeight);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
@@ -1883,6 +1923,27 @@ private:
         heightSeedSpinBox_->setValue(heightSeed);
     }
 
+    void syncFlatHeightWithPlanet() {
+        if (!flatHeightButton_) {
+            return;
+        }
+
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            const QSignalBlocker blocker(flatHeightButton_);
+            flatHeightButton_->setChecked(false);
+            flatHeightButton_->setEnabled(false);
+            updateFlatHeightButtonText(false);
+            return;
+        }
+
+        const bool useFlatHeight = planetComboBox_->itemData(index, kRoleFlatHeight).toBool();
+        const QSignalBlocker blocker(flatHeightButton_);
+        flatHeightButton_->setChecked(useFlatHeight);
+        flatHeightButton_->setEnabled(true);
+        updateFlatHeightButtonText(useFlatHeight);
+    }
+
     void syncCloudAlbedoWithPlanet() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0 || !cloudAlbedoSpinBox_) {
@@ -1892,6 +1953,15 @@ private:
         const double cloudAlbedo = planetComboBox_->itemData(index, kRoleCloudAlbedo).toDouble();
         const QSignalBlocker blocker(cloudAlbedoSpinBox_);
         cloudAlbedoSpinBox_->setValue(cloudAlbedo);
+    }
+
+    void syncPlanetFlatHeightWithSelection(bool useFlatHeight) {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+        planetComboBox_->setItemData(index, useFlatHeight, kRoleFlatHeight);
+        updateFlatHeightButtonText(useFlatHeight);
     }
 
     void syncPlanetMaterialWithSelection() {
@@ -2073,6 +2143,8 @@ private:
             planetComboBox_->currentData(kRoleHeightSeed).toUInt();
         const bool useContinentsHeight =
             planetComboBox_->currentData(kRoleUseContinentsHeight).toBool();
+        const bool useFlatHeight =
+            planetComboBox_->currentData(kRoleFlatHeight).toBool();
         const bool hasSeaLevel = materialId == QLatin1String("ocean");
         surfaceGrid_.setHeightSource(heightSource, heightmapPath, heightmapScaleKm,
                                      heightSeed, useContinentsHeight, hasSeaLevel);
@@ -2090,6 +2162,12 @@ private:
         const double ratio = qMax(1.0, static_cast<double>(targetPointCount) / 20.0);
         const int subdivisionLevel = qMax(0, static_cast<int>(qRound(qLn(ratio) / qLn(4.0))));
         surfaceGrid_.generateIcosahedronGrid(subdivisionLevel);
+
+        if (useFlatHeight) {
+            for (auto &point : surfaceGrid_.points()) {
+                point.heightKm = 0.0;
+            }
+        }
     }
 
     struct SurfacePointStateDefaults {
@@ -3177,6 +3255,7 @@ private:
                                             heightmapScaleKm,
                                             heightSeed,
                                             useContinentsHeight,
+                                            useFlatHeight,
                                             subsurfaceSettings.layerCount,
                                             subsurfaceSettings.topLayerThicknessMeters,
                                             subsurfaceSettings.bottomDepthMeters,
@@ -3206,6 +3285,7 @@ private:
                                                       heightmapScaleKm,
                                                       heightSeed,
                                                       useContinentsHeight,
+                                                      useFlatHeight,
                                                       subsurfaceSettings.layerCount,
                                                       subsurfaceSettings.topLayerThicknessMeters,
                                                       subsurfaceSettings.bottomDepthMeters,
@@ -3227,6 +3307,7 @@ private:
              heightmapScaleKm,
              heightSeed,
              useContinentsHeight,
+             useFlatHeight,
              latitudePointCount,
              referenceDistanceAU,
              obliquity,
@@ -3251,6 +3332,7 @@ private:
                                                                   heightmapScaleKm,
                                                                   heightSeed,
                                                                   useContinentsHeight,
+                                                                  useFlatHeight,
                                                                   subsurfaceSettings);
                 startTemperatureElapsedUi(requestId, QPointer<QProgressDialog>());
                 auto *surfaceWatcher =
@@ -3420,6 +3502,7 @@ private:
                                                 heightmapScaleKm,
                                                 heightSeed,
                                                 useContinentsHeight,
+                                                useFlatHeight,
                                                 subsurfaceSettings);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
