@@ -289,6 +289,8 @@ void SurfaceMapWidget::rebuildImages() {
                     double sample = 0.0;
                     if (mapMode_ == SurfaceMapMode::Temperature) {
                         sample = points[pointIndex].temperatureK;
+                    } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                        sample = points[pointIndex].airTemperatureK;
                     } else if (mapMode_ == SurfaceMapMode::Height) {
                         sample = points[pointIndex].heightKm;
                     } else if (mapMode_ == SurfaceMapMode::Pressure) {
@@ -299,7 +301,8 @@ void SurfaceMapWidget::rebuildImages() {
                     value += pixelWeights.weights[i] * sample;
                 }
 
-                if (mapMode_ == SurfaceMapMode::Temperature) {
+                if (mapMode_ == SurfaceMapMode::Temperature ||
+                    mapMode_ == SurfaceMapMode::AirTemperature) {
                     scanLine[x] = temperatureToColor(value);
                 } else if (mapMode_ == SurfaceMapMode::Height) {
                     scanLine[x] = heightToColor(value);
@@ -332,6 +335,8 @@ void SurfaceMapWidget::rebuildImages() {
                 QRgb color = 0;
                 if (mapMode_ == SurfaceMapMode::Temperature) {
                     color = temperatureToColor(point.temperatureK);
+                } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                    color = temperatureToColor(point.airTemperatureK);
                 } else if (mapMode_ == SurfaceMapMode::Height) {
                     color = heightToColor(point.heightKm);
                 } else if (mapMode_ == SurfaceMapMode::Pressure) {
@@ -369,6 +374,8 @@ void SurfaceMapWidget::rebuildImages() {
                     QRgb color = 0;
                     if (mapMode_ == SurfaceMapMode::Temperature) {
                         color = temperatureToColor(point.temperatureK);
+                    } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                        color = temperatureToColor(point.airTemperatureK);
                     } else if (mapMode_ == SurfaceMapMode::Height) {
                         color = heightToColor(point.heightKm);
                     } else if (mapMode_ == SurfaceMapMode::Pressure) {
@@ -468,11 +475,13 @@ int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
 }
 
 QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point) const {
-    return QStringLiteral("Широта: %1°\nДолгота: %2°\nТемпература: %3 K\nВысота: %4 км\n"
-                          "Давление: %5 атм\nВетер: %6 м/с")
+    return QStringLiteral("Широта: %1°\nДолгота: %2°\nТемпература поверхности: %3 K\n"
+                          "Температура воздуха: %4 K\nВысота: %5 км\nДавление: %6 атм\n"
+                          "Ветер: %7 м/с")
         .arg(point.latitudeDeg, 0, 'f', 2)
         .arg(point.longitudeDeg, 0, 'f', 2)
         .arg(point.temperatureK, 0, 'f', 2)
+        .arg(point.airTemperatureK, 0, 'f', 2)
         .arg(point.heightKm, 0, 'f', 2)
         .arg(point.pressureAtm, 0, 'f', 3)
         .arg(point.windSpeedMps, 0, 'f', 2);

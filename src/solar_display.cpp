@@ -11,6 +11,7 @@
 #include "surface_map_widget.h"
 #include "surface_globe_widget.h"
 #include "surface_point_status_dialog.h"
+#include "surface_atmosphere_coupler.h"
 #include "surface_temperature_scale_widget.h"
 #include "surface_height_scale_widget.h"
 #include "surface_wind_scale_widget.h"
@@ -22,6 +23,7 @@
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
 #include "atmospheric_pressure_model.h"
+#include "atmospheric_cell_state.h"
 #include "atmosphere_model.h"
 
 #include <QtCore/QCommandLineOption>
@@ -104,6 +106,9 @@ constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
 constexpr int kSurfaceOrbitSegmentsPerYear = 360;
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
+constexpr double kStandardPressurePa = 101325.0;
+constexpr double kDryAirSpecificHeatJPerKgK = 1004.0;
+constexpr double kDefaultHeatTransferWPerM2K = 8.0;
 constexpr double kEarthAreaKm2 = 510072000.0;
 constexpr double kDefaultSurfaceRoughness = 20.0;
 constexpr double kDefaultBasinShape = 3.5;
@@ -624,8 +629,10 @@ public:
         temperatureElapsedLabel_ = new QLabel(QStringLiteral("Прошло: 00:00"), this);
         surfaceSeamlessCheckBox_ = new QCheckBox(QStringLiteral("Бесшовная карта"), this);
         surfaceMapModeComboBox_ = new QComboBox(this);
-        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура"),
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура поверхности"),
                                          static_cast<int>(SurfaceMapMode::Temperature));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура воздуха"),
+                                         static_cast<int>(SurfaceMapMode::AirTemperature));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Высота"),
                                          static_cast<int>(SurfaceMapMode::Height));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Ветер"),
@@ -1154,6 +1161,9 @@ private:
     double surfaceMinTemperatureK_ = 0.0;
     double surfaceMaxTemperatureK_ = 0.0;
     bool hasSurfaceTemperatureRange_ = false;
+    double surfaceMinAirTemperatureK_ = 0.0;
+    double surfaceMaxAirTemperatureK_ = 0.0;
+    bool hasSurfaceAirTemperatureRange_ = false;
     double surfaceMinHeightKm_ = 0.0;
     double surfaceMaxHeightKm_ = 0.0;
     bool hasSurfaceHeightRange_ = false;
@@ -2266,6 +2276,31 @@ private:
         updateSurfacePointStatusDialog();
     }
 
+    double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
+                                        double pressureAtm,
+                                        double gravity,
+                                        double initialAirTemperature,
+                                        double timeStepSeconds) const {
+        if (pressureAtm <= 0.0 || gravity <= 0.0) {
+            return surfaceState.temperatureKelvin();
+        }
+        const double columnMassKgPerM2 =
+            (pressureAtm * kStandardPressurePa) / gravity;
+        const double airHeatCapacity = columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
+        if (airHeatCapacity <= 0.0) {
+            return surfaceState.temperatureKelvin();
+        }
+
+        AtmosphericCellState airState(qMax(0.0, initialAirTemperature), airHeatCapacity);
+        // Берём копию состояния поверхности, чтобы не менять расчётную температуру карты
+        // при оценке теплообмена с воздухом.
+        SurfacePointState surfaceCopy = surfaceState;
+        const double couplingScale = qBound(0.0, pressureAtm, 1.0);
+        SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K * couplingScale);
+        coupler.exchangeSensibleHeat(surfaceCopy, airState, timeStepSeconds);
+        return airState.airTemperatureKelvin();
+    }
+
     void applySurfaceTemperatureRangeToViews(double minTemperature, double maxTemperature) {
         if (surfaceMapWidget_) {
             surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
@@ -2300,6 +2335,12 @@ private:
         }
         if (surfaceGlobeWidget_) {
             surfaceGlobeWidget_->setMapMode(mode);
+        }
+        if (mode == SurfaceMapMode::Temperature && hasSurfaceTemperatureRange_) {
+            applySurfaceTemperatureRangeToViews(surfaceMinTemperatureK_, surfaceMaxTemperatureK_);
+        } else if (mode == SurfaceMapMode::AirTemperature && hasSurfaceAirTemperatureRange_) {
+            applySurfaceTemperatureRangeToViews(surfaceMinAirTemperatureK_,
+                                                surfaceMaxAirTemperatureK_);
         }
         refreshSurfaceLegend();
     }
@@ -2389,6 +2430,7 @@ private:
         if (surfaceGrid_.points().isEmpty()) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
             return;
@@ -2398,6 +2440,7 @@ private:
         if (!stateDefaults) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
             return;
@@ -2448,8 +2491,13 @@ private:
         bool hasTemperatureRange = true;
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
+        double minAirTemperature = std::numeric_limits<double>::max();
+        double maxAirTemperature = std::numeric_limits<double>::lowest();
         QVector<double> blendedInsolations;
         blendedInsolations.reserve(surfaceGrid_.points().size());
+        QVector<double> baselineAirTemperatures;
+        baselineAirTemperatures.reserve(surfaceGrid_.points().size());
+        const double timeStepSeconds = 3600.0;
         if (!summarySource && !segmentSource) {
             const double fallbackInsolation =
                 (lastSolarConstant_ > 0.0) ? (lastSolarConstant_ / 4.0) : 0.0;
@@ -2460,6 +2508,7 @@ private:
                 const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
                 const double albedo = qMax(materialAlbedo, cloudAlbedo);
                 point.temperatureK = stateDefaults->minTemperatureKelvin;
+                point.airTemperatureK = point.temperatureK;
                 point.state = SurfacePointState(point.temperatureK,
                                                 albedo,
                                                 stateDefaults->greenhouseOpacity,
@@ -2467,6 +2516,7 @@ private:
                                                 material,
                                                 stateDefaults->subsurfaceSettings);
                 blendedInsolations.push_back(fallbackInsolation);
+                baselineAirTemperatures.push_back(point.temperatureK);
             }
             hasTemperatureRange = false;
         } else {
@@ -2509,8 +2559,6 @@ private:
             }
             // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
             const double globalAverageInsolation = segmentSolarConstant / 4.0;
-            const double timeStepSeconds = 3600.0;
-
             auto interpolateBaselineTemperature = [summarySource, segmentSource](double latitudeDeg) {
                 // Базовая температура зависит от широты и используется как старт для мгновенного шага.
                 if (summarySource) {
@@ -2578,6 +2626,7 @@ private:
                 const double albedo = qMax(materialAlbedo, cloudAlbedo);
                 const double baselineTemperature =
                     interpolateBaselineTemperature(point.latitudeDeg);
+                baselineAirTemperatures.push_back(baselineTemperature);
                 const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
                 const double cosZenith =
                     point.sinLatitude * sinDeclination +
@@ -2638,6 +2687,18 @@ private:
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel);
             point.state.setGreenhouseOpacity(localGreenhouseOpacity);
+            const double initialAirTemperature =
+                (i < baselineAirTemperatures.size())
+                    ? baselineAirTemperatures.at(i)
+                    : point.temperatureK;
+            point.airTemperatureK =
+                estimateAirTemperatureKelvin(point.state,
+                                             point.pressureAtm,
+                                             gravity,
+                                             initialAirTemperature,
+                                             timeStepSeconds);
+            minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
+            maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
 
@@ -2647,6 +2708,14 @@ private:
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+        }
+        if (hasTemperatureRange && minAirTemperature <= maxAirTemperature) {
+            if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
+                applySurfaceTemperatureRangeToViews(minAirTemperature, maxAirTemperature);
+            }
+            updateSurfaceAirTemperatureLegend(true, minAirTemperature, maxAirTemperature);
+        } else {
+            updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
         }
         if (minPressureAtm <= maxPressureAtm) {
             applySurfacePressureRangeToViews(minPressureAtm, maxPressureAtm);
@@ -2877,6 +2946,8 @@ private:
 
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
+        double minAirTemperature = std::numeric_limits<double>::max();
+        double maxAirTemperature = std::numeric_limits<double>::lowest();
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             point.state.setTemperatureKelvin(advectedTemperatures.at(i));
@@ -2884,6 +2955,16 @@ private:
             point.temperatureK = point.state.temperatureKelvin();
             minTemperature = qMin(minTemperature, point.temperatureK);
             maxTemperature = qMax(maxTemperature, point.temperatureK);
+            const double initialAirTemperature =
+                (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
+            point.airTemperatureK =
+                estimateAirTemperatureKelvin(point.state,
+                                             point.pressureAtm,
+                                             gravity,
+                                             initialAirTemperature,
+                                             timeStepSeconds);
+            minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
+            maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
 
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
@@ -2895,6 +2976,14 @@ private:
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+        }
+        if (minAirTemperature <= maxAirTemperature) {
+            if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
+                applySurfaceTemperatureRangeToViews(minAirTemperature, maxAirTemperature);
+            }
+            updateSurfaceAirTemperatureLegend(true, minAirTemperature, maxAirTemperature);
+        } else {
+            updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
         }
         if (minPressureAtm <= maxPressureAtm) {
             applySurfacePressureRangeToViews(minPressureAtm, maxPressureAtm);
@@ -2919,6 +3008,19 @@ private:
             surfaceMaxTemperatureK_ = maxTemperature;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Temperature) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceAirTemperatureLegend(bool hasRange,
+                                           double minTemperature,
+                                           double maxTemperature) {
+        hasSurfaceAirTemperatureRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinAirTemperatureK_ = minTemperature;
+            surfaceMaxAirTemperatureK_ = maxTemperature;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
             refreshSurfaceLegend();
         }
     }
@@ -2997,6 +3099,30 @@ private:
             if (temperatureScaleWidget_) {
                 temperatureScaleWidget_->setTemperatureRange(surfaceMinTemperatureK_,
                                                              surfaceMaxTemperatureK_);
+            }
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
+            }
+            if (!hasSurfaceAirTemperatureRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (temperatureScaleWidget_) {
+                    temperatureScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 K").arg(locale.toString(surfaceMinAirTemperatureK_, 'f', 1)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 K").arg(locale.toString(surfaceMaxAirTemperatureK_, 'f', 1)));
+            if (temperatureScaleWidget_) {
+                temperatureScaleWidget_->setTemperatureRange(surfaceMinAirTemperatureK_,
+                                                             surfaceMaxAirTemperatureK_);
             }
             return;
         }

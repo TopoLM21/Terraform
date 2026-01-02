@@ -14,6 +14,7 @@ struct SurfacePoint {
     double cosLatitude = 1.0;
     double radiusKm = 0.0;
     double temperatureK = 0.0;
+    double airTemperatureK = 0.0;
     // Состояние хранится отдельно для каждой точки, чтобы учитывать локальную
     // тепловую инерцию и парниковую поправку без глобального пересчёта.
     SurfacePointState state;
