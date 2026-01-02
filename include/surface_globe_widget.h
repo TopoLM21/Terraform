@@ -15,6 +15,7 @@ public:
 
     void setGrid(const PlanetSurfaceGrid *grid);
     void setMapMode(SurfaceMapMode mode);
+    void setSubsurfaceLayerIndex(int layerIndex);
     void setTemperatureRange(double minK, double maxK);
     void setWindRange(double minMps, double maxMps);
     void setPressureRange(double minAtm, double maxAtm);
@@ -39,6 +40,7 @@ private:
     QColor heightToColor(double heightKm) const;
     QColor windToColor(double speedMps) const;
     QColor pressureToColor(double pressureAtm) const;
+    double subsurfaceLayerTemperature(const SurfacePoint &point) const;
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
     QVector3D applyRotation(const QVector3D &v) const;
 
@@ -52,6 +54,7 @@ private:
     double maxWindSpeedMps_ = 50.0;
     double minPressureAtm_ = 0.0;
     double maxPressureAtm_ = 2.0;
+    int subsurfaceLayerIndex_ = 0;
     float yawDeg_ = 0.0f;
     float pitchDeg_ = 0.0f;
     QPoint lastMousePos_;

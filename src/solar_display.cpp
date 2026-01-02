@@ -632,6 +632,8 @@ public:
         surfaceMapModeComboBox_ = new QComboBox(this);
         surfaceMapModeComboBox_->addItem(QStringLiteral("Температура поверхности"),
                                          static_cast<int>(SurfaceMapMode::Temperature));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура подповерхности"),
+                                         static_cast<int>(SurfaceMapMode::SubsurfaceLayer));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Температура воздуха"),
                                          static_cast<int>(SurfaceMapMode::AirTemperature));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Высота"),
@@ -640,6 +642,16 @@ public:
                                          static_cast<int>(SurfaceMapMode::Wind));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Давление"),
                                          static_cast<int>(SurfaceMapMode::Pressure));
+        subsurfaceLayerIndexSpinBox_ = new QSpinBox(this);
+        subsurfaceLayerIndexSpinBox_->setRange(0, qMax(0, subsurfaceLayersSpinBox_->value() - 1));
+        subsurfaceLayerIndexSpinBox_->setValue(0);
+        subsurfaceLayerIndexSpinBox_->setEnabled(false);
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setSubsurfaceLayerIndex(subsurfaceLayerIndexSpinBox_->value());
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setSubsurfaceLayerIndex(subsurfaceLayerIndexSpinBox_->value());
+        }
         surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
         surfaceViewToggleButton_->setCheckable(true);
         surfaceMarkupCheckBox_ = new QCheckBox(QStringLiteral("Разметка"), this);
@@ -702,6 +714,8 @@ public:
         surfaceControlLayout->addWidget(surfaceSeamlessCheckBox_);
         surfaceControlLayout->addWidget(new QLabel(QStringLiteral("Карта:"), this));
         surfaceControlLayout->addWidget(surfaceMapModeComboBox_);
+        surfaceControlLayout->addWidget(new QLabel(QStringLiteral("Слой:"), this));
+        surfaceControlLayout->addWidget(subsurfaceLayerIndexSpinBox_);
         surfaceControlLayout->addWidget(surfaceViewToggleButton_);
         surfaceControlLayout->addWidget(surfaceMarkupCheckBox_);
         surfaceControlLayout->addStretch();
@@ -925,7 +939,17 @@ public:
                     applySurfaceMapMode(mode);
                 });
 
-        const auto onSubsurfaceChanged = [this]() {
+        const auto updateSubsurfaceLayerRange = [this]() {
+            if (!subsurfaceLayerIndexSpinBox_ || !subsurfaceLayersSpinBox_) {
+                return;
+            }
+            const int layerCount = qMax(1, subsurfaceLayersSpinBox_->value());
+            subsurfaceLayerIndexSpinBox_->setRange(0, layerCount - 1);
+            subsurfaceLayerIndexSpinBox_->setValue(
+                qBound(0, subsurfaceLayerIndexSpinBox_->value(), layerCount - 1));
+        };
+        const auto onSubsurfaceChanged = [this, updateSubsurfaceLayerRange]() {
+            updateSubsurfaceLayerRange();
             clearTemperatureCache();
             updateTemperaturePlot();
             updateSurfaceGridTemperatures();
@@ -938,6 +962,18 @@ public:
                 [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
         connect(subsurfaceBoundaryComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [onSubsurfaceChanged](int) { onSubsurfaceChanged(); });
+
+        connect(subsurfaceLayerIndexSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this](int value) {
+                    subsurfaceLayerIndex_ = qMax(0, value);
+                    if (surfaceMapWidget_) {
+                        surfaceMapWidget_->setSubsurfaceLayerIndex(subsurfaceLayerIndex_);
+                    }
+                    if (surfaceGlobeWidget_) {
+                        surfaceGlobeWidget_->setSubsurfaceLayerIndex(subsurfaceLayerIndex_);
+                    }
+                    updateSurfaceSubsurfaceLegendFromGrid();
+                });
 
         connect(surfaceViewToggleButton_, &QPushButton::toggled, this, [this](bool checked) {
             if (!surfaceViewStack_) {
@@ -1130,6 +1166,7 @@ private:
     QComboBox *surfaceMapModeComboBox_ = nullptr;
     QPushButton *surfaceViewToggleButton_ = nullptr;
     QCheckBox *surfaceMarkupCheckBox_ = nullptr;
+    QSpinBox *subsurfaceLayerIndexSpinBox_ = nullptr;
     QSpinBox *subsurfaceLayersSpinBox_ = nullptr;
     QDoubleSpinBox *subsurfaceTopThicknessSpinBox_ = nullptr;
     QDoubleSpinBox *subsurfaceDepthSpinBox_ = nullptr;
@@ -1162,6 +1199,10 @@ private:
     double surfaceMinTemperatureK_ = 0.0;
     double surfaceMaxTemperatureK_ = 0.0;
     bool hasSurfaceTemperatureRange_ = false;
+    double surfaceMinSubsurfaceTemperatureK_ = 0.0;
+    double surfaceMaxSubsurfaceTemperatureK_ = 0.0;
+    bool hasSurfaceSubsurfaceTemperatureRange_ = false;
+    int subsurfaceLayerIndex_ = 0;
     double surfaceMinAirTemperatureK_ = 0.0;
     double surfaceMaxAirTemperatureK_ = 0.0;
     bool hasSurfaceAirTemperatureRange_ = false;
@@ -2367,8 +2408,15 @@ private:
         if (surfaceGlobeWidget_) {
             surfaceGlobeWidget_->setMapMode(mode);
         }
+        if (subsurfaceLayerIndexSpinBox_) {
+            subsurfaceLayerIndexSpinBox_->setEnabled(mode == SurfaceMapMode::SubsurfaceLayer);
+        }
         if (mode == SurfaceMapMode::Temperature && hasSurfaceTemperatureRange_) {
             applySurfaceTemperatureRangeToViews(surfaceMinTemperatureK_, surfaceMaxTemperatureK_);
+        } else if (mode == SurfaceMapMode::SubsurfaceLayer &&
+                   hasSurfaceSubsurfaceTemperatureRange_) {
+            applySurfaceTemperatureRangeToViews(surfaceMinSubsurfaceTemperatureK_,
+                                                surfaceMaxSubsurfaceTemperatureK_);
         } else if (mode == SurfaceMapMode::AirTemperature && hasSurfaceAirTemperatureRange_) {
             applySurfaceTemperatureRangeToViews(surfaceMinAirTemperatureK_,
                                                 surfaceMaxAirTemperatureK_);
@@ -2461,6 +2509,7 @@ private:
         if (surfaceGrid_.points().isEmpty()) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceSubsurfaceLegendFromGrid();
             updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
@@ -2471,6 +2520,7 @@ private:
         if (!stateDefaults) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceSubsurfaceLegendFromGrid();
             updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
@@ -2757,6 +2807,7 @@ private:
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
         }
+        updateSurfaceSubsurfaceLegendFromGrid();
         if (hasTemperatureRange && minAirTemperature <= maxAirTemperature) {
             if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
                 applySurfaceTemperatureRangeToViews(minAirTemperature, maxAirTemperature);
@@ -3042,6 +3093,7 @@ private:
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
         }
+        updateSurfaceSubsurfaceLegendFromGrid();
         if (minAirTemperature <= maxAirTemperature) {
             if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
                 applySurfaceTemperatureRangeToViews(minAirTemperature, maxAirTemperature);
@@ -3073,6 +3125,40 @@ private:
             surfaceMaxTemperatureK_ = maxTemperature;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Temperature) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceSubsurfaceLegendFromGrid() {
+        if (surfaceGrid_.points().isEmpty()) {
+            hasSurfaceSubsurfaceTemperatureRange_ = false;
+            surfaceMinSubsurfaceTemperatureK_ = 0.0;
+            surfaceMaxSubsurfaceTemperatureK_ = 0.0;
+            if (surfaceMapMode_ == SurfaceMapMode::SubsurfaceLayer) {
+                refreshSurfaceLegend();
+            }
+            return;
+        }
+
+        double minTemperature = std::numeric_limits<double>::max();
+        double maxTemperature = std::numeric_limits<double>::lowest();
+        for (const auto &point : surfaceGrid_.points()) {
+            const auto &profile = point.state.solver().temperatures();
+            const double value = profile.isEmpty()
+                ? point.temperatureK
+                : profile.at(qBound(0, subsurfaceLayerIndex_, profile.size() - 1));
+            minTemperature = qMin(minTemperature, value);
+            maxTemperature = qMax(maxTemperature, value);
+        }
+
+        hasSurfaceSubsurfaceTemperatureRange_ = minTemperature <= maxTemperature;
+        surfaceMinSubsurfaceTemperatureK_ = minTemperature;
+        surfaceMaxSubsurfaceTemperatureK_ = maxTemperature;
+        if (surfaceMapMode_ == SurfaceMapMode::SubsurfaceLayer) {
+            if (hasSurfaceSubsurfaceTemperatureRange_) {
+                applySurfaceTemperatureRangeToViews(surfaceMinSubsurfaceTemperatureK_,
+                                                    surfaceMaxSubsurfaceTemperatureK_);
+            }
             refreshSurfaceLegend();
         }
     }
@@ -3164,6 +3250,32 @@ private:
             if (temperatureScaleWidget_) {
                 temperatureScaleWidget_->setTemperatureRange(surfaceMinTemperatureK_,
                                                              surfaceMaxTemperatureK_);
+            }
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::SubsurfaceLayer) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
+            }
+            if (!hasSurfaceSubsurfaceTemperatureRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (temperatureScaleWidget_) {
+                    temperatureScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 K")
+                    .arg(locale.toString(surfaceMinSubsurfaceTemperatureK_, 'f', 1)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 K")
+                    .arg(locale.toString(surfaceMaxSubsurfaceTemperatureK_, 'f', 1)));
+            if (temperatureScaleWidget_) {
+                temperatureScaleWidget_->setTemperatureRange(surfaceMinSubsurfaceTemperatureK_,
+                                                             surfaceMaxSubsurfaceTemperatureK_);
             }
             return;
         }
