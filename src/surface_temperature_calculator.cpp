@@ -26,9 +26,11 @@ constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kDailyTimeSteps = 96;
 constexpr int kSpinUpDays = 6;
 constexpr double kDryAirSpecificHeatJPerKgK = 1004.0;
+constexpr double kDryAirGasConstantJPerKgK = 287.05;
 constexpr double kEarthGravityMPerS2 = 9.80665;
 constexpr double kStandardPressurePa = 101325.0;
 constexpr double kDefaultHeatTransferWPerM2K = 8.0;
+constexpr double kDefaultAirLayerThicknessMeters = 200.0;
 
 struct TraceGasSpec {
     const char *id;
@@ -477,9 +479,17 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                                       material_,
                                       subsurfaceSettings_);
         const double gravity = (surfaceGravity_ > 0.0) ? surfaceGravity_ : kEarthGravityMPerS2;
-        const double columnMassKgPerM2 =
-            (pressureAtm > 0.0) ? (pressureAtm * kStandardPressurePa / gravity) : 0.0;
-        const double airHeatCapacity = columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
+        const double pressurePa = (pressureAtm > 0.0) ? (pressureAtm * kStandardPressurePa) : 0.0;
+        const double airTemperatureForDensity = qMax(1.0, state.temperatureKelvin());
+        // Модель приземного слоя для «обитаемости»: используем массу тонкого слоя воздуха,
+        // а не всей атмосферной колонки.
+        // rho = P / (R * T_air); m_layer = rho * h_layer.
+        const double airDensityKgPerM3 =
+            (pressurePa > 0.0)
+                ? (pressurePa / (kDryAirGasConstantJPerKgK * airTemperatureForDensity))
+                : 0.0;
+        const double airLayerMassKgPerM2 = airDensityKgPerM3 * kDefaultAirLayerThicknessMeters;
+        const double airHeatCapacity = airLayerMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
         AtmosphericCellState airState(tBase, airHeatCapacity);
         // Коэффициент теплообмена h_c в Вт/(м^2·К) связывает поверхность и воздух.
         // В реальности он зависит от ветра, давления и турбулентности; здесь масштабируем
