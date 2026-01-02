@@ -642,6 +642,9 @@ public:
                                          static_cast<int>(SurfaceMapMode::Wind));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Давление"),
                                          static_cast<int>(SurfaceMapMode::Pressure));
+        subsurfaceLayersSpinBox_ = new QSpinBox(this);
+        subsurfaceLayersSpinBox_->setRange(1, 200);
+        subsurfaceLayersSpinBox_->setValue(24);
         subsurfaceLayerIndexSpinBox_ = new QSpinBox(this);
         subsurfaceLayerIndexSpinBox_->setRange(0, qMax(0, subsurfaceLayersSpinBox_->value() - 1));
         subsurfaceLayerIndexSpinBox_->setValue(0);
@@ -662,9 +665,6 @@ public:
                 surfaceGlobeWidget_->setMarkupVisible(checked);
             }
         });
-        subsurfaceLayersSpinBox_ = new QSpinBox(this);
-        subsurfaceLayersSpinBox_->setRange(1, 200);
-        subsurfaceLayersSpinBox_->setValue(24);
         subsurfaceTopThicknessSpinBox_ = new QDoubleSpinBox(this);
         subsurfaceTopThicknessSpinBox_->setRange(0.001, 10.0);
         subsurfaceTopThicknessSpinBox_->setDecimals(3);
