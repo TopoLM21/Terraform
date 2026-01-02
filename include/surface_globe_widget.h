@@ -19,6 +19,7 @@ public:
     void setWindRange(double minMps, double maxMps);
     void setPressureRange(double minAtm, double maxAtm);
     void setMarkupVisible(bool visible);
+    void setAxisTiltDegrees(double tiltDegrees);
 
 signals:
     void pointClicked(int pointIndex);
@@ -58,4 +59,5 @@ private:
     QVector<ProjectedPoint> projectedPoints_;
     double lastPointRadiusPx_ = 0.0;
     bool markupVisible_ = false;
+    double axisTiltDegrees_ = 0.0;
 };

@@ -179,6 +179,14 @@ void SurfaceGlobeWidget::setMarkupVisible(bool visible) {
     update();
 }
 
+void SurfaceGlobeWidget::setAxisTiltDegrees(double tiltDegrees) {
+    if (qFuzzyCompare(axisTiltDegrees_, tiltDegrees)) {
+        return;
+    }
+    axisTiltDegrees_ = tiltDegrees;
+    update();
+}
+
 void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event)
     QPainter painter(this);
@@ -316,10 +324,6 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         painter.setBrush(Qt::NoBrush);
 
         const int lineSegments = 72;
-        const QVector<QVector3D> equator = buildLatitudeLine(0.0, lineSegments);
-        const QVector<QVector3D> meridianA = buildLongitudeLine(0.0, lineSegments);
-        const QVector<QVector3D> meridianB = buildLongitudeLine(90.0, lineSegments);
-
         const auto drawLineStrip = [&](const QVector<QVector3D> &line) {
             if (line.size() < 2) {
                 return;
@@ -339,22 +343,47 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             }
         };
 
-        drawLineStrip(equator);
-        drawLineStrip(meridianB);
+        const int gridStepDeg = 30;
+        for (int latitude = -90 + gridStepDeg; latitude < 90; latitude += gridStepDeg) {
+            drawLineStrip(buildLatitudeLine(latitude, lineSegments));
+        }
+        for (int longitude = 0; longitude < 360; longitude += gridStepDeg) {
+            drawLineStrip(buildLongitudeLine(longitude, lineSegments));
+        }
 
         // Линия через полюса выделена отдельно, чтобы отличаться от прочей разметки.
         QPen polarPen(QColor(180, 220, 255, 200), qMax(1.0, sphereRadius * 0.0045));
         polarPen.setCapStyle(Qt::RoundCap);
         painter.setPen(polarPen);
-        drawLineStrip(meridianA);
+        drawLineStrip(buildLongitudeLine(0.0, lineSegments));
 
-        // Ось вращения рисуем как прямую через центр сферы.
-        const QVector3D rotationAxis = applyRotation(QVector3D(0.0f, 1.0f, 0.0f));
-        QPen axisPen(QColor(255, 220, 128, 200), qMax(1.0, sphereRadius * 0.005));
-        axisPen.setCapStyle(Qt::RoundCap);
-        painter.setPen(axisPen);
-        const QVector3D axisStart = -rotationAxis;
-        const QVector3D axisEnd = rotationAxis;
+        // Географическая ось (истинный полюс) — через широты ±90°.
+        const QVector3D geographicAxis = applyRotation(latLonToCartesian(90.0, 0.0));
+        QPen geographicAxisPen(QColor(120, 200, 255, 200), qMax(1.0, sphereRadius * 0.0045));
+        geographicAxisPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(geographicAxisPen);
+        const QVector3D geographicStart = -geographicAxis;
+        const QVector3D geographicEnd = geographicAxis;
+        ClippedSegment geographicSegment;
+        if (clipLineSegmentAgainstZ(geographicStart, geographicEnd, &geographicSegment)) {
+            const QPointF p1(center.x() + geographicSegment.start.x() * sphereRadius,
+                             center.y() - geographicSegment.start.y() * sphereRadius);
+            const QPointF p2(center.x() + geographicSegment.end.x() * sphereRadius,
+                             center.y() - geographicSegment.end.y() * sphereRadius);
+            painter.drawLine(p1, p2);
+        }
+
+        // Ось вращения: поворачиваем географическую ось на угол обликости вокруг оси X,
+        // моделируя физический наклон оси вращения относительно истинного полюса.
+        QMatrix4x4 obliquityRotation;
+        obliquityRotation.rotate(static_cast<float>(axisTiltDegrees_), 1.0f, 0.0f, 0.0f);
+        const QVector3D tiltedAxis =
+            applyRotation(obliquityRotation.mapVector(latLonToCartesian(90.0, 0.0)));
+        QPen rotationAxisPen(QColor(255, 180, 120, 220), qMax(1.0, sphereRadius * 0.0055));
+        rotationAxisPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(rotationAxisPen);
+        const QVector3D axisStart = -tiltedAxis;
+        const QVector3D axisEnd = tiltedAxis;
         ClippedSegment axisSegment;
         if (clipLineSegmentAgainstZ(axisStart, axisEnd, &axisSegment)) {
             const QPointF p1(center.x() + axisSegment.start.x() * sphereRadius,
