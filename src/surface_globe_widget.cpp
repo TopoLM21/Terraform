@@ -227,6 +227,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         // Освещение отключено по требованию отображения без теней и подсветок.
         if (mapMode_ == SurfaceMapMode::Temperature) {
             globePoint.color = temperatureToColor(point.temperatureK);
+        } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+            globePoint.color = temperatureToColor(point.airTemperatureK);
         } else if (mapMode_ == SurfaceMapMode::Height) {
             globePoint.color = heightToColor(point.heightKm);
         } else if (mapMode_ == SurfaceMapMode::Pressure) {
@@ -283,6 +285,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             const SurfacePoint &cellPoint = grid_->points().at(cell.pointIndex);
             if (mapMode_ == SurfaceMapMode::Temperature) {
                 cellDraw.color = temperatureToColor(cellPoint.temperatureK);
+            } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                cellDraw.color = temperatureToColor(cellPoint.airTemperatureK);
             } else if (mapMode_ == SurfaceMapMode::Height) {
                 cellDraw.color = heightToColor(cellPoint.heightKm);
             } else if (mapMode_ == SurfaceMapMode::Pressure) {
