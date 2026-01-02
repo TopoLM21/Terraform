@@ -44,6 +44,10 @@ void SurfacePointState::setGreenhouseOpacity(double greenhouseOpacity) {
     greenhouseOpacity_ = qBound(0.0, greenhouseOpacity, 0.999);
 }
 
+const SubsurfaceTemperatureSolver &SurfacePointState::solver() const {
+    return solver_;
+}
+
 double SurfacePointState::absorbedFlux(double solarIrradiance) const {
     return solarIrradiance * (1.0 - albedo_);
 }

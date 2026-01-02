@@ -153,6 +153,14 @@ void SurfaceGlobeWidget::setMapMode(SurfaceMapMode mode) {
     update();
 }
 
+void SurfaceGlobeWidget::setSubsurfaceLayerIndex(int layerIndex) {
+    if (subsurfaceLayerIndex_ == layerIndex) {
+        return;
+    }
+    subsurfaceLayerIndex_ = qMax(0, layerIndex);
+    update();
+}
+
 void SurfaceGlobeWidget::setTemperatureRange(double minK, double maxK) {
     minTemperatureK_ = minK;
     maxTemperatureK_ = maxK;
@@ -227,6 +235,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         // Освещение отключено по требованию отображения без теней и подсветок.
         if (mapMode_ == SurfaceMapMode::Temperature) {
             globePoint.color = temperatureToColor(point.temperatureK);
+        } else if (mapMode_ == SurfaceMapMode::SubsurfaceLayer) {
+            globePoint.color = temperatureToColor(subsurfaceLayerTemperature(point));
         } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
             globePoint.color = temperatureToColor(point.airTemperatureK);
         } else if (mapMode_ == SurfaceMapMode::Height) {
@@ -285,6 +295,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             const SurfacePoint &cellPoint = grid_->points().at(cell.pointIndex);
             if (mapMode_ == SurfaceMapMode::Temperature) {
                 cellDraw.color = temperatureToColor(cellPoint.temperatureK);
+            } else if (mapMode_ == SurfaceMapMode::SubsurfaceLayer) {
+                cellDraw.color = temperatureToColor(subsurfaceLayerTemperature(cellPoint));
             } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
                 cellDraw.color = temperatureToColor(cellPoint.airTemperatureK);
             } else if (mapMode_ == SurfaceMapMode::Height) {
@@ -419,6 +431,15 @@ QColor SurfaceGlobeWidget::pressureToColor(double pressureAtm) const {
                                 (maxPressureAtm_ - minPressureAtm_),
                             1.0);
     return temperatureColorForRatio(t);
+}
+
+double SurfaceGlobeWidget::subsurfaceLayerTemperature(const SurfacePoint &point) const {
+    const auto &profile = point.state.solver().temperatures();
+    if (profile.isEmpty()) {
+        return point.temperatureK;
+    }
+    const int index = qBound(0, subsurfaceLayerIndex_, profile.size() - 1);
+    return profile.at(index);
 }
 
 void SurfaceGlobeWidget::mousePressEvent(QMouseEvent *event) {

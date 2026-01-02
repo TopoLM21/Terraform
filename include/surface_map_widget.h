@@ -17,6 +17,7 @@ public:
 
     void setGrid(const PlanetSurfaceGrid *grid);
     void setMapMode(SurfaceMapMode mode);
+    void setSubsurfaceLayerIndex(int layerIndex);
     void setTemperatureRange(double minK, double maxK);
     void setWindRange(double minMps, double maxMps);
     void setPressureRange(double minAtm, double maxAtm);
@@ -39,6 +40,7 @@ private:
     QRgb heightToColor(double heightKm) const;
     QRgb windToColor(double speedMps) const;
     QRgb pressureToColor(double pressureAtm) const;
+    double subsurfaceLayerTemperature(const SurfacePoint &point) const;
     int pointIdAt(const QPoint &pixel) const;
     QString formatPointTooltip(const SurfacePoint &point) const;
     double pointRadiusPx(int pointCount, const QSize &imageSize) const;
@@ -59,6 +61,7 @@ private:
     double maxWindSpeedMps_ = 50.0;
     double minPressureAtm_ = 0.0;
     double maxPressureAtm_ = 2.0;
+    int subsurfaceLayerIndex_ = 0;
     bool interpolationEnabled_ = false;
     double renderScale_ = 1.0;
     int neighborCount_ = 8;
