@@ -3,6 +3,7 @@
 #include "atmosphere_model.h"
 #include "orbit_segment_calculator.h"
 #include "planet_presets.h"
+#include "radiation_model.h"
 #include "rotation_mode.h"
 #include "subsurface_temperature_solver.h"
 
@@ -54,7 +55,7 @@ public:
                                  double surfaceGravity = 0.0,
                                  double planetRadiusKm = 6371.0,
                                  bool useAtmosphericModel = false,
-                                 bool useMultiLayerRadiation = false,
+                                 RadiationModelType radiationModelType = RadiationModelType::Fast,
                                  int meridionalTransportSteps = 8,
                                  HeightSourceType heightSourceType = HeightSourceType::Procedural,
                                  const QString &heightmapPath = QString(),
@@ -125,7 +126,7 @@ private:
     double surfaceGravity_ = 0.0;
     double planetRadiusKm_ = 6371.0;
     bool useAtmosphericModel_ = false;
-    bool useMultiLayerRadiation_ = false;
+    RadiationModelType radiationModelType_ = RadiationModelType::Fast;
     int meridionalTransportSteps_ = 8;
     HeightSourceType heightSourceType_ = HeightSourceType::Procedural;
     QString heightmapPath_;

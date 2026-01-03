@@ -16,11 +16,11 @@ constexpr double kShortwaveToLongwaveRatio = 0.12;
 AtmosphericRadiationModel::AtmosphericRadiationModel(const AtmosphereComposition &composition,
                                                      double pressureAtm,
                                                      double baseTemperatureKelvin,
-                                                     bool useMultiLayerRadiation)
+                                                     RadiationModelType radiationModelType)
     : composition_(composition),
       pressureAtm_(pressureAtm),
       baseTemperatureKelvin_(baseTemperatureKelvin),
-      useMultiLayerRadiation_(useMultiLayerRadiation) {
+      radiationModelType_(radiationModelType) {
     computeOpticalDepths();
 }
 
@@ -71,7 +71,7 @@ double AtmosphericRadiationModel::incomingTransmission() const {
     if (shortwaveOpticalDepth_ <= 0.0) {
         return 1.0;
     }
-    if (!useMultiLayerRadiation_) {
+    if (radiationModelType_ == RadiationModelType::Fast) {
         // Закон Бугера-Ламберта: I = I0 * exp(-tau).
         return std::exp(-shortwaveOpticalDepth_);
     }
@@ -84,7 +84,7 @@ double AtmosphericRadiationModel::outgoingTransmission() const {
     if (effectiveOpticalDepth_ <= 0.0) {
         return 1.0;
     }
-    if (!useMultiLayerRadiation_) {
+    if (radiationModelType_ == RadiationModelType::Fast) {
         // Эффективная прозрачность в длинноволновом диапазоне.
         return std::exp(-effectiveOpticalDepth_);
     }
