@@ -38,7 +38,13 @@ constexpr std::array<OverlapSpec, 4> kOverlapSpecs = {{
 }};
 
 constexpr double kReferenceTemperatureKelvin = 288.0;
+constexpr double kReferencePressureAtm = 1.0;
 constexpr double kSaturationExponent = 0.65;
+constexpr double kPressureBroadeningExponent = 0.35;
+constexpr double kTemperaturePower = 0.45;
+constexpr double kTemperatureLinearFactor = 0.35;
+constexpr double kCo2ContinuumCoefficient = 0.35;
+constexpr double kCo2ContinuumTemperaturePower = -0.2;
 }  // namespace
 
 AtmosphericRadiationModel::AtmosphericRadiationModel(const AtmosphereComposition &composition,
@@ -60,8 +66,20 @@ void AtmosphericRadiationModel::computeOpticalDepths() {
     QHash<QString, double> gasOpticalDepths;
     gasOpticalDepths.reserve(static_cast<int>(kGasOpticalSpecs.size()));
 
+    const double temperatureRatio =
+        qMax(1.0, baseTemperatureKelvin_) / kReferenceTemperatureKelvin;
+    // Температурная зависимость сильнее, чем просто sqrt(T): учитываем степенную часть
+    // и мягкую линейную поправку, отражающую рост ширины распределения уровней.
     const double temperatureScale =
-        std::sqrt(qMax(1.0, baseTemperatureKelvin_) / kReferenceTemperatureKelvin);
+        qBound(0.2,
+               std::pow(temperatureRatio, kTemperaturePower) *
+                   (1.0 + kTemperatureLinearFactor * (temperatureRatio - 1.0)),
+               3.0);
+    // Давление расширяет спектральные линии (pressure broadening),
+    // увеличивая эффективное поглощение в крыльях линий.
+    const double pressureBroadening =
+        std::pow(qMax(0.05, pressureAtm_ / kReferencePressureAtm), kPressureBroadeningExponent);
+    double continuumOpticalDepth = 0.0;
 
     const auto fractions = composition_.fractions();
     for (const auto &fraction : fractions) {
@@ -88,9 +106,21 @@ void AtmosphericRadiationModel::computeOpticalDepths() {
         const double saturation =
             std::pow(partialPressureAtm / (partialPressureAtm + it->saturationPressureAtm),
                      kSaturationExponent);
-        const double opticalDepth = it->baseOpticalDepth * saturation * temperatureScale;
-        gasOpticalDepths.insert(fraction.id, opticalDepth);
-        shortwaveOpticalDepth_ += it->shortwaveShare * opticalDepth;
+        const double lineOpticalDepth =
+            it->baseOpticalDepth * saturation * temperatureScale * pressureBroadening;
+        gasOpticalDepths.insert(fraction.id, lineOpticalDepth);
+        shortwaveOpticalDepth_ += it->shortwaveShare * lineOpticalDepth;
+
+        if (fraction.id == QLatin1String("co2")) {
+            // Континуум CO2: поглощение в межлинейных областях растёт при высоком давлении
+            // из-за столкновительного (continuum) вклада. Используем квадратичную зависимость
+            // по парциальному давлению и ослабляем её при росте температуры.
+            const double continuumTemperatureScale =
+                std::pow(temperatureRatio, kCo2ContinuumTemperaturePower);
+            continuumOpticalDepth += kCo2ContinuumCoefficient *
+                                     std::pow(partialPressureAtm, 2.0) *
+                                     pressureBroadening * continuumTemperatureScale;
+        }
     }
 
     if (gasOpticalDepths.isEmpty()) {
@@ -120,7 +150,8 @@ void AtmosphericRadiationModel::computeOpticalDepths() {
     }
 
     overlapPenalty = qBound(0.05, overlapPenalty, 1.0);
-    effectiveOpticalDepth_ = combinedDepth * overlapPenalty;
+    // Итоговая оптическая толщина: линии (с перекрытием) плюс континуум CO2.
+    effectiveOpticalDepth_ = combinedDepth * overlapPenalty + continuumOpticalDepth;
     shortwaveOpticalDepth_ *= overlapPenalty;
 }
 
