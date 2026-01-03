@@ -54,6 +54,7 @@ public:
                                  double surfaceGravity = 0.0,
                                  double planetRadiusKm = 6371.0,
                                  bool useAtmosphericModel = false,
+                                 bool useMultiLayerRadiation = false,
                                  int meridionalTransportSteps = 8,
                                  HeightSourceType heightSourceType = HeightSourceType::Procedural,
                                  const QString &heightmapPath = QString(),
@@ -124,6 +125,7 @@ private:
     double surfaceGravity_ = 0.0;
     double planetRadiusKm_ = 6371.0;
     bool useAtmosphericModel_ = false;
+    bool useMultiLayerRadiation_ = false;
     int meridionalTransportSteps_ = 8;
     HeightSourceType heightSourceType_ = HeightSourceType::Procedural;
     QString heightmapPath_;
