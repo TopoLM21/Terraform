@@ -9,8 +9,6 @@
 #include <QtCore/QThread>
 #include <QtCore/QtMath>
 
-#include <algorithm>
-#include <array>
 #include <cmath>
 
 namespace {
@@ -31,23 +29,6 @@ constexpr double kEarthGravityMPerS2 = 9.80665;
 constexpr double kStandardPressurePa = 101325.0;
 constexpr double kDefaultHeatTransferWPerM2K = 8.0;
 constexpr double kDefaultAirLayerThicknessMeters = 200.0;
-
-struct TraceGasSpec {
-    const char *id;
-    double greenhousePower;
-};
-
-constexpr std::array<TraceGasSpec, 4> kTraceGases = {{
-    {"ch4", 0.5},
-    {"nh3", 1.5},
-    {"sf6", 300.0},
-    {"nf3", 250.0},
-}};
-
-
-double gasMassGigatons(const AtmosphereComposition &atmosphere, const QString &gasId) {
-    return qMax(0.0, atmosphere.massGigatons(gasId));
-}
 
 double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
     // В текущем UI нет явного управления гидросферой, поэтому применяем мягкую эвристику:
@@ -283,7 +264,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         (totalGas > 0.0)
             ? (totalGas / kEarthAtmosphereMassGt) * (surfaceGravity / 9.8) / areaScale
             : 0.0;
-    const double co2Mass = gasMassGigatons(atmosphere_, QStringLiteral("co2"));
     const double waterGigatons = estimateSurfaceWaterGigatons(material_);
     const bool hasSeaLevel = hasSeaLevel_;
     const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
@@ -295,7 +275,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     }
     potentialCoverage = qBound(0.0, potentialCoverage, 1.0);
 
-    const double colDensity = 1.0 / qMax(1.0, areaScale);
     const double albedo = qBound(0.0, material_.albedo, 1.0);
     const double baseRadiativeTemp =
         std::pow((segmentSolarConstant * (1.0 - albedo)) / (4.0 * kStefanBoltzmannConstant),
@@ -365,19 +344,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             atmosphere_,
             surfaceGravity);
 
-        // Модель оптической толщины повторяет формулы из React-кода:
-        // tau_CO2 = ln(1 + M_CO2 * colDensity * power * 0.001) * broadening,
-        // где broadening учитывает расширение линий при росте давления.
-        const double broadening = std::pow(qMax(0.5, pressureAtm * 2.0), 0.32);
-        const double baseTau =
-            std::log(1.0 + co2Mass * colDensity * 0.02 * 0.001) * broadening;
-        double traceTau = 0.0;
-        for (const auto &spec : kTraceGases) {
-            const double traceMass = gasMassGigatons(atmosphere_, QLatin1String(spec.id));
-            traceTau += (traceMass / qMax(1.0, areaScale)) * spec.greenhousePower * 1e-6 *
-                        broadening;
-        }
-
         double pressureClouds =
             pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
         const double surfaceAlbedoPre =
@@ -389,8 +355,12 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             std::pow((segmentSolarConstant * (1.0 - planetaryAlbedoPre)) /
                          (4.0 * kStefanBoltzmannConstant),
                      0.25);
+        // Базовая оценка парникового эффекта через модель оптической толщины:
+        // учитываем расширение линий, давление и температуру.
+        const AtmosphericRadiationModel preRadiationModel(atmosphere_, pressureAtm, tEffPre);
+        const double baseTau = preRadiationModel.effectiveOpticalDepth();
         const double tBasePre =
-            tEffPre * std::pow(1.0 + 0.75 * (baseTau + traceTau), 0.25);
+            tEffPre * std::pow(1.0 + 0.75 * baseTau, 0.25);
 
         double evaporation = 0.0;
         if (potentialCoverage > 0.0 && tBasePre > 263.0) {
@@ -415,8 +385,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const AtmosphericRadiationModel radiationModel(atmosphere_, pressureAtm, tBasePre);
         const double shortwaveTransmission =
             radiationModel.incomingTransmission() * cloudShortwaveTransmission;
+        // Дополнительный водяной пар (испарение) усиливает длинноволновое поглощение.
         const double waterTau = qMin(8.0, evaporation * 1.5);
-        double totalTau = baseTau + traceTau + waterTau;
+        double totalTau = radiationModel.effectiveOpticalDepth() + waterTau;
         if (!useAtmosphericModel_ && greenhouseOpacity_ > 0.0) {
             // Дополнительная непрозрачность, когда атмосферная модель выключена,
             // но задана парниковая "шторка" вручную.
