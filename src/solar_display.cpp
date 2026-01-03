@@ -101,6 +101,7 @@ constexpr int kRoleHeightSeed = Qt::UserRole + 17;
 constexpr int kRoleUseContinentsHeight = Qt::UserRole + 18;
 constexpr int kRoleHasSeaLevel = Qt::UserRole + 19;
 constexpr int kRoleFlatHeight = Qt::UserRole + 20;
+constexpr int kRoleManualGreenhouseOnTopOfAtmosphere = Qt::UserRole + 21;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -146,7 +147,8 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      double planetRadiusKm,
                                      double blendedInsolation,
                                      double manualGreenhouseOpacity,
-                                     bool useAtmosphericModel) {
+                                     bool useAtmosphericModel,
+                                     bool manualGreenhouseOnTopOfAtmosphere) {
     const double safeRadiusKm = qMax(0.1, planetRadiusKm);
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
     const double colDensity = 1.0 / qMax(1.0, areaScale);
@@ -193,9 +195,10 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     }
     const double waterTau = qMin(8.0, evaporation * 1.5);
     double totalTau = baseTau + traceTau + waterTau;
-    if (!useAtmosphericModel && manualGreenhouseOpacity > 0.0) {
-        // Дополнительная непрозрачность, когда атмосферная модель выключена,
-        // но задана парниковая "шторка" вручную.
+    if (manualGreenhouseOpacity > 0.0 &&
+        (!useAtmosphericModel || manualGreenhouseOnTopOfAtmosphere)) {
+        // Дополнительная непрозрачность: либо без атмосферной модели,
+        // либо поверх неё по явному переключателю.
         totalTau += -std::log(qMax(1e-6, 1.0 - manualGreenhouseOpacity));
     }
 
@@ -212,6 +215,7 @@ struct TemperatureCacheKey {
     double atmospherePressureAtm = 0.0;
     double surfaceGravity = 0.0;
     double greenhouseOpacity = 0.0;
+    bool manualGreenhouseOnTopOfAtmosphere = false;
     double cloudAlbedo = 0.0;
     double dayLength = 0.0;
     double referenceDistanceAU = 0.0;
@@ -243,6 +247,7 @@ struct TemperatureCacheKey {
                atmospherePressureAtm == other.atmospherePressureAtm &&
                surfaceGravity == other.surfaceGravity &&
                greenhouseOpacity == other.greenhouseOpacity &&
+               manualGreenhouseOnTopOfAtmosphere == other.manualGreenhouseOnTopOfAtmosphere &&
                cloudAlbedo == other.cloudAlbedo &&
                dayLength == other.dayLength &&
                referenceDistanceAU == other.referenceDistanceAU &&
@@ -287,6 +292,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.atmospherePressureAtm), seed);
     seed = qHash(hashDoubleBits(key.surfaceGravity), seed);
     seed = qHash(hashDoubleBits(key.greenhouseOpacity), seed);
+    seed = qHash(key.manualGreenhouseOnTopOfAtmosphere, seed);
     seed = qHash(hashDoubleBits(key.cloudAlbedo), seed);
     seed = qHash(hashDoubleBits(key.dayLength), seed);
     seed = qHash(hashDoubleBits(key.referenceDistanceAU), seed);
@@ -498,6 +504,11 @@ public:
         cloudAlbedoSpinBox_->setRange(0.0, 1.0);
         cloudAlbedoSpinBox_->setDecimals(2);
         cloudAlbedoSpinBox_->setSingleStep(0.05);
+        manualGreenhouseOnTopCheckBox_ = new QCheckBox(
+            QStringLiteral("Добавлять ручную парниковую непрозрачность поверх атмосферы"), this);
+        manualGreenhouseOnTopCheckBox_->setToolTip(
+            QStringLiteral("Если включено, значение парниковой непрозрачности добавляется\n"
+                           "к атмосферной модели и используется как дополнительный фактор."));
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
@@ -555,6 +566,7 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
         planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), flatHeightButton_);
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
+        planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
         planetControlsLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
         planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
 
@@ -795,6 +807,7 @@ public:
             syncHeightSeedWithPlanet();
             syncFlatHeightWithPlanet();
             syncCloudAlbedoWithPlanet();
+            syncManualGreenhouseOnTopWithPlanet();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
                 (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -870,6 +883,16 @@ public:
                 return;
             }
             syncPlanetCloudAlbedoWithSelection();
+            clearTemperatureCache();
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
+        });
+
+        connect(manualGreenhouseOnTopCheckBox_, &QCheckBox::toggled, this, [this](bool) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetManualGreenhouseOnTopWithSelection();
             clearTemperatureCache();
             updateTemperaturePlot();
             updateSurfaceGridTemperatures();
@@ -1104,6 +1127,7 @@ private:
     QSpinBox *heightSeedSpinBox_ = nullptr;
     QPushButton *flatHeightButton_ = nullptr;
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
+    QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
     ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
     QRadioButton *latitudeStepFastRadio_ = nullptr;
     QRadioButton *latitudeStepSlowRadio_ = nullptr;
@@ -1324,6 +1348,7 @@ private:
         syncHeightSeedWithPlanet();
         syncFlatHeightWithPlanet();
         syncCloudAlbedoWithPlanet();
+        syncManualGreenhouseOnTopWithPlanet();
         updatePlanetActions();
     }
 
@@ -1361,6 +1386,10 @@ private:
         if (cloudAlbedoSpinBox_) {
             const QSignalBlocker cloudBlocker(cloudAlbedoSpinBox_);
             cloudAlbedoSpinBox_->setValue(0.0);
+        }
+        if (manualGreenhouseOnTopCheckBox_) {
+            const QSignalBlocker greenhouseBlocker(manualGreenhouseOnTopCheckBox_);
+            manualGreenhouseOnTopCheckBox_->setChecked(false);
         }
         updatePlanetActions();
         updateTemperaturePlot();
@@ -1599,6 +1628,9 @@ private:
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
         planetComboBox_->setItemData(index, QVariant::fromValue(planet.atmosphere), kRoleAtmosphere);
         planetComboBox_->setItemData(index, planet.greenhouseOpacity, kRoleGreenhouseOpacity);
+        planetComboBox_->setItemData(index,
+                                     planet.manualGreenhouseOnTopOfAtmosphere,
+                                     kRoleManualGreenhouseOnTopOfAtmosphere);
         planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
                                      kRoleHeightSourceType);
@@ -1687,6 +1719,12 @@ private:
         cloudAlbedoInput->setDecimals(2);
         cloudAlbedoInput->setSingleStep(0.05);
 
+        auto *manualGreenhouseOnTopInput = new QCheckBox(
+            QStringLiteral("Добавлять поверх атмосферной модели"), &dialog);
+        manualGreenhouseOnTopInput->setToolTip(
+            QStringLiteral("Использовать значение парниковой непрозрачности как дополнительный\n"
+                           "фактор поверх атмосферной модели (например, для проверки гипотез)."));
+
         auto *heightSeedInput = new QSpinBox(&dialog);
         heightSeedInput->setRange(0, std::numeric_limits<int>::max());
         heightSeedInput->setValue(0);
@@ -1702,6 +1740,8 @@ private:
         formLayout->addRow(QStringLiteral("Аргумент перицентра (°):"), perihelionArgumentInput);
         formLayout->addRow(QStringLiteral("Парниковая непрозрачность (0..1):"),
                            greenhouseOpacityInput);
+        formLayout->addRow(QStringLiteral("Парниковая непрозрачность поверх атмосферы:"),
+                           manualGreenhouseOnTopInput);
         formLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoInput);
         formLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedInput);
 
@@ -1752,7 +1792,8 @@ private:
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
                 [&dialog, nameInput, axisInput, dayLengthInput, massInput, radiusInput,
                  eccentricityInput, obliquityInput, perihelionArgumentInput,
-                 greenhouseOpacityInput, cloudAlbedoInput, heightSeedInput, materialInput,
+                 greenhouseOpacityInput, manualGreenhouseOnTopInput, cloudAlbedoInput,
+                 heightSeedInput, materialInput,
                  rotationModeInput, atmosphereInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
@@ -1817,6 +1858,7 @@ private:
                     return;
                 }
             }
+            const bool manualGreenhouseOnTop = manualGreenhouseOnTopInput->isChecked();
             const double cloudAlbedo = cloudAlbedoInput->value();
 
             const int existingIndex = findPlanetIndexByName(name);
@@ -1832,7 +1874,8 @@ private:
                     : false;
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
-                                composition, greenhouseOpacity, cloudAlbedo, tidallyLocked};
+                                composition, greenhouseOpacity, manualGreenhouseOnTop,
+                                cloudAlbedo, tidallyLocked};
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
             if (existingIndex >= 0) {
@@ -1858,6 +1901,9 @@ private:
                 planetComboBox_->setItemData(existingIndex, atmosphereValue, kRoleAtmosphere);
                 planetComboBox_->setItemData(existingIndex, preset.greenhouseOpacity,
                                              kRoleGreenhouseOpacity);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.manualGreenhouseOnTopOfAtmosphere,
+                                             kRoleManualGreenhouseOnTopOfAtmosphere);
                 planetComboBox_->setItemData(existingIndex, preset.cloudAlbedo, kRoleCloudAlbedo);
                 planetComboBox_->setItemData(existingIndex,
                                              static_cast<int>(preset.heightSourceType),
@@ -1983,6 +2029,23 @@ private:
         cloudAlbedoSpinBox_->setValue(cloudAlbedo);
     }
 
+    void syncManualGreenhouseOnTopWithPlanet() {
+        if (!manualGreenhouseOnTopCheckBox_) {
+            return;
+        }
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            const QSignalBlocker blocker(manualGreenhouseOnTopCheckBox_);
+            manualGreenhouseOnTopCheckBox_->setChecked(false);
+            return;
+        }
+
+        const bool manualOnTop =
+            planetComboBox_->itemData(index, kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
+        const QSignalBlocker blocker(manualGreenhouseOnTopCheckBox_);
+        manualGreenhouseOnTopCheckBox_->setChecked(manualOnTop);
+    }
+
     void syncPlanetFlatHeightWithSelection(bool useFlatHeight) {
         const int index = planetComboBox_->currentIndex();
         if (index < 0) {
@@ -2022,6 +2085,17 @@ private:
             return;
         }
         planetComboBox_->setItemData(index, cloudAlbedoSpinBox_->value(), kRoleCloudAlbedo);
+    }
+
+    void syncPlanetManualGreenhouseOnTopWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !manualGreenhouseOnTopCheckBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(
+            index,
+            manualGreenhouseOnTopCheckBox_->isChecked(),
+            kRoleManualGreenhouseOnTopOfAtmosphere);
     }
 
     void updateRotationModeIllustration() {
@@ -2518,6 +2592,8 @@ private:
         }
         const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
         const double manualGreenhouseOpacity = stateDefaults->greenhouseOpacity;
+        const bool manualGreenhouseOnTop =
+            planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
 
         bool hasTemperatureRange = true;
         double minTemperature = std::numeric_limits<double>::max();
@@ -2723,7 +2799,8 @@ private:
                                               radiusKm,
                                               blendedInsolation,
                                               manualGreenhouseOpacity,
-                                              useAtmosphericModel);
+                                              useAtmosphericModel,
+                                              manualGreenhouseOnTop);
             point.state.setGreenhouseOpacity(localGreenhouseOpacity);
             // Воздух интегрируется по времени, иначе он будет “сбрасываться” каждый тик.
             // Поэтому используем предыдущее значение, а базу только для первичной инициализации.
@@ -2841,6 +2918,8 @@ private:
         const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
         const double manualGreenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        const bool manualGreenhouseOnTop =
+            planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
         const double cloudAlbedo =
             qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
 
@@ -2984,7 +3063,8 @@ private:
                                               radiusKm,
                                               blendedInsolation,
                                               manualGreenhouseOpacity,
-                                              useAtmosphericModel);
+                                              useAtmosphericModel,
+                                              manualGreenhouseOnTop);
             point.state.setGreenhouseOpacity(localGreenhouseOpacity);
         }
 
@@ -3415,6 +3495,8 @@ private:
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         const double greenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        const bool manualGreenhouseOnTop =
+            planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
         const double cloudAlbedo =
             planetComboBox_->currentData(kRoleCloudAlbedo).toDouble();
         const HeightSourceType heightSourceType =
@@ -3451,6 +3533,7 @@ private:
                                             atmospherePressureAtm,
                                             surfaceGravity,
                                             greenhouseOpacity,
+                                            manualGreenhouseOnTop,
                                             cloudAlbedo,
                                             dayLength,
                                             referenceDistanceAU,
@@ -3482,6 +3565,7 @@ private:
                                                       0.0,
                                                       surfaceGravity,
                                                       0.0,
+                                                      false,
                                                       0.0,
                                                       dayLength,
                                                       referenceDistanceAU,
@@ -3535,6 +3619,7 @@ private:
                                                                   rotationMode,
                                                                   surfaceOnlyAtmosphere,
                                                                   0.0,
+                                                                  false,
                                                                   0.0,
                                                                   0.0,
                                                                   surfaceGravity,
@@ -3706,6 +3791,7 @@ private:
         // При наличии атмосферы включаем расширенную модель с парниковым слоем и циркуляцией.
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength,
                                                 rotationMode, atmosphere, greenhouseOpacity,
+                                                manualGreenhouseOnTop,
                                                 cloudAlbedo,
                                                 atmospherePressureAtm,
                                                 surfaceGravity,

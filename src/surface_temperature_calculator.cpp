@@ -46,6 +46,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            RotationMode rotationMode,
                                                            const AtmosphereComposition &atmosphere,
                                                            double greenhouseOpacity,
+                                                           bool manualGreenhouseOnTopOfAtmosphere,
                                                            double presetCloudAlbedo,
                                                            double atmospherePressureAtm,
                                                            double surfaceGravity,
@@ -66,6 +67,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       rotationMode_(rotationMode),
       atmosphere_(atmosphere),
       greenhouseOpacity_(qBound(0.0, greenhouseOpacity, 0.999)),
+      manualGreenhouseOnTopOfAtmosphere_(manualGreenhouseOnTopOfAtmosphere),
       presetCloudAlbedo_(qBound(0.0, presetCloudAlbedo, 1.0)),
       atmospherePressureAtm_(atmospherePressureAtm),
       surfaceGravity_(surfaceGravity),
@@ -388,9 +390,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         // Дополнительный водяной пар (испарение) усиливает длинноволновое поглощение.
         const double waterTau = qMin(8.0, evaporation * 1.5);
         double totalTau = radiationModel.effectiveOpticalDepth() + waterTau;
-        if (!useAtmosphericModel_ && greenhouseOpacity_ > 0.0) {
-            // Дополнительная непрозрачность, когда атмосферная модель выключена,
-            // но задана парниковая "шторка" вручную.
+        if (greenhouseOpacity_ > 0.0 &&
+            (!useAtmosphericModel_ || manualGreenhouseOnTopOfAtmosphere_)) {
+            // Дополнительная непрозрачность: либо без атмосферной модели,
+            // либо поверх неё по явному переключателю.
             totalTau += -std::log(qMax(1e-6, 1.0 - greenhouseOpacity_));
         }
         const double ghMult = std::pow(1.0 + 0.75 * totalTau, 0.25);
