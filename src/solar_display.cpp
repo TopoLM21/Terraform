@@ -23,6 +23,7 @@
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
 #include "radiation_model.h"
+#include "radiation_model_utils.h"
 #include "atmospheric_pressure_model.h"
 #include "atmospheric_cell_state.h"
 #include "atmosphere_model.h"
@@ -73,7 +74,6 @@
 #include <QtWidgets/QWidget>
 
 #include <atomic>
-#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -117,22 +117,6 @@ constexpr double kDefaultSurfaceRoughness = 20.0;
 constexpr double kDefaultBasinShape = 3.5;
 constexpr double kEarthWaterGigatons = 1.4e9;
 
-struct TraceGasSpec {
-    const char *id;
-    double greenhousePower;
-};
-
-constexpr std::array<TraceGasSpec, 4> kTraceGases = {{
-    {"ch4", 0.5},
-    {"nh3", 1.5},
-    {"sf6", 300.0},
-    {"nf3", 250.0},
-}};
-
-double gasMassGigatons(const AtmosphereComposition &atmosphere, const QString &gasId) {
-    return qMax(0.0, atmosphere.massGigatons(gasId));
-}
-
 double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
     // В текущем UI нет явного управления гидросферой, поэтому применяем мягкую эвристику:
     // океаническую поверхность считаем водной, остальные материалы — сухими.
@@ -151,23 +135,8 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      bool useAtmosphericModel,
                                      RadiationModelType radiationModelType,
                                      bool manualGreenhouseOnTopOfAtmosphere) {
-    Q_UNUSED(radiationModelType);
     const double safeRadiusKm = qMax(0.1, planetRadiusKm);
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
-    const double colDensity = 1.0 / qMax(1.0, areaScale);
-    const double co2Mass = gasMassGigatons(atmosphere, QStringLiteral("co2"));
-
-    // tau_CO2 = ln(1 + M_CO2 * colDensity * power * 0.001) * broadening,
-    // где broadening учитывает расширение линий при росте давления.
-    const double broadening = std::pow(qMax(0.5, pressureAtm * 2.0), 0.32);
-    const double baseTau =
-        std::log(1.0 + co2Mass * colDensity * 0.02 * 0.001) * broadening;
-    double traceTau = 0.0;
-    for (const auto &spec : kTraceGases) {
-        const double traceMass = gasMassGigatons(atmosphere, QLatin1String(spec.id));
-        traceTau += (traceMass / qMax(1.0, areaScale)) * spec.greenhousePower * 1e-6 *
-                    broadening;
-    }
 
     const double waterGigatons = estimateSurfaceWaterGigatons(material);
     const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
@@ -189,25 +158,36 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
         std::pow((blendedInsolation * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
                      (4.0 * kStefanBoltzmannConstant),
                  0.25);
+    const auto preRadiationModel = makeRadiationModel(atmosphere,
+                                                      pressureAtm,
+                                                      tEffPre,
+                                                      radiationModelType);
+    const double baseLongwaveTransmission =
+        qMax(1e-6, preRadiationModel->outgoingTransmission());
     const double tBasePre =
-        tEffPre * std::pow(1.0 + 0.75 * (baseTau + traceTau), 0.25);
+        tEffPre * std::pow(1.0 / baseLongwaveTransmission, 0.25);
 
     double evaporation = 0.0;
     if (potentialCoverage > 0.0 && tBasePre > 263.0) {
         evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
     }
     const double waterTau = qMin(8.0, evaporation * 1.5);
-    double totalTau = baseTau + traceTau + waterTau;
+    double extraTau = waterTau;
     if (manualGreenhouseOpacity > 0.0 &&
         (!useAtmosphericModel || manualGreenhouseOnTopOfAtmosphere)) {
         // Дополнительная непрозрачность: либо без атмосферной модели,
         // либо поверх неё по явному переключателю.
-        totalTau += -std::log(qMax(1e-6, 1.0 - manualGreenhouseOpacity));
+        extraTau += opticalDepthFromGreenhouseOpacity(manualGreenhouseOpacity,
+                                                      radiationModelType);
     }
 
-    // Приводим оптическую толщину к коэффициенту парникового эффекта для SurfacePointState.
-    const double greenhouseOpacity =
-        (totalTau > 0.0) ? (1.0 - 1.0 / (1.0 + 0.75 * totalTau)) : 0.0;
+    const double extraLongwaveTransmission =
+        longwaveTransmissionForOpticalDepth(extraTau, radiationModelType);
+    const double totalLongwaveTransmission =
+        qMax(1e-6, baseLongwaveTransmission * extraLongwaveTransmission);
+
+    // Приводим пропускание к коэффициенту парникового эффекта для SurfacePointState.
+    const double greenhouseOpacity = 1.0 - totalLongwaveTransmission;
     return qBound(0.0, greenhouseOpacity, 0.999);
 }
 

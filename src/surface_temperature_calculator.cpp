@@ -5,6 +5,7 @@
 #include "surface_temperature_state.h"
 #include "surface_atmosphere_coupler.h"
 #include "radiation_model.h"
+#include "radiation_model_utils.h"
 
 #include <QtCore/QThread>
 #include <QtCore/QtMath>
@@ -359,15 +360,17 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             std::pow((segmentSolarConstant * (1.0 - planetaryAlbedoPre)) /
                          (4.0 * kStefanBoltzmannConstant),
                      0.25);
-        // Базовая оценка парникового эффекта через модель оптической толщины:
-        // учитываем расширение линий, давление и температуру.
+        // Базовая оценка парникового эффекта берём через коэффициент пропускания
+        // исходящего излучения, чтобы обе модели (Fast/Layered) масштабировались
+        // в одинаковых терминах T^4 ∝ 1 / T_lw.
         const auto preRadiationModel = makeRadiationModel(atmosphere_,
                                                           pressureAtm,
                                                           tEffPre,
                                                           radiationModelType_);
-        const double baseTau = preRadiationModel->effectiveOpticalDepth();
+        const double baseLongwaveTransmission =
+            qMax(1e-6, preRadiationModel->outgoingTransmission());
         const double tBasePre =
-            tEffPre * std::pow(1.0 + 0.75 * baseTau, 0.25);
+            tEffPre * std::pow(1.0 / baseLongwaveTransmission, 0.25);
 
         double evaporation = 0.0;
         if (potentialCoverage > 0.0 && tBasePre > 263.0) {
@@ -397,18 +400,22 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             radiationModel->incomingTransmission() * cloudShortwaveTransmission;
         // Дополнительный водяной пар (испарение) усиливает длинноволновое поглощение.
         const double waterTau = qMin(8.0, evaporation * 1.5);
-        double totalTau = radiationModel->effectiveOpticalDepth() + waterTau;
+        double extraTau = waterTau;
         if (greenhouseOpacity_ > 0.0 &&
             (!useAtmosphericModel_ || manualGreenhouseOnTopOfAtmosphere_)) {
             // Дополнительная непрозрачность: либо без атмосферной модели,
             // либо поверх неё по явному переключателю.
-            totalTau += -std::log(qMax(1e-6, 1.0 - greenhouseOpacity_));
+            extraTau += opticalDepthFromGreenhouseOpacity(greenhouseOpacity_, radiationModelType_);
         }
-        const double ghMult = std::pow(1.0 + 0.75 * totalTau, 0.25);
-        // Приводим оптическую толщину к коэффициенту парникового эффекта для модели
+        const double extraLongwaveTransmission =
+            longwaveTransmissionForOpticalDepth(extraTau, radiationModelType_);
+        const double totalLongwaveTransmission =
+            qMax(1e-6, radiationModel->outgoingTransmission() * extraLongwaveTransmission);
+        const double ghMult = std::pow(1.0 / totalLongwaveTransmission, 0.25);
+        // Приводим пропускание к коэффициенту парникового эффекта для модели
         // SurfaceTemperatureState: в стационаре T^4 ∝ 1 / (1 - G).
         const double greenhouseOpacity =
-            (totalTau > 0.0) ? (1.0 - 1.0 / (1.0 + 0.75 * totalTau)) : 0.0;
+            qBound(0.0, 1.0 - totalLongwaveTransmission, 0.999);
 
         const double transport =
             (pressureAtm > 50.0)
@@ -521,9 +528,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             // Потоки в Вт/м^2 переводим в ΔT: ΔT = (Q * Δt) / C_air.
             const double shortwaveAbsorbedByAir =
                 blendedInsolation * cloudShortwaveTransmission *
-                (1.0 - radiationModel.incomingTransmission());
+                (1.0 - radiationModel->incomingTransmission());
             const double longwaveAbsorbedByAir =
-                emittedFlux * (1.0 - radiationModel.outgoingTransmission());
+                emittedFlux * (1.0 - radiationModel->outgoingTransmission());
             const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveAbsorbedByAir;
             if (airHeatCapacity > 0.0) {
                 const double airDeltaTemp =
