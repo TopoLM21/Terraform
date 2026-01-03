@@ -1,5 +1,7 @@
 #include "emission_layer_model.h"
 
+#include "co2_convective_adjustment.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -26,5 +28,8 @@ double emissionLayerTemperature(double surfaceTemperatureKelvin, double opticalD
         return surfaceTemperatureKelvin;
     }
     const double ratio = (tauEmission + kTwoThirds) / denominator;
-    return surfaceTemperatureKelvin * std::pow(ratio, 0.25);
+    const double radiativeTemperature = surfaceTemperatureKelvin * std::pow(ratio, 0.25);
+    return Co2ConvectiveAdjustment::adjustedEmissionTemperature(surfaceTemperatureKelvin,
+                                                                tauSurface,
+                                                                radiativeTemperature);
 }
