@@ -465,7 +465,12 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         // Коэффициент теплообмена h_c в Вт/(м^2·К) связывает поверхность и воздух.
         // В реальности он зависит от ветра, давления и турбулентности; здесь масштабируем
         // от давления, чтобы тонкая атмосфера слабее влияла на поверхность.
-        const double couplingScale = qBound(0.0, pressureAtm, 1.0);
+        // Для плотных атмосфер конвекция усиливается: у Венеры приземный слой более
+        // теплопроводный и турбулентный, поэтому связывание растет и после 1 атм.
+        const double couplingScale =
+            (pressureAtm <= 1.0)
+                ? qBound(0.0, pressureAtm, 1.0)
+                : 1.0 + 0.3 * std::log1p(pressureAtm - 1.0);
         SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K * couplingScale);
 
         const int totalSteps = stepsPerDay * (spinUpDays + 1);
