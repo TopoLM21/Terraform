@@ -45,6 +45,7 @@ constexpr double kTemperaturePower = 0.45;
 constexpr double kTemperatureLinearFactor = 0.35;
 constexpr double kCo2ContinuumCoefficient = 0.35;
 constexpr double kCo2ContinuumTemperaturePower = -0.2;
+constexpr double kLongwaveWindowPressureDecayPerAtm = 0.075;
 }  // namespace
 
 AtmosphericRadiationModel::AtmosphericRadiationModel(const AtmosphereComposition &composition,
@@ -166,7 +167,14 @@ double AtmosphericRadiationModel::incomingTransmission() const {
 
 double AtmosphericRadiationModel::outgoingTransmission() const {
     // Эффективная прозрачность в длинноволновом диапазоне.
-    return std::exp(-effectiveOpticalDepth_);
+    const double baseTransmission = std::exp(-effectiveOpticalDepth_);
+    // Давление закрывает "окно" в ИК-диапазоне: при пс ≳ 92 атм остаётся лишь
+    // излучение через атмосферный эмиссионный слой. Используем гладкий
+    // экспоненциальный спад, чтобы не вводить резких порогов.
+    // exp(-k * 92 атм) ≈ 1e-3 для k = 0.075, то есть окно практически закрыто.
+    const double longwaveWindowScale =
+        std::exp(-kLongwaveWindowPressureDecayPerAtm * qMax(0.0, pressureAtm_));
+    return baseTransmission * longwaveWindowScale;
 }
 
 double AtmosphericRadiationModel::applyIncomingFlux(double flux) const {
