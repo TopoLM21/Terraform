@@ -15,10 +15,12 @@ constexpr double kShortwaveToLongwaveRatio = 0.12;
 
 AtmosphericRadiationModel::AtmosphericRadiationModel(const AtmosphereComposition &composition,
                                                      double pressureAtm,
-                                                     double baseTemperatureKelvin)
+                                                     double baseTemperatureKelvin,
+                                                     bool useMultiLayerRadiation)
     : composition_(composition),
       pressureAtm_(pressureAtm),
-      baseTemperatureKelvin_(baseTemperatureKelvin) {
+      baseTemperatureKelvin_(baseTemperatureKelvin),
+      useMultiLayerRadiation_(useMultiLayerRadiation) {
     computeOpticalDepths();
 }
 
@@ -66,13 +68,29 @@ double AtmosphericRadiationModel::effectiveOpticalDepth() const {
 }
 
 double AtmosphericRadiationModel::incomingTransmission() const {
-    // Закон Бугера-Ламберта: I = I0 * exp(-tau).
-    return std::exp(-shortwaveOpticalDepth_);
+    if (shortwaveOpticalDepth_ <= 0.0) {
+        return 1.0;
+    }
+    if (!useMultiLayerRadiation_) {
+        // Закон Бугера-Ламберта: I = I0 * exp(-tau).
+        return std::exp(-shortwaveOpticalDepth_);
+    }
+    // Многослойная серая атмосфера (двухпотоковая аппроксимация):
+    // T_sw ≈ 1 / (1 + 0.75 * tau_sw).
+    return 1.0 / (1.0 + 0.75 * shortwaveOpticalDepth_);
 }
 
 double AtmosphericRadiationModel::outgoingTransmission() const {
-    // Эффективная прозрачность в длинноволновом диапазоне.
-    return std::exp(-effectiveOpticalDepth_);
+    if (effectiveOpticalDepth_ <= 0.0) {
+        return 1.0;
+    }
+    if (!useMultiLayerRadiation_) {
+        // Эффективная прозрачность в длинноволновом диапазоне.
+        return std::exp(-effectiveOpticalDepth_);
+    }
+    // Для многослойной модели используем Eddington-приближение для серой атмосферы:
+    // T_lw ≈ 1 / (1 + 0.75 * tau_lw).
+    return 1.0 / (1.0 + 0.75 * effectiveOpticalDepth_);
 }
 
 double AtmosphericRadiationModel::applyIncomingFlux(double flux) const {

@@ -6,7 +6,8 @@ class AtmosphericRadiationModel {
 public:
     AtmosphericRadiationModel(const AtmosphereComposition &composition,
                               double pressureAtm,
-                              double baseTemperatureKelvin);
+                              double baseTemperatureKelvin,
+                              bool useMultiLayerRadiation = false);
 
     double effectiveOpticalDepth() const;
     double incomingTransmission() const;
@@ -20,6 +21,7 @@ private:
     AtmosphereComposition composition_;
     double pressureAtm_ = 0.0;
     double baseTemperatureKelvin_ = 0.0;
+    bool useMultiLayerRadiation_ = false;
     double effectiveOpticalDepth_ = 0.0;
     double shortwaveOpticalDepth_ = 0.0;
 };

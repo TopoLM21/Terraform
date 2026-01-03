@@ -52,6 +52,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            double surfaceGravity,
                                                            double planetRadiusKm,
                                                            bool useAtmosphericModel,
+                                                           bool useMultiLayerRadiation,
                                                            int meridionalTransportSteps,
                                                            HeightSourceType heightSourceType,
                                                            const QString &heightmapPath,
@@ -73,6 +74,7 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       surfaceGravity_(surfaceGravity),
       planetRadiusKm_(planetRadiusKm),
       useAtmosphericModel_(useAtmosphericModel),
+      useMultiLayerRadiation_(useMultiLayerRadiation),
       meridionalTransportSteps_(qMax(1, meridionalTransportSteps)),
       heightSourceType_(heightSourceType),
       heightmapPath_(heightmapPath),
@@ -359,7 +361,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                      0.25);
         // Базовая оценка парникового эффекта через модель оптической толщины:
         // учитываем расширение линий, давление и температуру.
-        const AtmosphericRadiationModel preRadiationModel(atmosphere_, pressureAtm, tEffPre);
+        const AtmosphericRadiationModel preRadiationModel(atmosphere_,
+                                                          pressureAtm,
+                                                          tEffPre,
+                                                          useMultiLayerRadiation_);
         const double baseTau = preRadiationModel.effectiveOpticalDepth();
         const double tBasePre =
             tEffPre * std::pow(1.0 + 0.75 * baseTau, 0.25);
@@ -384,7 +389,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
         // Атмосферное поглощение SW оцениваем через простую модель оптической толщины.
-        const AtmosphericRadiationModel radiationModel(atmosphere_, pressureAtm, tBasePre);
+        const AtmosphericRadiationModel radiationModel(atmosphere_,
+                                                       pressureAtm,
+                                                       tBasePre,
+                                                       useMultiLayerRadiation_);
         const double shortwaveTransmission =
             radiationModel.incomingTransmission() * cloudShortwaveTransmission;
         // Дополнительный водяной пар (испарение) усиливает длинноволновое поглощение.
