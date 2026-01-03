@@ -22,7 +22,7 @@
 #include "wind_field_model.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
-#include "atmospheric_radiation_model.h"
+#include "radiation_model.h"
 #include "atmospheric_pressure_model.h"
 #include "atmospheric_cell_state.h"
 #include "atmosphere_model.h"
@@ -149,9 +149,9 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      double blendedInsolation,
                                      double manualGreenhouseOpacity,
                                      bool useAtmosphericModel,
-                                     bool useMultiLayerRadiation,
+                                     RadiationModelType radiationModelType,
                                      bool manualGreenhouseOnTopOfAtmosphere) {
-    Q_UNUSED(useMultiLayerRadiation);
+    Q_UNUSED(radiationModelType);
     const double safeRadiusKm = qMax(0.1, planetRadiusKm);
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
     const double colDensity = 1.0 / qMax(1.0, areaScale);
@@ -219,7 +219,7 @@ struct TemperatureCacheKey {
     double surfaceGravity = 0.0;
     double greenhouseOpacity = 0.0;
     bool manualGreenhouseOnTopOfAtmosphere = false;
-    bool useMultiLayerRadiation = false;
+    RadiationModelType radiationModelType = RadiationModelType::Fast;
     double cloudAlbedo = 0.0;
     double dayLength = 0.0;
     double referenceDistanceAU = 0.0;
@@ -252,7 +252,7 @@ struct TemperatureCacheKey {
                surfaceGravity == other.surfaceGravity &&
                greenhouseOpacity == other.greenhouseOpacity &&
                manualGreenhouseOnTopOfAtmosphere == other.manualGreenhouseOnTopOfAtmosphere &&
-               useMultiLayerRadiation == other.useMultiLayerRadiation &&
+               radiationModelType == other.radiationModelType &&
                cloudAlbedo == other.cloudAlbedo &&
                dayLength == other.dayLength &&
                referenceDistanceAU == other.referenceDistanceAU &&
@@ -298,7 +298,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.surfaceGravity), seed);
     seed = qHash(hashDoubleBits(key.greenhouseOpacity), seed);
     seed = qHash(key.manualGreenhouseOnTopOfAtmosphere, seed);
-    seed = qHash(key.useMultiLayerRadiation, seed);
+    seed = qHash(static_cast<int>(key.radiationModelType), seed);
     seed = qHash(hashDoubleBits(key.cloudAlbedo), seed);
     seed = qHash(hashDoubleBits(key.dayLength), seed);
     seed = qHash(hashDoubleBits(key.referenceDistanceAU), seed);
@@ -1660,7 +1660,9 @@ private:
         planetComboBox_->setItemData(index,
                                      planet.manualGreenhouseOnTopOfAtmosphere,
                                      kRoleManualGreenhouseOnTopOfAtmosphere);
-        planetComboBox_->setItemData(index, false, kRoleAdvancedRadiationModel);
+        planetComboBox_->setItemData(index,
+                                     static_cast<int>(RadiationModelType::Fast),
+                                     kRoleAdvancedRadiationModel);
         planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
                                      kRoleHeightSourceType);
@@ -1936,9 +1938,11 @@ private:
                                              kRoleManualGreenhouseOnTopOfAtmosphere);
                 const QVariant advancedRadiationValue =
                     planetComboBox_->itemData(existingIndex, kRoleAdvancedRadiationModel);
+                const QVariant fallbackRadiation =
+                    static_cast<int>(RadiationModelType::Fast);
                 planetComboBox_->setItemData(
                     existingIndex,
-                    advancedRadiationValue.isValid() ? advancedRadiationValue : false,
+                    advancedRadiationValue.isValid() ? advancedRadiationValue : fallbackRadiation,
                     kRoleAdvancedRadiationModel);
                 planetComboBox_->setItemData(existingIndex, preset.cloudAlbedo, kRoleCloudAlbedo);
                 planetComboBox_->setItemData(existingIndex,
@@ -2093,8 +2097,10 @@ private:
             return;
         }
 
-        const bool useAdvanced =
-            planetComboBox_->itemData(index, kRoleAdvancedRadiationModel).toBool();
+        const int modelTypeValue =
+            planetComboBox_->itemData(index, kRoleAdvancedRadiationModel).toInt();
+        const auto modelType = static_cast<RadiationModelType>(modelTypeValue);
+        const bool useAdvanced = modelType == RadiationModelType::Layered;
         const QSignalBlocker blocker(advancedRadiationCheckBox_);
         advancedRadiationCheckBox_->setChecked(useAdvanced);
     }
@@ -2156,8 +2162,11 @@ private:
         if (index < 0 || !advancedRadiationCheckBox_) {
             return;
         }
+        const auto modelType = advancedRadiationCheckBox_->isChecked()
+                                   ? RadiationModelType::Layered
+                                   : RadiationModelType::Fast;
         planetComboBox_->setItemData(index,
-                                     advancedRadiationCheckBox_->isChecked(),
+                                     static_cast<int>(modelType),
                                      kRoleAdvancedRadiationModel);
     }
 
@@ -2420,7 +2429,7 @@ private:
                                         double initialAirTemperature,
                                         double blendedInsolation,
                                         double cloudShortwaveTransmission,
-                                        const AtmosphericRadiationModel &radiationModel,
+                                        const RadiationModel &radiationModel,
                                         double timeStepSeconds) const {
         if (pressureAtm <= 0.0 || gravity <= 0.0) {
             return surfaceState.temperatureKelvin();
@@ -2657,8 +2666,8 @@ private:
         const double manualGreenhouseOpacity = stateDefaults->greenhouseOpacity;
         const bool manualGreenhouseOnTop =
             planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
-        const bool useMultiLayerRadiation =
-            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toBool();
+        const auto radiationModelType = static_cast<RadiationModelType>(
+            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
 
         bool hasTemperatureRange = true;
         double minTemperature = std::numeric_limits<double>::max();
@@ -2865,7 +2874,7 @@ private:
                                               blendedInsolation,
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
-                                              useMultiLayerRadiation,
+                                              radiationModelType,
                                               manualGreenhouseOnTop);
             point.state.setGreenhouseOpacity(localGreenhouseOpacity);
             // Воздух интегрируется по времени, иначе он будет “сбрасываться” каждый тик.
@@ -2876,10 +2885,11 @@ private:
                     : ((i < baselineAirTemperatures.size())
                            ? baselineAirTemperatures.at(i)
                            : point.temperatureK);
-            const AtmosphericRadiationModel radiationModel(atmosphere,
-                                                           point.pressureAtm,
-                                                           point.state.temperatureKelvin(),
-                                                           useMultiLayerRadiation);
+            const auto radiationModel =
+                makeRadiationModel(atmosphere,
+                                   point.pressureAtm,
+                                   point.state.temperatureKelvin(),
+                                   radiationModelType);
             point.airTemperatureK =
                 estimateAirTemperatureKelvin(point.state,
                                              point.pressureAtm,
@@ -2887,7 +2897,7 @@ private:
                                              initialAirTemperature,
                                              blendedInsolation,
                                              cloudShortwaveTransmission,
-                                             radiationModel,
+                                             *radiationModel,
                                              timeStepSeconds);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
@@ -2987,8 +2997,8 @@ private:
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
         const bool manualGreenhouseOnTop =
             planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
-        const bool useMultiLayerRadiation =
-            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toBool();
+        const auto radiationModelType = static_cast<RadiationModelType>(
+            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
         const double cloudAlbedo =
             qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
 
@@ -3133,7 +3143,7 @@ private:
                                               blendedInsolation,
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
-                                              useMultiLayerRadiation,
+                                              radiationModelType,
                                               manualGreenhouseOnTop);
             point.state.setGreenhouseOpacity(localGreenhouseOpacity);
         }
@@ -3166,10 +3176,11 @@ private:
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
-            const AtmosphericRadiationModel radiationModel(atmosphere,
-                                                           point.pressureAtm,
-                                                           point.state.temperatureKelvin(),
-                                                           useMultiLayerRadiation);
+            const auto radiationModel =
+                makeRadiationModel(atmosphere,
+                                   point.pressureAtm,
+                                   point.state.temperatureKelvin(),
+                                   radiationModelType);
             point.airTemperatureK =
                 estimateAirTemperatureKelvin(point.state,
                                              point.pressureAtm,
@@ -3177,7 +3188,7 @@ private:
                                              initialAirTemperature,
                                              blendedInsolation,
                                              cloudShortwaveTransmission,
-                                             radiationModel,
+                                             *radiationModel,
                                              timeStepSeconds);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
@@ -3570,8 +3581,8 @@ private:
             planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
         const double cloudAlbedo =
             planetComboBox_->currentData(kRoleCloudAlbedo).toDouble();
-        const bool useMultiLayerRadiation =
-            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toBool();
+        const auto radiationModelType = static_cast<RadiationModelType>(
+            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
         const HeightSourceType heightSourceType =
             static_cast<HeightSourceType>(planetComboBox_->currentData(kRoleHeightSourceType)
                                               .toInt());
@@ -3607,7 +3618,7 @@ private:
                                             surfaceGravity,
                                             greenhouseOpacity,
                                             manualGreenhouseOnTop,
-                                            useMultiLayerRadiation,
+                                            radiationModelType,
                                             cloudAlbedo,
                                             dayLength,
                                             referenceDistanceAU,
@@ -3640,7 +3651,7 @@ private:
                                                       surfaceGravity,
                                                       0.0,
                                                       false,
-                                                      useMultiLayerRadiation,
+                                                      radiationModelType,
                                                       0.0,
                                                       dayLength,
                                                       referenceDistanceAU,
@@ -3673,7 +3684,7 @@ private:
              surfaceOnlyAtmosphere,
              surfaceGravity,
              radiusKm,
-             useMultiLayerRadiation,
+             radiationModelType,
              subsurfaceSettings,
              heightSourceType,
              heightmapPath,
@@ -3701,7 +3712,7 @@ private:
                                                                   surfaceGravity,
                                                                   radiusKm,
                                                                   false,
-                                                                  useMultiLayerRadiation,
+                                                                  radiationModelType,
                                                                   8,
                                                                   heightSourceType,
                                                                   heightmapPath,
@@ -3874,7 +3885,7 @@ private:
                                                 surfaceGravity,
                                                 radiusKm,
                                                 hasAtmosphere,
-                                                useMultiLayerRadiation,
+                                                radiationModelType,
                                                 8,
                                                 heightSourceType,
                                                 heightmapPath,

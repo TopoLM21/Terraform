@@ -13,6 +13,7 @@ add_executable(solar_constant
     include/atmosphere_model.h
     include/atmospheric_cell_state.h
     include/atmospheric_radiation_model.h
+    include/radiation_model.h
     include/atmospheric_circulation_model.h
     include/atmospheric_lapse_rate_model.h
     include/atmosphere_widget.h
@@ -51,6 +52,7 @@ add_executable(solar_constant
     src/atmosphere_model.cpp
     src/atmospheric_pressure_model.cpp
     src/atmospheric_radiation_model.cpp
+    src/radiation_model_factory.cpp
     src/atmospheric_circulation_model.cpp
     src/atmospheric_lapse_rate_model.cpp
     src/atmosphere_widget.cpp
