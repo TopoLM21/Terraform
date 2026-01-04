@@ -370,6 +370,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const auto preRadiationModel = makeRadiationModel(atmosphere_,
                                                           pressureAtm,
                                                           tEffPre,
+                                                          tEffPre,
                                                           surfaceGravity,
                                                           radiationModelType_);
         const double baseLongwaveTransmission =
@@ -400,6 +401,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const auto radiationModel = makeRadiationModel(atmosphere_,
                                                        pressureAtm,
                                                        tBasePre,
+                                                       tEff,
                                                        surfaceGravity,
                                                        radiationModelType_);
         // Дополнительный водяной пар (испарение) усиливает длинноволновое поглощение.
@@ -527,6 +529,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             const auto stepRadiationModel = makeRadiationModel(atmosphere_,
                                                                pressureAtm,
                                                                radiationTemperature,
+                                                               tEff,
                                                                surfaceGravity,
                                                                radiationModelType_);
             const double incomingTransmission = stepRadiationModel->incomingTransmission();

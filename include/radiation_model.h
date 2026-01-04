@@ -27,5 +27,6 @@ public:
 std::unique_ptr<RadiationModel> makeRadiationModel(const AtmosphereComposition &composition,
                                                    double pressureAtm,
                                                    double baseTemperatureKelvin,
+                                                   double effectiveTemperatureKelvin,
                                                    double surfaceGravity,
                                                    RadiationModelType type);

@@ -9,11 +9,13 @@ constexpr double kTwoStreamEddingtonFactor = 0.75;
 AtmosphericRadiationModel::AtmosphericRadiationModel(const AtmosphereComposition &composition,
                                                      double pressureAtm,
                                                      double baseTemperatureKelvin,
+                                                     double effectiveTemperatureKelvin,
                                                      double surfaceGravity,
                                                      RadiationModelType radiationModelType)
     : composition_(composition),
       pressureAtm_(pressureAtm),
       baseTemperatureKelvin_(baseTemperatureKelvin),
+      effectiveTemperatureKelvin_(effectiveTemperatureKelvin),
       surfaceGravity_(surfaceGravity),
       radiationModelType_(radiationModelType) {
     computeOpticalDepths();
@@ -31,6 +33,7 @@ void AtmosphericRadiationModel::computeOpticalDepths() {
     const RadiativeConvectiveProfile profile(composition_,
                                               pressureAtm_,
                                               baseTemperatureKelvin_,
+                                              effectiveTemperatureKelvin_,
                                               surfaceGravity_);
     effectiveOpticalDepth_ = profile.totalOpticalDepthLongwave();
     shortwaveOpticalDepth_ = profile.totalOpticalDepthShortwave();

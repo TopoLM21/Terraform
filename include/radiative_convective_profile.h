@@ -18,6 +18,7 @@ public:
     RadiativeConvectiveProfile(const AtmosphereComposition &composition,
                                double surfacePressureAtm,
                                double surfaceTemperatureKelvin,
+                               double effectiveTemperatureKelvin,
                                double surfaceGravity,
                                int layerCount = 32);
 
@@ -38,6 +39,7 @@ private:
     AtmosphereComposition composition_;
     double surfacePressureAtm_ = 0.0;
     double surfaceTemperatureKelvin_ = 0.0;
+    double effectiveTemperatureKelvin_ = 0.0;
     double surfaceGravity_ = 0.0;
     int layerCount_ = 0;
     QVector<RadiativeConvectiveLayer> layers_;
