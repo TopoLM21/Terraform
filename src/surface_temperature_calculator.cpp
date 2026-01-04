@@ -397,6 +397,22 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+
+        double surfaceAlbedo = albedo * (1.0 - potentialCoverage);
+        if (tBasePre < 260.0) {
+            surfaceAlbedo += potentialCoverage * 0.70;
+        } else {
+            surfaceAlbedo += potentialCoverage * 0.06;
+        }
+        // Планетарное (TOA) альбедо складывается из облачного отражения и доли,
+        // прошедшей к поверхности и обратно.
+        const double planetaryAlbedo = cloudAlbedo + (1.0 - cloudAlbedo) * surfaceAlbedo;
+        const double tEff =
+            // TOA-баланс: используем планетарное альбедо, а не альбедо поверхности.
+            std::pow((segmentSolarConstant * (1.0 - planetaryAlbedo)) /
+                         (4.0 * kStefanBoltzmannConstant),
+                     0.25);
+
         // Атмосферное поглощение SW оцениваем через простую модель оптической толщины.
         const auto radiationModel = makeRadiationModel(atmosphere_,
                                                        pressureAtm,
@@ -433,20 +449,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             (dayLengthDays_ < 2.0 && pressureAtm < 10.0) ? 0.65 : 1.0;
         const double meridionalTransport = transport * rotBlock;
 
-        double surfaceAlbedo = albedo * (1.0 - potentialCoverage);
-        if (tBasePre < 260.0) {
-            surfaceAlbedo += potentialCoverage * 0.70;
-        } else {
-            surfaceAlbedo += potentialCoverage * 0.06;
-        }
-        // Планетарное (TOA) альбедо складывается из облачного отражения и доли,
-        // прошедшей к поверхности и обратно.
-        const double planetaryAlbedo = cloudAlbedo + (1.0 - cloudAlbedo) * surfaceAlbedo;
-        const double tEff =
-            // TOA-баланс: используем планетарное альбедо, а не альбедо поверхности.
-            std::pow((segmentSolarConstant * (1.0 - planetaryAlbedo)) /
-                         (4.0 * kStefanBoltzmannConstant),
-                     0.25);
         const double tGlobalAvg = tEff;
 
         const double tLatRad =
