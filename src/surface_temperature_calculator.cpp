@@ -545,8 +545,9 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             const double shortwaveAbsorbedByAir =
                 blendedInsolation * cloudShortwaveTransmission *
                 (1.0 - incomingTransmission);
-            const double longwaveAbsorbedByAir =
-                emittedFlux * (1.0 - outgoingTransmission);
+            // Поверхность уже излучает как слой τ≈1 (см. SurfaceTemperatureState),
+            // поэтому в схеме через emission layer не ослабляем поток повторно.
+            const double longwaveAbsorbedByAir = emittedFlux;
             // Длинноволновое охлаждение атмосферы за счет собственного излучения в космос:
             // F_lw_air = σ * T_air^4, но видимость космоса ограничена оптической толщиной.
             const double airLongwaveToSpace =
