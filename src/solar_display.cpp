@@ -3151,6 +3151,7 @@ private:
                                               material,
                                               point.pressureAtm,
                                               radiusKm,
+                                              gravity,
                                               blendedInsolation,
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
