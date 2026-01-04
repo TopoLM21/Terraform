@@ -398,8 +398,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                                                        tBasePre,
                                                        surfaceGravity,
                                                        radiationModelType_);
-        const double shortwaveTransmission =
-            radiationModel->incomingTransmission() * cloudShortwaveTransmission;
         // Дополнительный водяной пар (испарение) усиливает длинноволновое поглощение.
         const double waterTau = qMin(8.0, evaporation * 1.5);
         double extraTau = waterTau;
@@ -517,8 +515,21 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
 
+            // Пересчитываем оптическую толщину атмосферы на основе текущей температуры
+            // приземного слоя, чтобы коэффициенты не "застывали" на старте широты.
+            const double radiationTemperature =
+                qMax(1.0, airState.airTemperatureKelvin());
+            const auto stepRadiationModel = makeRadiationModel(atmosphere_,
+                                                               pressureAtm,
+                                                               radiationTemperature,
+                                                               surfaceGravity,
+                                                               radiationModelType_);
+            const double incomingTransmission = stepRadiationModel->incomingTransmission();
+            const double outgoingTransmission = stepRadiationModel->outgoingTransmission();
+
             // До поверхности доходит только прошедший через атмосферу и облака поток.
-            const double transmittedInsolation = blendedInsolation * shortwaveTransmission;
+            const double transmittedInsolation =
+                blendedInsolation * (incomingTransmission * cloudShortwaveTransmission);
             const double absorbedFlux = state.absorbedFlux(transmittedInsolation);
             const double emittedFlux = state.emittedFlux();
             state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
@@ -528,14 +539,14 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             // Потоки в Вт/м^2 переводим в ΔT: ΔT = (Q * Δt) / C_air.
             const double shortwaveAbsorbedByAir =
                 blendedInsolation * cloudShortwaveTransmission *
-                (1.0 - radiationModel->incomingTransmission());
+                (1.0 - incomingTransmission);
             const double longwaveAbsorbedByAir =
-                emittedFlux * (1.0 - radiationModel->outgoingTransmission());
+                emittedFlux * (1.0 - outgoingTransmission);
             // Длинноволновое охлаждение атмосферы за счет собственного излучения в космос:
             // F_lw_air = σ * T_air^4, но видимость космоса ограничена оптической толщиной.
             const double airLongwaveToSpace =
                 kStefanBoltzmannConstant * std::pow(airState.airTemperatureKelvin(), 4.0) *
-                radiationModel->outgoingTransmission();
+                outgoingTransmission;
             const double airRadiativeHeatingFlux =
                 shortwaveAbsorbedByAir + longwaveAbsorbedByAir - airLongwaveToSpace;
             if (airHeatCapacity > 0.0) {
