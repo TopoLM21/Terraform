@@ -366,6 +366,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const auto preRadiationModel = makeRadiationModel(atmosphere_,
                                                           pressureAtm,
                                                           tEffPre,
+                                                          surfaceGravity,
                                                           radiationModelType_);
         const double baseLongwaveTransmission =
             qMax(1e-6, preRadiationModel->outgoingTransmission());
@@ -395,6 +396,7 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         const auto radiationModel = makeRadiationModel(atmosphere_,
                                                        pressureAtm,
                                                        tBasePre,
+                                                       surfaceGravity,
                                                        radiationModelType_);
         const double shortwaveTransmission =
             radiationModel->incomingTransmission() * cloudShortwaveTransmission;
