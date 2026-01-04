@@ -10,10 +10,12 @@ constexpr double kTwoStreamEddingtonFactor = 0.75;
 LayeredRadiationModel::LayeredRadiationModel(const AtmosphereComposition &composition,
                                              double pressureAtm,
                                              double baseTemperatureKelvin,
+                                             double effectiveTemperatureKelvin,
                                              double surfaceGravity)
     : composition_(composition),
       pressureAtm_(pressureAtm),
       baseTemperatureKelvin_(baseTemperatureKelvin),
+      effectiveTemperatureKelvin_(effectiveTemperatureKelvin),
       surfaceGravity_(surfaceGravity) {
     buildLayers();
 }
@@ -30,6 +32,7 @@ void LayeredRadiationModel::buildLayers() {
     const RadiativeConvectiveProfile profile(composition_,
                                               pressureAtm_,
                                               baseTemperatureKelvin_,
+                                              effectiveTemperatureKelvin_,
                                               surfaceGravity_,
                                               kLayerCount);
     effectiveOpticalDepth_ = profile.totalOpticalDepthLongwave();

@@ -7,6 +7,7 @@ public:
     AtmosphericRadiationModel(const AtmosphereComposition &composition,
                               double pressureAtm,
                               double baseTemperatureKelvin,
+                              double effectiveTemperatureKelvin,
                               double surfaceGravity,
                               RadiationModelType radiationModelType = RadiationModelType::Fast);
 
@@ -22,6 +23,7 @@ private:
     AtmosphereComposition composition_;
     double pressureAtm_ = 0.0;
     double baseTemperatureKelvin_ = 0.0;
+    double effectiveTemperatureKelvin_ = 0.0;
     double surfaceGravity_ = 0.0;
     RadiationModelType radiationModelType_ = RadiationModelType::Fast;
     double effectiveOpticalDepth_ = 0.0;

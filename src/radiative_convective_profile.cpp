@@ -22,11 +22,13 @@ constexpr double kMinPressureRatio = 1e-4;
 RadiativeConvectiveProfile::RadiativeConvectiveProfile(const AtmosphereComposition &composition,
                                                        double surfacePressureAtm,
                                                        double surfaceTemperatureKelvin,
+                                                       double effectiveTemperatureKelvin,
                                                        double surfaceGravity,
                                                        int layerCount)
     : composition_(composition),
       surfacePressureAtm_(surfacePressureAtm),
       surfaceTemperatureKelvin_(surfaceTemperatureKelvin),
+      effectiveTemperatureKelvin_(effectiveTemperatureKelvin),
       surfaceGravity_(surfaceGravity),
       layerCount_(layerCount) {
     buildProfile();
@@ -105,10 +107,15 @@ double RadiativeConvectiveProfile::radiativeGradientDlnT(double temperatureKelvi
 
     // Радиативный градиент в терминах d ln T / d ln P для серой атмосферы:
     // ∇_rad = (3 κ P F) / (16 g σ T^4),
-    // где F = σ T_eff^4 — вертикальный поток, κ — массовая непрозрачность.
+    // где F = σ T_eff^4 — вертикальный поток из ТОА-баланса.
     const double kappa = kappaLongwave(temperatureKelvin, pressurePa);
+    // Если эффективная температура не задана, падаем обратно на температуру поверхности,
+    // чтобы профиль оставался устойчивым в упрощённых режимах.
+    const double effectiveTemperature =
+        (effectiveTemperatureKelvin_ > 0.0) ? effectiveTemperatureKelvin_
+                                            : surfaceTemperatureKelvin_;
     const double flux =
-        kStefanBoltzmannConstant * std::pow(qMax(1.0, surfaceTemperatureKelvin_), 4.0);
+        kStefanBoltzmannConstant * std::pow(qMax(1.0, effectiveTemperature), 4.0);
     const double numerator = 3.0 * kappa * pressurePa * flux;
     const double denominator =
         16.0 * qMax(1.0, surfaceGravity_) * kStefanBoltzmannConstant *

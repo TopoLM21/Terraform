@@ -163,6 +163,7 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     const auto preRadiationModel = makeRadiationModel(atmosphere,
                                                       pressureAtm,
                                                       tEffPre,
+                                                      tEffPre,
                                                       surfaceGravity,
                                                       radiationModelType);
     const double baseLongwaveTransmission =
@@ -2894,10 +2895,20 @@ private:
                     : ((i < baselineAirTemperatures.size())
                            ? baselineAirTemperatures.at(i)
                            : point.temperatureK);
+            // Используем локальную оценку ТОА-потока через blendedInsolation и планетарное
+            // альбедо (облака перекрывают поверхность), чтобы связать оптическую толщину
+            // с физически корректным источником излучения.
+            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+            const double planetaryAlbedo = qMax(materialAlbedo, cloudAlbedo);
+            const double effectiveFlux =
+                blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
+            const double effectiveTemperatureKelvin =
+                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
                                    point.state.temperatureKelvin(),
+                                   effectiveTemperatureKelvin,
                                    gravity,
                                    radiationModelType);
             point.airTemperatureK =
@@ -3188,10 +3199,18 @@ private:
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+            const double planetaryAlbedo = qMax(materialAlbedo, cloudAlbedo);
+            const double effectiveFlux =
+                blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
+            const double effectiveTemperatureKelvin =
+                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
                                    point.state.temperatureKelvin(),
+                                   effectiveTemperatureKelvin,
                                    gravity,
                                    radiationModelType);
             point.airTemperatureK =

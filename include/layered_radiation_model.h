@@ -16,6 +16,7 @@ public:
     LayeredRadiationModel(const AtmosphereComposition &composition,
                           double pressureAtm,
                           double baseTemperatureKelvin,
+                          double effectiveTemperatureKelvin,
                           double surfaceGravity);
 
     double effectiveOpticalDepth() const override;
@@ -29,6 +30,7 @@ private:
     AtmosphereComposition composition_;
     double pressureAtm_ = 0.0;
     double baseTemperatureKelvin_ = 0.0;
+    double effectiveTemperatureKelvin_ = 0.0;
     double surfaceGravity_ = 0.0;
     double effectiveOpticalDepth_ = 0.0;
     double shortwaveOpticalDepth_ = 0.0;
