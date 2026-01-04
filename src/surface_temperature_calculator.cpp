@@ -269,6 +269,10 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         (totalGas > 0.0)
             ? (totalGas / kEarthAtmosphereMassGt) * (surfaceGravity / 9.8) / areaScale
             : 0.0;
+    // "Массивную" атмосферу считаем по давлению у уровня моря: при больших значениях
+    // ручная непрозрачность может привести к двойному учёту парникового эффекта.
+    const double massiveAtmospherePressureAtm = 5.0;
+    const bool hasMassiveAtmosphere = seaLevelPressureAtm >= massiveAtmospherePressureAtm;
     const double waterGigatons = estimateSurfaceWaterGigatons(material_);
     const bool hasSeaLevel = hasSeaLevel_;
     const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
@@ -401,10 +405,11 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         // Дополнительный водяной пар (испарение) усиливает длинноволновое поглощение.
         const double waterTau = qMin(8.0, evaporation * 1.5);
         double extraTau = waterTau;
-        if (greenhouseOpacity_ > 0.0 &&
-            (!useAtmosphericModel_ || manualGreenhouseOnTopOfAtmosphere_)) {
-            // Дополнительная непрозрачность: либо без атмосферной модели,
-            // либо поверх неё по явному переключателю.
+        const bool allowManualGreenhouse =
+            manualGreenhouseOnTopOfAtmosphere_ || (!useAtmosphericModel_ && !hasMassiveAtmosphere);
+        if (greenhouseOpacity_ > 0.0 && allowManualGreenhouse) {
+            // Дополнительная непрозрачность: либо в режиме ручной надстройки,
+            // либо без атмосферной модели при отсутствии массивной атмосферы.
             extraTau += opticalDepthFromGreenhouseOpacity(greenhouseOpacity_, radiationModelType_);
         }
         const double extraLongwaveTransmission =
