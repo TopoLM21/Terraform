@@ -160,7 +160,8 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      double manualGreenhouseOpacity,
                                      bool useAtmosphericModel,
                                      RadiationModelType radiationModelType,
-                                     bool manualGreenhouseOnTopOfAtmosphere) {
+                                     bool manualGreenhouseOnTopOfAtmosphere,
+                                     bool logDetails) {
     const double safeRadiusKm = qMax(0.1, planetRadiusKm);
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
 
@@ -216,19 +217,21 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
 
     // Приводим пропускание к коэффициенту парникового эффекта для SurfacePointState.
     const double greenhouseOpacity = 1.0 - totalLongwaveTransmission;
-    qCInfo(solarRadiationLog) << "Local greenhouse opacity"
-                             << "pressureAtm=" << pressureAtm
-                             << "blendedInsolation=" << blendedInsolation
-                             << "surfAlbedoPre=" << surfAlbedoPre
-                             << "pressureClouds=" << pressureClouds
-                             << "tEffPre=" << tEffPre
-                             << "baseLongwaveTransmission=" << baseLongwaveTransmission
-                             << "tBasePre=" << tBasePre
-                             << "evaporation=" << evaporation
-                             << "waterTau=" << waterTau
-                             << "extraTau=" << extraTau
-                             << "totalLongwaveTransmission=" << totalLongwaveTransmission
-                             << "greenhouseOpacity=" << greenhouseOpacity;
+    if (logDetails) {
+        qCInfo(solarRadiationLog) << "Local greenhouse opacity"
+                                 << "pressureAtm=" << pressureAtm
+                                 << "blendedInsolation=" << blendedInsolation
+                                 << "surfAlbedoPre=" << surfAlbedoPre
+                                 << "pressureClouds=" << pressureClouds
+                                 << "tEffPre=" << tEffPre
+                                 << "baseLongwaveTransmission=" << baseLongwaveTransmission
+                                 << "tBasePre=" << tBasePre
+                                 << "evaporation=" << evaporation
+                                 << "waterTau=" << waterTau
+                                 << "extraTau=" << extraTau
+                                 << "totalLongwaveTransmission=" << totalLongwaveTransmission
+                                 << "greenhouseOpacity=" << greenhouseOpacity;
+    }
     return qBound(0.0, greenhouseOpacity, 0.999);
 }
 
@@ -1145,6 +1148,18 @@ private:
 
     void showInputError(const QString &message) {
         QMessageBox::warning(this, QStringLiteral("Некорректный ввод"), message);
+    }
+
+    bool shouldLogRadiationForPoint(int pointIndex) const {
+        if (surfaceGrid_.points().isEmpty()) {
+            return false;
+        }
+        int targetIndex = selectedSurfacePointIndex_;
+        if (targetIndex < 0 || targetIndex >= surfaceGrid_.points().size()) {
+            // Если ячейка не выбрана, логируем нулевую — так лог остаётся однострочным и предсказуемым.
+            targetIndex = 0;
+        }
+        return pointIndex == targetIndex;
     }
 
     QLineEdit *radiusInput_ = nullptr;
@@ -2912,6 +2927,7 @@ private:
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point.materialId);
+            const bool logDetails = shouldLogRadiationForPoint(i);
             const double localGreenhouseOpacity =
                 computeLocalGreenhouseOpacity(atmosphere,
                                               material,
@@ -2922,7 +2938,8 @@ private:
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
                                               radiationModelType,
-                                              manualGreenhouseOnTop);
+                                              manualGreenhouseOnTop,
+                                              logDetails);
             point.state.setGreenhouseOpacity(localGreenhouseOpacity);
             // Воздух интегрируется по времени, иначе он будет “сбрасываться” каждый тик.
             // Поэтому используем предыдущее значение, а базу только для первичной инициализации.
@@ -2941,12 +2958,14 @@ private:
                 blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
                 std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
-            qCInfo(solarRadiationLog) << "Radiation inputs (init)"
-                                      << "index=" << i
-                                      << "blendedInsolation=" << blendedInsolation
-                                      << "planetaryAlbedo=" << planetaryAlbedo
-                                      << "effectiveFlux=" << effectiveFlux
-                                      << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
+            if (logDetails) {
+                qCInfo(solarRadiationLog) << "Radiation inputs (init)"
+                                          << "index=" << i
+                                          << "blendedInsolation=" << blendedInsolation
+                                          << "planetaryAlbedo=" << planetaryAlbedo
+                                          << "effectiveFlux=" << effectiveFlux
+                                          << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
+            }
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
@@ -2964,9 +2983,11 @@ private:
                                             radiationModelType,
                                             *radiationModel,
                                             timeStepSeconds);
-            qCInfo(solarRadiationLog) << "Resolved air temperature (init)"
-                                      << "index=" << i
-                                      << "airTemperatureK=" << point.airTemperatureK;
+            if (logDetails) {
+                qCInfo(solarRadiationLog) << "Resolved air temperature (init)"
+                                          << "index=" << i
+                                          << "airTemperatureK=" << point.airTemperatureK;
+            }
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
@@ -3203,6 +3224,7 @@ private:
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point.materialId);
+            const bool logDetails = shouldLogRadiationForPoint(i);
             const double localGreenhouseOpacity =
                 computeLocalGreenhouseOpacity(atmosphere,
                                               material,
@@ -3213,7 +3235,8 @@ private:
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
                                               radiationModelType,
-                                              manualGreenhouseOnTop);
+                                              manualGreenhouseOnTop,
+                                              logDetails);
             point.state.setGreenhouseOpacity(localGreenhouseOpacity);
         }
 
@@ -3246,18 +3269,21 @@ private:
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point.materialId);
+            const bool logDetails = shouldLogRadiationForPoint(i);
             const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
             const double planetaryAlbedo = qMax(materialAlbedo, cloudAlbedo);
             const double effectiveFlux =
                 blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
                 std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
-            qCInfo(solarRadiationLog) << "Radiation inputs (tick)"
-                                      << "index=" << i
-                                      << "blendedInsolation=" << blendedInsolation
-                                      << "planetaryAlbedo=" << planetaryAlbedo
-                                      << "effectiveFlux=" << effectiveFlux
-                                      << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
+            if (logDetails) {
+                qCInfo(solarRadiationLog) << "Radiation inputs (tick)"
+                                          << "index=" << i
+                                          << "blendedInsolation=" << blendedInsolation
+                                          << "planetaryAlbedo=" << planetaryAlbedo
+                                          << "effectiveFlux=" << effectiveFlux
+                                          << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
+            }
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
@@ -3275,9 +3301,11 @@ private:
                                             radiationModelType,
                                             *radiationModel,
                                             timeStepSeconds);
-            qCInfo(solarRadiationLog) << "Resolved air temperature (tick)"
-                                      << "index=" << i
-                                      << "airTemperatureK=" << point.airTemperatureK;
+            if (logDetails) {
+                qCInfo(solarRadiationLog) << "Resolved air temperature (tick)"
+                                          << "index=" << i
+                                          << "airTemperatureK=" << point.airTemperatureK;
+            }
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
