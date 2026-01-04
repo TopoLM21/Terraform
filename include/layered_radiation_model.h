@@ -20,6 +20,7 @@ public:
     double effectiveOpticalDepth() const override;
     double incomingTransmission() const override;
     double outgoingTransmission() const override;
+    double bottomLayerTemperatureKelvin() const;
 
 private:
     void buildLayers();

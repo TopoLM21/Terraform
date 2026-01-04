@@ -23,6 +23,7 @@
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
 #include "radiation_model.h"
+#include "layered_radiation_model.h"
 #include "radiation_model_utils.h"
 #include "atmospheric_pressure_model.h"
 #include "atmospheric_cell_state.h"
@@ -636,7 +637,7 @@ public:
         surfaceMapModeComboBox_ = new QComboBox(this);
         surfaceMapModeComboBox_->addItem(QStringLiteral("Температура поверхности"),
                                          static_cast<int>(SurfaceMapMode::Temperature));
-        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура воздуха (200 м)"),
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура нижнего слоя атмосферы"),
                                          static_cast<int>(SurfaceMapMode::AirTemperature));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Высота"),
                                          static_cast<int>(SurfaceMapMode::Height));
@@ -2403,6 +2404,31 @@ private:
         updateSurfacePointStatusDialog();
     }
 
+    double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
+                                       double pressureAtm,
+                                       double gravity,
+                                       double initialAirTemperature,
+                                       double blendedInsolation,
+                                       double cloudShortwaveTransmission,
+                                       RadiationModelType radiationModelType,
+                                       const RadiationModel &radiationModel,
+                                       double timeStepSeconds) const {
+        if (radiationModelType == RadiationModelType::Layered) {
+            const auto *layeredModel = dynamic_cast<const LayeredRadiationModel *>(&radiationModel);
+            if (layeredModel) {
+                return layeredModel->bottomLayerTemperatureKelvin();
+            }
+        }
+        return estimateAirTemperatureKelvin(surfaceState,
+                                            pressureAtm,
+                                            gravity,
+                                            initialAirTemperature,
+                                            blendedInsolation,
+                                            cloudShortwaveTransmission,
+                                            radiationModel,
+                                            timeStepSeconds);
+    }
+
     double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
                                         double pressureAtm,
                                         double gravity,
@@ -2871,14 +2897,15 @@ private:
                                    point.state.temperatureKelvin(),
                                    radiationModelType);
             point.airTemperatureK =
-                estimateAirTemperatureKelvin(point.state,
-                                             point.pressureAtm,
-                                             gravity,
-                                             initialAirTemperature,
-                                             blendedInsolation,
-                                             cloudShortwaveTransmission,
-                                             *radiationModel,
-                                             timeStepSeconds);
+                resolveAirTemperatureKelvin(point.state,
+                                            point.pressureAtm,
+                                            gravity,
+                                            initialAirTemperature,
+                                            blendedInsolation,
+                                            cloudShortwaveTransmission,
+                                            radiationModelType,
+                                            *radiationModel,
+                                            timeStepSeconds);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
@@ -3162,14 +3189,15 @@ private:
                                    point.state.temperatureKelvin(),
                                    radiationModelType);
             point.airTemperatureK =
-                estimateAirTemperatureKelvin(point.state,
-                                             point.pressureAtm,
-                                             gravity,
-                                             initialAirTemperature,
-                                             blendedInsolation,
-                                             cloudShortwaveTransmission,
-                                             *radiationModel,
-                                             timeStepSeconds);
+                resolveAirTemperatureKelvin(point.state,
+                                            point.pressureAtm,
+                                            gravity,
+                                            initialAirTemperature,
+                                            blendedInsolation,
+                                            cloudShortwaveTransmission,
+                                            radiationModelType,
+                                            *radiationModel,
+                                            timeStepSeconds);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }

@@ -123,3 +123,11 @@ double LayeredRadiationModel::outgoingTransmission() const {
     }
     return transmission;
 }
+
+double LayeredRadiationModel::bottomLayerTemperatureKelvin() const {
+    if (layers_.isEmpty()) {
+        return baseTemperatureKelvin_;
+    }
+    // Первый слой соответствует максимальному давлению и описывает нижнюю часть атмосферы.
+    return layers_.first().temperatureKelvin;
+}
