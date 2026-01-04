@@ -47,6 +47,7 @@
 #include <QtCore/QHash>
 #include <QtCore/QHashFunctions>
 #include <QtCore/QStringList>
+#include <QtCore/QLoggingCategory>
 #include <QtEndian>
 #include <QtGui/QDoubleValidator>
 #include <QtConcurrent/QtConcurrent>
@@ -81,6 +82,29 @@
 #include <cstring>
 
 namespace {
+Q_LOGGING_CATEGORY(solarRadiationLog, "solar.radiation")
+
+bool isSolarRadiationLoggingEnabledFromEnvironment() {
+    if (!qEnvironmentVariableIsSet("SOLAR_RADIATION_LOG")) {
+        return false;
+    }
+
+    const QByteArray rawValue = qgetenv("SOLAR_RADIATION_LOG").trimmed().toLower();
+    if (rawValue.isEmpty()) {
+        return true;
+    }
+    return rawValue != "0" && rawValue != "false" && rawValue != "off";
+}
+
+void enableSolarRadiationLogging() {
+    QString rules = QString::fromLocal8Bit(qgetenv("QT_LOGGING_RULES"));
+    if (!rules.isEmpty()) {
+        rules.append('\n');
+    }
+    rules.append(QStringLiteral("solar.radiation.info=true\nsolar.radiation.debug=true"));
+    QLoggingCategory::setFilterRules(rules);
+}
+
 constexpr int kRoleSemiMajorAxis = Qt::UserRole;
 constexpr int kRoleIsCustom = Qt::UserRole + 1;
 constexpr int kRolePlanetName = Qt::UserRole + 2;
@@ -192,6 +216,19 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
 
     // Приводим пропускание к коэффициенту парникового эффекта для SurfacePointState.
     const double greenhouseOpacity = 1.0 - totalLongwaveTransmission;
+    qCInfo(solarRadiationLog) << "Local greenhouse opacity"
+                             << "pressureAtm=" << pressureAtm
+                             << "blendedInsolation=" << blendedInsolation
+                             << "surfAlbedoPre=" << surfAlbedoPre
+                             << "pressureClouds=" << pressureClouds
+                             << "tEffPre=" << tEffPre
+                             << "baseLongwaveTransmission=" << baseLongwaveTransmission
+                             << "tBasePre=" << tBasePre
+                             << "evaporation=" << evaporation
+                             << "waterTau=" << waterTau
+                             << "extraTau=" << extraTau
+                             << "totalLongwaveTransmission=" << totalLongwaveTransmission
+                             << "greenhouseOpacity=" << greenhouseOpacity;
     return qBound(0.0, greenhouseOpacity, 0.999);
 }
 
@@ -2904,6 +2941,12 @@ private:
                 blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
                 std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
+            qCInfo(solarRadiationLog) << "Radiation inputs (init)"
+                                      << "index=" << i
+                                      << "blendedInsolation=" << blendedInsolation
+                                      << "planetaryAlbedo=" << planetaryAlbedo
+                                      << "effectiveFlux=" << effectiveFlux
+                                      << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
@@ -2921,6 +2964,9 @@ private:
                                             radiationModelType,
                                             *radiationModel,
                                             timeStepSeconds);
+            qCInfo(solarRadiationLog) << "Resolved air temperature (init)"
+                                      << "index=" << i
+                                      << "airTemperatureK=" << point.airTemperatureK;
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
@@ -3206,6 +3252,12 @@ private:
                 blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
                 std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
+            qCInfo(solarRadiationLog) << "Radiation inputs (tick)"
+                                      << "index=" << i
+                                      << "blendedInsolation=" << blendedInsolation
+                                      << "planetaryAlbedo=" << planetaryAlbedo
+                                      << "effectiveFlux=" << effectiveFlux
+                                      << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
@@ -3223,6 +3275,9 @@ private:
                                             radiationModelType,
                                             *radiationModel,
                                             timeStepSeconds);
+            qCInfo(solarRadiationLog) << "Resolved air temperature (tick)"
+                                      << "index=" << i
+                                      << "airTemperatureK=" << point.airTemperatureK;
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
@@ -4045,7 +4100,8 @@ private:
 ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
                                                   QTextStream &output,
                                                   BinarySystemParameters &parameters,
-                                                  int &precision) {
+                                                  int &precision,
+                                                  bool &enableRadiationLog) {
     QCommandLineParser parser;
     parser.setApplicationDescription(
         QStringLiteral("Вычисление солнечной постоянной по параметрам звезды."));
@@ -4074,10 +4130,15 @@ ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
                                        QStringLiteral("Количество значащих цифр в выводе."),
                                        QStringLiteral("digits"),
                                        QString::number(kDefaultPrecision));
+    QCommandLineOption radiationLogOption(QStringLiteral("radiation-log"),
+                                          QStringLiteral("Включить подробные логи радиационной модели."));
 
     parser.addOptions({radiusOption, temperatureOption, distanceOption, radius2Option, temperature2Option,
-                       distance2Option, precisionOption});
+                       distance2Option, precisionOption, radiationLogOption});
     parser.process(app);
+    if (parser.isSet(radiationLogOption)) {
+        enableRadiationLog = true;
+    }
 
     const auto parsePositive = [&](const QCommandLineOption &option, double &target,
                                    const QString &name) -> bool {
@@ -4239,7 +4300,12 @@ int main(int argc, char *argv[]) {
 
     BinarySystemParameters parameters{};
     int precision = kDefaultPrecision;
-    const ArgumentsParseResult argsResult = parseParametersFromArguments(app, output, parameters, precision);
+    bool enableRadiationLog = isSolarRadiationLoggingEnabledFromEnvironment();
+    const ArgumentsParseResult argsResult =
+        parseParametersFromArguments(app, output, parameters, precision, enableRadiationLog);
+    if (enableRadiationLog) {
+        enableSolarRadiationLogging();
+    }
 
     switch (argsResult) {
     case ArgumentsParseResult::Failure:
