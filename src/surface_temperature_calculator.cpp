@@ -411,7 +411,6 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             longwaveTransmissionForOpticalDepth(extraTau, radiationModelType_);
         const double totalLongwaveTransmission =
             qMax(1e-6, radiationModel->outgoingTransmission() * extraLongwaveTransmission);
-        const double ghMult = std::pow(1.0 / totalLongwaveTransmission, 0.25);
         // Приводим пропускание к коэффициенту парникового эффекта для модели
         // SurfaceTemperatureState: в стационаре T^4 ∝ 1 / (1 - G).
         const double greenhouseOpacity =
@@ -441,14 +440,13 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             std::pow((segmentSolarConstant * (1.0 - planetaryAlbedo)) /
                          (4.0 * kStefanBoltzmannConstant),
                      0.25);
-        const double tGlobalAvg = tEff * ghMult;
+        const double tGlobalAvg = tEff;
 
         const double tLatRad =
             std::pow(qMax(0.1,
                           segmentSolarConstant * (1.0 - planetaryAlbedo) * dailyFactor) /
                          kStefanBoltzmannConstant,
-                     0.25) *
-            ghMult;
+                     0.25);
         const double tBase =
             tLatRad * (1.0 - meridionalTransport) + tGlobalAvg * meridionalTransport;
 
