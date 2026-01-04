@@ -131,6 +131,7 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      const SurfaceMaterial &material,
                                      double pressureAtm,
                                      double planetRadiusKm,
+                                     double surfaceGravity,
                                      double blendedInsolation,
                                      double manualGreenhouseOpacity,
                                      bool useAtmosphericModel,
@@ -162,6 +163,7 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     const auto preRadiationModel = makeRadiationModel(atmosphere,
                                                       pressureAtm,
                                                       tEffPre,
+                                                      surfaceGravity,
                                                       radiationModelType);
     const double baseLongwaveTransmission =
         qMax(1e-6, preRadiationModel->outgoingTransmission());
@@ -2877,6 +2879,7 @@ private:
                                               material,
                                               point.pressureAtm,
                                               radiusKm,
+                                              gravity,
                                               blendedInsolation,
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
@@ -2895,6 +2898,7 @@ private:
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
                                    point.state.temperatureKelvin(),
+                                   gravity,
                                    radiationModelType);
             point.airTemperatureK =
                 resolveAirTemperatureKelvin(point.state,
@@ -3187,6 +3191,7 @@ private:
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
                                    point.state.temperatureKelvin(),
+                                   gravity,
                                    radiationModelType);
             point.airTemperatureK =
                 resolveAirTemperatureKelvin(point.state,

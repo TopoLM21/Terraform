@@ -18,6 +18,8 @@ add_executable(solar_constant
     include/radiation_model_utils.h
     include/atmospheric_circulation_model.h
     include/atmospheric_lapse_rate_model.h
+    include/atmospheric_thermodynamics.h
+    include/radiative_convective_profile.h
     include/atmosphere_widget.h
     include/co2_convective_adjustment.h
     include/emission_layer_model.h
@@ -57,8 +59,10 @@ add_executable(solar_constant
     src/layered_radiation_model.cpp
     src/radiation_model_factory.cpp
     src/radiation_model_utils.cpp
+    src/radiative_convective_profile.cpp
     src/atmospheric_circulation_model.cpp
     src/atmospheric_lapse_rate_model.cpp
+    src/atmospheric_thermodynamics.cpp
     src/atmosphere_widget.cpp
     src/co2_convective_adjustment.cpp
     src/emission_layer_model.cpp
