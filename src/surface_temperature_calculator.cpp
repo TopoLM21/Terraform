@@ -531,7 +531,13 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                 (1.0 - radiationModel->incomingTransmission());
             const double longwaveAbsorbedByAir =
                 emittedFlux * (1.0 - radiationModel->outgoingTransmission());
-            const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveAbsorbedByAir;
+            // Длинноволновое охлаждение атмосферы за счет собственного излучения в космос:
+            // F_lw_air = σ * T_air^4, но видимость космоса ограничена оптической толщиной.
+            const double airLongwaveToSpace =
+                kStefanBoltzmannConstant * std::pow(airState.airTemperatureKelvin(), 4.0) *
+                radiationModel->outgoingTransmission();
+            const double airRadiativeHeatingFlux =
+                shortwaveAbsorbedByAir + longwaveAbsorbedByAir - airLongwaveToSpace;
             if (airHeatCapacity > 0.0) {
                 const double airDeltaTemp =
                     airRadiativeHeatingFlux * timeStepSeconds / airHeatCapacity;
