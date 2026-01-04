@@ -35,7 +35,8 @@ struct PlanetPreset {
     double radiusKm;
     QString surfaceMaterialId;
     AtmosphereComposition atmosphere;
-    // Прозрачность парникового слоя (0..1), где 0.99 соответствует плотной атмосфере Венеры.
+    // Ручная непрозрачность парникового слоя (0..1): не является физической моделью и
+    // при включённой атмосфере может привести к двойному учёту парникового эффекта.
     double greenhouseOpacity = 0.0;
     // Включает ручную непрозрачность поверх атмосферной модели (для проверки гипотез).
     bool manualGreenhouseOnTopOfAtmosphere = false;

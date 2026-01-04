@@ -58,7 +58,7 @@ QVector<PlanetPreset> solarSystemPresets() {
         {QStringLiteral("Венера"), 0.72, 116.75, 0.0068, 177.36, 54.88, 0.815, 6051.8,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(92.0, 0.815, 6051.8, {{QStringLiteral("co2"), 1.0}}),
-         0.99,
+         0.0,
          false,
          0.75,
          false,
