@@ -543,7 +543,8 @@ public:
             QStringLiteral("Точная радиационная модель (многослойная)"), this);
         advancedRadiationCheckBox_->setToolTip(
             QStringLiteral("Уточняет передачу коротковолнового и длинноволнового излучения\n"
-                           "через атмосферу в многослойной аппроксимации."));
+                           "через атмосферу в многослойной аппроксимации.\n"
+                           "По умолчанию точная модель включена."));
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
@@ -1697,7 +1698,7 @@ private:
                                      planet.manualGreenhouseOnTopOfAtmosphere,
                                      kRoleManualGreenhouseOnTopOfAtmosphere);
         planetComboBox_->setItemData(index,
-                                     static_cast<int>(RadiationModelType::Fast),
+                                     static_cast<int>(RadiationModelType::Layered),
                                      kRoleAdvancedRadiationModel);
         planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
@@ -1975,7 +1976,7 @@ private:
                 const QVariant advancedRadiationValue =
                     planetComboBox_->itemData(existingIndex, kRoleAdvancedRadiationModel);
                 const QVariant fallbackRadiation =
-                    static_cast<int>(RadiationModelType::Fast);
+                    static_cast<int>(RadiationModelType::Layered);
                 planetComboBox_->setItemData(
                     existingIndex,
                     advancedRadiationValue.isValid() ? advancedRadiationValue : fallbackRadiation,
