@@ -66,9 +66,7 @@
 #include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QSpinBox>
 #include <algorithm>
-#include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QPushButton>
-#include <QtWidgets/QRadioButton>
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QTabWidget>
@@ -548,12 +546,7 @@ public:
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
-        latitudeStepFastRadio_ = new QRadioButton(QStringLiteral("Через 1° (быстрые)"), this);
-        latitudeStepSlowRadio_ = new QRadioButton(QStringLiteral("Через 10° (медленные)"), this);
-        latitudeStepGroup_ = new QButtonGroup(this);
-        latitudeStepGroup_->addButton(latitudeStepFastRadio_);
-        latitudeStepGroup_->addButton(latitudeStepSlowRadio_);
-        latitudeStepFastRadio_->setChecked(true);
+        auto *latitudeStepLabel = new QLabel(QStringLiteral("Через 1° (быстрые)"), this);
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
         deletePlanetButton_ = new QPushButton(this);
         deletePlanetButton_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
@@ -586,10 +579,11 @@ public:
         rotationModeLayout->addWidget(rotationModeComboBox_);
         auto *rotationModeWidget = new QWidget(this);
         rotationModeWidget->setLayout(rotationModeLayout);
-        auto *latitudeStepLayout = new QHBoxLayout();
-        latitudeStepLayout->addWidget(latitudeStepFastRadio_);
-        latitudeStepLayout->addWidget(latitudeStepSlowRadio_);
         auto *latitudeStepWidget = new QWidget(this);
+        auto *latitudeStepLayout = new QHBoxLayout();
+        latitudeStepLayout->addWidget(latitudeStepLabel);
+        latitudeStepLayout->addStretch();
+        latitudeStepLayout->setContentsMargins(0, 0, 0, 0);
         latitudeStepWidget->setLayout(latitudeStepLayout);
 
         auto *planetColumnsLayout = new QHBoxLayout();
@@ -835,7 +829,6 @@ public:
             updateAtmospherePlanetParameters();
             updateAtmosphereComposition();
             updatePlanetOrbitLabels();
-            updateLatitudePointsDefault();
             syncMaterialWithPlanet();
             if (rightTabs->currentWidget() == surfaceMapContainer) {
                 updateSurfaceGridTemperatures();
@@ -946,19 +939,6 @@ public:
             updateSurfaceGridTemperatures();
         });
 
-        connect(latitudeStepFastRadio_, &QRadioButton::toggled, this,
-                [this, rightTabs, surfaceMapContainer](bool checked) {
-            if (!checked) {
-                return;
-            }
-            latitudePointsManuallySet_ = true;
-            if (rightTabs->currentWidget() == surfaceMapContainer) {
-                updateSurfaceGridTemperatures();
-            }
-            clearTemperatureCache();
-            updateTemperaturePlot();
-        });
-
         connect(temperaturePauseButton_, &QPushButton::clicked, this, [this]() {
             const bool shouldPause = !temperaturePauseFlag_.load();
             temperaturePauseFlag_.store(shouldPause);
@@ -1021,19 +1001,6 @@ public:
                                                       : QStringLiteral("3D вид"));
         });
 
-        connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this,
-                [this, rightTabs, surfaceMapContainer](bool checked) {
-            if (!checked) {
-                return;
-            }
-            latitudePointsManuallySet_ = true;
-            if (rightTabs->currentWidget() == surfaceMapContainer) {
-                updateSurfaceGridTemperatures();
-            }
-            clearTemperatureCache();
-            updateTemperaturePlot();
-        });
-
         connect(segmentSelectorWidget_, &SegmentSelectorWidget::currentIndexChanged, this,
                 [this](int) { updateTemperaturePlotForSelectedSegment(); });
 
@@ -1048,7 +1015,7 @@ public:
 
         applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
         applySecondary(std::nullopt);
-        setPlanetPresets(solarSystemPresets(), QStringLiteral("Земля"));
+        setPlanetPresets(solarSystemPresets(), QStringLiteral("Венера"));
     }
 
 private:
@@ -1190,9 +1157,6 @@ private:
     QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
     QCheckBox *advancedRadiationCheckBox_ = nullptr;
     ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
-    QRadioButton *latitudeStepFastRadio_ = nullptr;
-    QRadioButton *latitudeStepSlowRadio_ = nullptr;
-    QButtonGroup *latitudeStepGroup_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
     AtmosphereWidget *atmosphereWidget_ = nullptr;
@@ -1260,7 +1224,6 @@ private:
     double surfaceMaxPressureAtm_ = 0.0;
     bool hasSurfacePressureRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
-    bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
@@ -1403,7 +1366,6 @@ private:
         updateAtmospherePlanetParameters();
         updateAtmosphereComposition();
         updatePlanetOrbitLabels();
-        updateLatitudePointsDefault();
         syncMaterialWithPlanet();
         syncRotationModeWithPlanet();
         syncHeightSeedWithPlanet();
@@ -1612,37 +1574,11 @@ private:
     }
 
     int latitudeStepDegrees() const {
-        if (latitudeStepSlowRadio_ && latitudeStepSlowRadio_->isChecked()) {
-            return 10;
-        }
         return 1;
     }
 
     int latitudePoints() const {
         return 180 / latitudeStepDegrees() + 1;
-    }
-
-    void updateLatitudePointsDefault() {
-        if (latitudePointsManuallySet_) {
-            return;
-        }
-
-        const QVariant value = planetComboBox_->currentData(kRoleDayLength);
-        if (!value.isValid()) {
-            return;
-        }
-
-        const double dayLength = value.toDouble();
-        // Для медленных планет увеличиваем шаг широты, чтобы профили быстро считались
-        // и оставались читаемыми при малом числе характерных широт.
-        const bool useSlowStep = (dayLength > 30.0);
-        const QSignalBlocker fastBlocker(latitudeStepFastRadio_);
-        const QSignalBlocker slowBlocker(latitudeStepSlowRadio_);
-        if (useSlowStep) {
-            latitudeStepSlowRadio_->setChecked(true);
-        } else {
-            latitudeStepFastRadio_->setChecked(true);
-        }
     }
 
     void updatePlanetOrbitLabels() {
