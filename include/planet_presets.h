@@ -42,6 +42,8 @@ struct PlanetPreset {
     bool manualGreenhouseOnTopOfAtmosphere = false;
     // Отражательная способность облаков (0..1), учитывает даже неводные облака.
     double cloudAlbedo = 0.0;
+    // Геотермальный поток снизу (Вт/м²) для подповерхностной модели.
+    double geothermalFluxWPerM2 = 0.0;
     // Приливная синхронизация задается отдельно: длина суток может совпадать
     // с резонансом вращения (например, 3:2) и не означает жесткую блокировку.
     bool tidallyLocked = false;

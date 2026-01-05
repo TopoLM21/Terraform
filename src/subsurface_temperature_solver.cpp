@@ -14,8 +14,15 @@ SubsurfaceTemperatureSolver::SubsurfaceTemperatureSolver(
     double density,
     double specificHeat,
     SubsurfaceBottomBoundaryCondition bottomBoundary,
-    double bottomTemperatureKelvin) {
-    reset(grid, thermalConductivity, density, specificHeat, bottomBoundary, bottomTemperatureKelvin);
+    double bottomTemperatureKelvin,
+    double geothermalFluxWPerM2) {
+    reset(grid,
+          thermalConductivity,
+          density,
+          specificHeat,
+          bottomBoundary,
+          bottomTemperatureKelvin,
+          geothermalFluxWPerM2);
 }
 
 void SubsurfaceTemperatureSolver::reset(const SubsurfaceGrid &grid,
@@ -23,7 +30,8 @@ void SubsurfaceTemperatureSolver::reset(const SubsurfaceGrid &grid,
                                         double density,
                                         double specificHeat,
                                         SubsurfaceBottomBoundaryCondition bottomBoundary,
-                                        double bottomTemperatureKelvin) {
+                                        double bottomTemperatureKelvin,
+                                        double geothermalFluxWPerM2) {
     grid_ = grid;
     thermalConductivity_ = qMax(1e-6, thermalConductivity);
     density_ = qMax(1e-6, density);
@@ -34,6 +42,7 @@ void SubsurfaceTemperatureSolver::reset(const SubsurfaceGrid &grid,
     alpha_ = thermalConductivity_ / (density_ * specificHeat_);
     bottomBoundary_ = bottomBoundary;
     bottomTemperatureKelvin_ = bottomTemperatureKelvin;
+    geothermalFluxWPerM2_ = geothermalFluxWPerM2;
 
     const int layers = grid_.layerCount();
     temperatures_.resize(layers);
@@ -96,6 +105,10 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
         const double capacity = volumetricHeatCapacity * dz[0];
         const double dtInv = capacity / dtSeconds;
         double kBottom = 0.0;
+        // Геотермальный поток задаётся как положительный вверх, добавляя тепло нижнему слою.
+        const double bottomFlux = (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::Insulating)
+            ? geothermalFluxWPerM2_
+            : 0.0;
         if (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::FixedTemperature) {
             const double distBottom = 0.5 * dz[0];
             kBottom = thermalConductivity_ / qMax(1e-6, distBottom);
@@ -103,7 +116,8 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
         a[0] = 0.0;
         b[0] = dtInv + kBottom;
         c[0] = 0.0;
-        d[0] = dtInv * temperatures_[0] + netSurfaceFlux + kBottom * bottomTemperatureKelvin_;
+        d[0] = dtInv * temperatures_[0] + netSurfaceFlux + bottomFlux +
+            kBottom * bottomTemperatureKelvin_;
         solveTridiagonal(a, b, c, d);
         temperatures_[0] = d[0];
         return;
@@ -127,6 +141,11 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
             const double distUp = 0.5 * (dz[n - 2] + dz[n - 1]);
             const double kUp = thermalConductivity_ / qMax(1e-6, distUp);
             double kBottom = 0.0;
+            // Геотермальный поток задаётся как положительный вверх, добавляя тепло нижнему слою.
+            const double bottomFlux =
+                (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::Insulating)
+                ? geothermalFluxWPerM2_
+                : 0.0;
             if (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::FixedTemperature) {
                 const double distBottom = 0.5 * dz[n - 1];
                 kBottom = thermalConductivity_ / qMax(1e-6, distBottom);
@@ -134,7 +153,7 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
             a[i] = -kUp;
             b[i] = dtInv + kUp + kBottom;
             c[i] = 0.0;
-            d[i] = dtInv * temperatures_[i] + kBottom * bottomTemperatureKelvin_;
+            d[i] = dtInv * temperatures_[i] + bottomFlux + kBottom * bottomTemperatureKelvin_;
             continue;
         }
 
