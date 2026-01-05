@@ -28,7 +28,8 @@ SurfaceTemperatureState::SurfaceTemperatureState(double initialTemperatureKelvin
                   material.density,
                   material.specificHeat,
                   subsurfaceSettings.bottomBoundary,
-                  initialTemperatureKelvin);
+                  initialTemperatureKelvin,
+                  subsurfaceSettings.geothermalFluxWPerM2);
     solver_.setInitialTemperature(qMax(minTemperatureKelvin_, initialTemperatureKelvin));
 }
 

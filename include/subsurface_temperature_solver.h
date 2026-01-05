@@ -15,6 +15,7 @@ struct SubsurfaceModelSettings {
     double bottomDepthMeters = 2.0;
     SubsurfaceBottomBoundaryCondition bottomBoundary =
         SubsurfaceBottomBoundaryCondition::Insulating;
+    double geothermalFluxWPerM2 = 0.0;
 };
 
 class SubsurfaceTemperatureSolver {
@@ -25,14 +26,16 @@ public:
                                 double density,
                                 double specificHeat,
                                 SubsurfaceBottomBoundaryCondition bottomBoundary,
-                                double bottomTemperatureKelvin);
+                                double bottomTemperatureKelvin,
+                                double geothermalFluxWPerM2);
 
     void reset(const SubsurfaceGrid &grid,
                double thermalConductivity,
                double density,
                double specificHeat,
                SubsurfaceBottomBoundaryCondition bottomBoundary,
-               double bottomTemperatureKelvin);
+               double bottomTemperatureKelvin,
+               double geothermalFluxWPerM2);
 
     void setInitialTemperature(double temperatureKelvin);
     void setTemperatures(const QVector<double> &temperatures);
@@ -61,4 +64,5 @@ private:
     SubsurfaceBottomBoundaryCondition bottomBoundary_ =
         SubsurfaceBottomBoundaryCondition::Insulating;
     double bottomTemperatureKelvin_ = 3.0;
+    double geothermalFluxWPerM2_ = 0.0;
 };

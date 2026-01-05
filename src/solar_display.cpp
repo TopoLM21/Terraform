@@ -126,6 +126,7 @@ constexpr int kRoleHasSeaLevel = Qt::UserRole + 19;
 constexpr int kRoleFlatHeight = Qt::UserRole + 20;
 constexpr int kRoleManualGreenhouseOnTopOfAtmosphere = Qt::UserRole + 21;
 constexpr int kRoleAdvancedRadiationModel = Qt::UserRole + 22;
+constexpr int kRoleGeothermalFlux = Qt::UserRole + 23;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -262,6 +263,7 @@ struct TemperatureCacheKey {
     double subsurfaceDepthMeters = 0.0;
     SubsurfaceBottomBoundaryCondition subsurfaceBoundary =
         SubsurfaceBottomBoundaryCondition::Insulating;
+    double subsurfaceGeothermalFluxWPerM2 = 0.0;
     int latitudePoints = 0;
     int segmentCount = 0;
     RotationMode rotationMode = RotationMode::Normal;
@@ -294,6 +296,7 @@ struct TemperatureCacheKey {
                subsurfaceTopThicknessMeters == other.subsurfaceTopThicknessMeters &&
                subsurfaceDepthMeters == other.subsurfaceDepthMeters &&
                subsurfaceBoundary == other.subsurfaceBoundary &&
+               subsurfaceGeothermalFluxWPerM2 == other.subsurfaceGeothermalFluxWPerM2 &&
                latitudePoints == other.latitudePoints &&
                segmentCount == other.segmentCount &&
                rotationMode == other.rotationMode;
@@ -340,6 +343,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.subsurfaceTopThicknessMeters), seed);
     seed = qHash(hashDoubleBits(key.subsurfaceDepthMeters), seed);
     seed = qHash(static_cast<int>(key.subsurfaceBoundary), seed);
+    seed = qHash(hashDoubleBits(key.subsurfaceGeothermalFluxWPerM2), seed);
     seed = qHash(key.latitudePoints, seed);
     seed = qHash(key.segmentCount, seed);
     seed = qHash(static_cast<int>(key.rotationMode), seed);
@@ -708,6 +712,15 @@ public:
         subsurfaceDepthSpinBox_->setSingleStep(0.1);
         subsurfaceDepthSpinBox_->setValue(2.0);
         subsurfaceDepthSpinBox_->setSuffix(QStringLiteral(" м"));
+        subsurfaceGeothermalFluxSpinBox_ = new QDoubleSpinBox(this);
+        subsurfaceGeothermalFluxSpinBox_->setRange(0.0, 1.0);
+        subsurfaceGeothermalFluxSpinBox_->setDecimals(4);
+        subsurfaceGeothermalFluxSpinBox_->setSingleStep(0.005);
+        // Типичный диапазон геотермального потока для безатмосферных тел: 0.01–0.02 Вт/м².
+        subsurfaceGeothermalFluxSpinBox_->setValue(0.015);
+        subsurfaceGeothermalFluxSpinBox_->setSuffix(QStringLiteral(" Вт/м²"));
+        subsurfaceGeothermalFluxSpinBox_->setToolTip(
+            QStringLiteral("Типичный диапазон для безатмосферных тел: 0.01–0.02 Вт/м²."));
         subsurfaceBoundaryComboBox_ = new QComboBox(this);
         subsurfaceBoundaryComboBox_->addItem(QStringLiteral("Поток = 0"),
                                              static_cast<int>(SubsurfaceBottomBoundaryCondition::Insulating));
@@ -757,6 +770,8 @@ public:
         subsurfaceFormLayout->addRow(QStringLiteral("Верхняя толщина:"), subsurfaceTopThicknessSpinBox_);
         subsurfaceFormLayout->addRow(QStringLiteral("Глубина модели:"), subsurfaceDepthSpinBox_);
         subsurfaceFormLayout->addRow(QStringLiteral("Граница снизу:"), subsurfaceBoundaryComboBox_);
+        subsurfaceFormLayout->addRow(QStringLiteral("Геотермальный поток:"),
+                                     subsurfaceGeothermalFluxSpinBox_);
         auto *subsurfaceGroupBox = new QGroupBox(QStringLiteral("Подповерхностная модель"), this);
         subsurfaceGroupBox->setLayout(subsurfaceFormLayout);
         auto *surfaceMapLayout = new QVBoxLayout();
@@ -837,6 +852,7 @@ public:
             syncHeightSeedWithPlanet();
             syncFlatHeightWithPlanet();
             syncCloudAlbedoWithPlanet();
+            syncGeothermalFluxWithPlanet();
             syncManualGreenhouseOnTopWithPlanet();
             syncAdvancedRadiationWithPlanet();
             updatePlanetActions();
@@ -986,6 +1002,10 @@ public:
         connect(subsurfaceTopThicknessSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                 this, [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
         connect(subsurfaceDepthSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+                [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
+        connect(subsurfaceGeothermalFluxSpinBox_,
+                QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this,
                 [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
         connect(subsurfaceBoundaryComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [onSubsurfaceChanged](int) { onSubsurfaceChanged(); });
@@ -1183,6 +1203,7 @@ private:
     QDoubleSpinBox *subsurfaceTopThicknessSpinBox_ = nullptr;
     QDoubleSpinBox *subsurfaceDepthSpinBox_ = nullptr;
     QComboBox *subsurfaceBoundaryComboBox_ = nullptr;
+    QDoubleSpinBox *subsurfaceGeothermalFluxSpinBox_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
     SurfaceWindScaleWidget *windScaleWidget_ = nullptr;
@@ -1637,6 +1658,7 @@ private:
                                      static_cast<int>(RadiationModelType::Layered),
                                      kRoleAdvancedRadiationModel);
         planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
+        planetComboBox_->setItemData(index, planet.geothermalFluxWPerM2, kRoleGeothermalFlux);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
                                      kRoleHeightSourceType);
         planetComboBox_->setItemData(index, planet.heightmapPath, kRoleHeightmapPath);
@@ -1865,6 +1887,8 @@ private:
             }
             const bool manualGreenhouseOnTop = manualGreenhouseOnTopInput->isChecked();
             const double cloudAlbedo = cloudAlbedoInput->value();
+            const double geothermalFlux =
+                subsurfaceGeothermalFluxSpinBox_ ? subsurfaceGeothermalFluxSpinBox_->value() : 0.0;
 
             const int existingIndex = findPlanetIndexByName(name);
             const QString materialId = materialInput->currentData().toString();
@@ -1880,7 +1904,7 @@ private:
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
                                 composition, greenhouseOpacity, manualGreenhouseOnTop,
-                                cloudAlbedo, tidallyLocked};
+                                cloudAlbedo, geothermalFlux, tidallyLocked};
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
             if (existingIndex >= 0) {
@@ -1918,6 +1942,9 @@ private:
                     advancedRadiationValue.isValid() ? advancedRadiationValue : fallbackRadiation,
                     kRoleAdvancedRadiationModel);
                 planetComboBox_->setItemData(existingIndex, preset.cloudAlbedo, kRoleCloudAlbedo);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.geothermalFluxWPerM2,
+                                             kRoleGeothermalFlux);
                 planetComboBox_->setItemData(existingIndex,
                                              static_cast<int>(preset.heightSourceType),
                                              kRoleHeightSourceType);
@@ -2040,6 +2067,26 @@ private:
         const double cloudAlbedo = planetComboBox_->itemData(index, kRoleCloudAlbedo).toDouble();
         const QSignalBlocker blocker(cloudAlbedoSpinBox_);
         cloudAlbedoSpinBox_->setValue(cloudAlbedo);
+    }
+
+    void syncGeothermalFluxWithPlanet() {
+        if (!subsurfaceGeothermalFluxSpinBox_) {
+            return;
+        }
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+
+        const QString planetName = planetComboBox_->itemData(index, kRolePlanetName).toString();
+        if (planetName != QStringLiteral("Луна")) {
+            return;
+        }
+
+        const double geothermalFlux =
+            planetComboBox_->itemData(index, kRoleGeothermalFlux).toDouble();
+        const QSignalBlocker blocker(subsurfaceGeothermalFluxSpinBox_);
+        subsurfaceGeothermalFluxSpinBox_->setValue(geothermalFlux);
     }
 
     void syncManualGreenhouseOnTopWithPlanet() {
@@ -2382,6 +2429,9 @@ private:
         if (subsurfaceBoundaryComboBox_) {
             settings.bottomBoundary = static_cast<SubsurfaceBottomBoundaryCondition>(
                 subsurfaceBoundaryComboBox_->currentData().toInt());
+        }
+        if (subsurfaceGeothermalFluxSpinBox_) {
+            settings.geothermalFluxWPerM2 = subsurfaceGeothermalFluxSpinBox_->value();
         }
         return settings;
     }
@@ -3693,6 +3743,7 @@ private:
                                             subsurfaceSettings.topLayerThicknessMeters,
                                             subsurfaceSettings.bottomDepthMeters,
                                             subsurfaceSettings.bottomBoundary,
+                                            subsurfaceSettings.geothermalFluxWPerM2,
                                             latitudePointCount,
                                             segmentCount,
                                             rotationMode};
@@ -3726,6 +3777,7 @@ private:
                                                       subsurfaceSettings.topLayerThicknessMeters,
                                                       subsurfaceSettings.bottomDepthMeters,
                                                       subsurfaceSettings.bottomBoundary,
+                                                      subsurfaceSettings.geothermalFluxWPerM2,
                                                       latitudePointCount,
                                                       segmentCount,
                                                       rotationMode};
