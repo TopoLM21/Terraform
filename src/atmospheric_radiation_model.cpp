@@ -28,8 +28,8 @@ void AtmosphericRadiationModel::computeOpticalDepths() {
         return;
     }
 
-    // Оптическая толщина определяется интегралом τ = ∫ κ(T, p) ρ dz,
-    // где κ — массовая непрозрачность, ρ — плотность, z — высота.
+    // Оптическая толщина определяется интегралом τ = ∫ κ(T, p, composition) ρ dz,
+    // где κ — суммарная непрозрачность по полосам CO2/H2O/SO2, ρ — плотность, z — высота.
     const RadiativeConvectiveProfile profile(composition_,
                                               pressureAtm_,
                                               baseTemperatureKelvin_,

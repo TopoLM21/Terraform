@@ -1,6 +1,7 @@
 #pragma once
 
 #include "atmosphere_model.h"
+#include "spectral_band_model.h"
 
 #include <QVector>
 
@@ -32,11 +33,9 @@ private:
     double kappaShortwave(double temperatureKelvin, double pressurePa) const;
     double radiativeGradientDlnT(double temperatureKelvin, double pressurePa) const;
     double adiabaticGradientDlnT(double temperatureKelvin, double pressurePa) const;
-    double mixedOpacity(double temperatureKelvin,
-                        double pressurePa,
-                        bool shortwave) const;
 
     AtmosphereComposition composition_;
+    SpectralBandModel spectralBandModel_ = SpectralBandModel::defaultModel();
     double surfacePressureAtm_ = 0.0;
     double surfaceTemperatureKelvin_ = 0.0;
     double effectiveTemperatureKelvin_ = 0.0;
