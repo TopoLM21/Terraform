@@ -4,17 +4,11 @@
 
 #include <QtCore/QtMath>
 
-#include <algorithm>
 #include <cmath>
 
 namespace {
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kPascalPerAtm = 101325.0;
-constexpr double kReferencePressurePa = 101325.0;
-constexpr double kReferenceTemperatureKelvin = 288.0;
-constexpr double kOpacityPressureExponent = 0.5;
-constexpr double kOpacityTemperatureExponent = 0.3;
-constexpr double kMinimumOpacity = 1e-5;
 constexpr double kTopPressureFloorAtm = 1e-4;
 constexpr double kMinPressureRatio = 1e-4;
 }  // namespace
@@ -46,57 +40,14 @@ double RadiativeConvectiveProfile::totalOpticalDepthShortwave() const {
     return totalOpticalDepthShortwave_;
 }
 
-double RadiativeConvectiveProfile::mixedOpacity(double temperatureKelvin,
-                                                double pressurePa,
-                                                bool shortwave) const {
-    double kappaMix = 0.0;
-    double totalShare = 0.0;
-    const auto gases = availableGases();
-    const auto fractions = composition_.fractions();
-    for (const auto &fraction : fractions) {
-        if (fraction.share <= 0.0) {
-            continue;
-        }
-        const auto it = std::find_if(gases.begin(), gases.end(),
-                                     [&fraction](const GasSpec &spec) {
-                                         return spec.id == fraction.id;
-                                     });
-        if (it == gases.end()) {
-            continue;
-        }
-        const double kappaBase =
-            shortwave
-                ? (it->isGreenhouse ? 0.03 : 0.005)
-                : (it->isGreenhouse ? 0.20 : 0.01);
-        kappaMix += fraction.share * kappaBase;
-        totalShare += fraction.share;
-    }
-
-    if (totalShare <= 0.0) {
-        kappaMix = shortwave ? 0.005 : 0.01;
-    } else {
-        kappaMix /= totalShare;
-    }
-
-    // Учитываем зависимость κ от давления и температуры:
-    // κ(T, p) = κ0 * (p / p0)^a * (T / T0)^b, где a ~ 0.5, b ~ 0.3.
-    const double pressureScale =
-        std::pow(qMax(1e-6, pressurePa / kReferencePressurePa),
-                 kOpacityPressureExponent);
-    const double temperatureScale =
-        std::pow(qMax(1e-6, temperatureKelvin / kReferenceTemperatureKelvin),
-                 kOpacityTemperatureExponent);
-    return qMax(kMinimumOpacity, kappaMix * pressureScale * temperatureScale);
-}
-
 double RadiativeConvectiveProfile::kappaLongwave(double temperatureKelvin,
                                                  double pressurePa) const {
-    return mixedOpacity(temperatureKelvin, pressurePa, false);
+    return spectralBandModel_.kappa(composition_, temperatureKelvin, pressurePa, false);
 }
 
 double RadiativeConvectiveProfile::kappaShortwave(double temperatureKelvin,
                                                   double pressurePa) const {
-    return mixedOpacity(temperatureKelvin, pressurePa, true);
+    return spectralBandModel_.kappa(composition_, temperatureKelvin, pressurePa, true);
 }
 
 double RadiativeConvectiveProfile::radiativeGradientDlnT(double temperatureKelvin,

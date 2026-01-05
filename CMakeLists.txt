@@ -31,6 +31,7 @@ add_executable(solar_constant
     include/height_color_scale.h
     include/surface_point_state.h
     include/surface_temperature_state.h
+    include/spectral_band_model.h
     include/subsurface_grid.h
     include/subsurface_temperature_solver.h
     include/surface_temperature_scale_widget.h
@@ -60,6 +61,7 @@ add_executable(solar_constant
     src/radiation_model_factory.cpp
     src/radiation_model_utils.cpp
     src/radiative_convective_profile.cpp
+    src/spectral_band_model.cpp
     src/atmospheric_circulation_model.cpp
     src/atmospheric_lapse_rate_model.cpp
     src/atmospheric_thermodynamics.cpp
