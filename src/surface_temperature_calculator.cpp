@@ -296,7 +296,25 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     // на медленно вращающихся планетах (например, Меркурий).
     const int scaledStepsPerDay = qRound(dayLengthDays_ * 24.0);
     const int stepsPerDay = qMax(kDailyTimeSteps, scaledStepsPerDay);
-    const int spinUpDays = isTidallyLocked ? 2 : kSpinUpDays;
+    int spinUpDays = isTidallyLocked ? 2 : kSpinUpDays;
+    if (subsurfaceSettings_.geothermalFluxWPerM2 > 0.0) {
+        const double depthMeters = qMax(0.0, subsurfaceSettings_.bottomDepthMeters);
+        const double heatCapacityVolume =
+            qMax(0.0, material_.density) * qMax(0.0, material_.specificHeat);
+        const double alpha =
+            (material_.thermalConductivity > 0.0 && heatCapacityVolume > 0.0)
+                ? (material_.thermalConductivity / heatCapacityVolume)
+                : 0.0;
+        if (depthMeters > 0.0 && alpha > 0.0) {
+            // Диффузия тепла задаёт время, за которое геотермальная волна поднимается к поверхности.
+            const double diffusionTimeSeconds = (depthMeters * depthMeters) / alpha;
+            const double diffusionTimeDays = diffusionTimeSeconds / 86400.0;
+            const double dayLengthDays = qMax(0.01, dayLengthDays_);
+            const int diffusionSpinUpDays =
+                static_cast<int>(std::ceil(diffusionTimeDays / dayLengthDays));
+            spinUpDays = qMax(spinUpDays, diffusionSpinUpDays);
+        }
+    }
     const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * 86400.0;
     const double timeStepSeconds =
         (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
