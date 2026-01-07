@@ -86,6 +86,7 @@ constexpr int kRoleHeightmapPath = Qt::UserRole + 14;
 constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 15;
 constexpr int kRoleHeightSeed = Qt::UserRole + 16;
 constexpr int kRoleUseContinentsHeight = Qt::UserRole + 17;
+constexpr int kRoleSubsurfaceSettings = Qt::UserRole + 18;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -110,6 +111,7 @@ struct TemperatureCacheKey {
     double subsurfaceDepthMeters = 0.0;
     SubsurfaceBottomBoundaryCondition subsurfaceBoundary =
         SubsurfaceBottomBoundaryCondition::Insulating;
+    QString subsurfaceProfileSignature;
     int latitudePoints = 0;
     int segmentCount = 0;
     RotationMode rotationMode = RotationMode::Normal;
@@ -132,6 +134,7 @@ struct TemperatureCacheKey {
                subsurfaceTopThicknessMeters == other.subsurfaceTopThicknessMeters &&
                subsurfaceDepthMeters == other.subsurfaceDepthMeters &&
                subsurfaceBoundary == other.subsurfaceBoundary &&
+               subsurfaceProfileSignature == other.subsurfaceProfileSignature &&
                latitudePoints == other.latitudePoints &&
                segmentCount == other.segmentCount &&
                rotationMode == other.rotationMode;
@@ -168,6 +171,7 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.subsurfaceTopThicknessMeters), seed);
     seed = qHash(hashDoubleBits(key.subsurfaceDepthMeters), seed);
     seed = qHash(static_cast<int>(key.subsurfaceBoundary), seed);
+    seed = qHash(key.subsurfaceProfileSignature, seed);
     seed = qHash(key.latitudePoints, seed);
     seed = qHash(key.segmentCount, seed);
     seed = qHash(static_cast<int>(key.rotationMode), seed);
@@ -1311,6 +1315,9 @@ private:
         planetComboBox_->setItemData(index, planet.heightmapScaleKm, kRoleHeightmapScaleKm);
         planetComboBox_->setItemData(index, planet.heightSeed, kRoleHeightSeed);
         planetComboBox_->setItemData(index, planet.useContinentsHeight, kRoleUseContinentsHeight);
+        planetComboBox_->setItemData(index,
+                                     QVariant::fromValue(planet.subsurfaceSettings),
+                                     kRoleSubsurfaceSettings);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -1868,6 +1875,16 @@ private:
         if (subsurfaceBoundaryComboBox_) {
             settings.bottomBoundary = static_cast<SubsurfaceBottomBoundaryCondition>(
                 subsurfaceBoundaryComboBox_->currentData().toInt());
+        }
+        if (planetComboBox_) {
+            const QVariant presetSettings = planetComboBox_->currentData(kRoleSubsurfaceSettings);
+            if (presetSettings.isValid()) {
+                const SubsurfaceModelSettings presetProfile =
+                    presetSettings.value<SubsurfaceModelSettings>();
+                settings.thermalConductivityByLayer = presetProfile.thermalConductivityByLayer;
+                settings.densityByLayer = presetProfile.densityByLayer;
+                settings.specificHeatByLayer = presetProfile.specificHeatByLayer;
+            }
         }
         return settings;
     }
@@ -2539,6 +2556,7 @@ private:
                                             subsurfaceSettings.topLayerThicknessMeters,
                                             subsurfaceSettings.bottomDepthMeters,
                                             subsurfaceSettings.bottomBoundary,
+                                            subsurfaceSettings.profileSignature(),
                                             latitudePointCount,
                                             segmentCount,
                                             rotationMode};
@@ -2562,6 +2580,7 @@ private:
                                                       subsurfaceSettings.topLayerThicknessMeters,
                                                       subsurfaceSettings.bottomDepthMeters,
                                                       subsurfaceSettings.bottomBoundary,
+                                                      subsurfaceSettings.profileSignature(),
                                                       latitudePointCount,
                                                       segmentCount,
                                                       rotationMode};
