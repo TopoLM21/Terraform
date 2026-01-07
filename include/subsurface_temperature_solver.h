@@ -11,7 +11,8 @@ enum class SubsurfaceBottomBoundaryCondition {
 
 struct SubsurfaceModelSettings {
     int layerCount = 24;
-    double topLayerThicknessMeters = 0.02;
+    // Верхний слой ~5 см: ближе к типичной суточной глубине прогрева лунного реголита.
+    double topLayerThicknessMeters = 0.05;
     double bottomDepthMeters = 2.0;
     SubsurfaceBottomBoundaryCondition bottomBoundary =
         SubsurfaceBottomBoundaryCondition::Insulating;

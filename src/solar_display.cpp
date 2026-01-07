@@ -704,7 +704,7 @@ public:
         subsurfaceTopThicknessSpinBox_->setRange(0.001, 10.0);
         subsurfaceTopThicknessSpinBox_->setDecimals(3);
         subsurfaceTopThicknessSpinBox_->setSingleStep(0.01);
-        subsurfaceTopThicknessSpinBox_->setValue(0.02);
+        subsurfaceTopThicknessSpinBox_->setValue(0.05);
         subsurfaceTopThicknessSpinBox_->setSuffix(QStringLiteral(" м"));
         subsurfaceDepthSpinBox_ = new QDoubleSpinBox(this);
         subsurfaceDepthSpinBox_->setRange(0.1, 200.0);
