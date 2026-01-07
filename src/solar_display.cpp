@@ -1858,6 +1858,9 @@ private:
         defaults.minTemperatureKelvin = minTemperatureKelvin;
         defaults.material = *material;
         defaults.subsurfaceSettings = buildSubsurfaceSettings();
+        defaults.subsurfaceSettings.temperatureDependentConductivity =
+            defaults.subsurfaceSettings.temperatureDependentConductivity ||
+            defaults.material.temperatureDependentConductivity;
         return defaults;
     }
 
@@ -1884,6 +1887,11 @@ private:
                 settings.thermalConductivityByLayer = presetProfile.thermalConductivityByLayer;
                 settings.densityByLayer = presetProfile.densityByLayer;
                 settings.specificHeatByLayer = presetProfile.specificHeatByLayer;
+                settings.temperatureDependentConductivity =
+                    presetProfile.temperatureDependentConductivity;
+                settings.regolithLambdaContact = presetProfile.regolithLambdaContact;
+                settings.regolithRadiativeCoefficientB =
+                    presetProfile.regolithRadiativeCoefficientB;
             }
         }
         return settings;
@@ -2509,7 +2517,10 @@ private:
             return;
         }
 
-        const SubsurfaceModelSettings subsurfaceSettings = buildSubsurfaceSettings();
+        SubsurfaceModelSettings subsurfaceSettings = buildSubsurfaceSettings();
+        subsurfaceSettings.temperatureDependentConductivity =
+            subsurfaceSettings.temperatureDependentConductivity ||
+            material->temperatureDependentConductivity;
         const int latitudePointCount = latitudePoints();
         const RotationMode rotationMode =
             static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());

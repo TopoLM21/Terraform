@@ -28,6 +28,10 @@ struct SubsurfaceModelSettings {
     QVector<double> thermalConductivityByLayer;
     QVector<double> densityByLayer;
     QVector<double> specificHeatByLayer;
+    bool temperatureDependentConductivity = false;
+    // Параметры температурной зависимости λ(T) = λ_contact + b * T^3.
+    double regolithLambdaContact = 0.0;
+    double regolithRadiativeCoefficientB = 0.0;
 
     QVector<double> thermalConductivityProfile(int layers, double defaultValue) const;
     QVector<double> densityProfile(int layers, double defaultValue) const;
@@ -49,6 +53,9 @@ public:
                                 const QVector<double> &thermalConductivityByLayer,
                                 const QVector<double> &densityByLayer,
                                 const QVector<double> &specificHeatByLayer,
+                                bool temperatureDependentConductivity,
+                                double regolithLambdaContact,
+                                double regolithRadiativeCoefficientB,
                                 SubsurfaceBottomBoundaryCondition bottomBoundary,
                                 double bottomTemperatureKelvin);
 
@@ -56,6 +63,9 @@ public:
                const QVector<double> &thermalConductivityByLayer,
                const QVector<double> &densityByLayer,
                const QVector<double> &specificHeatByLayer,
+               bool temperatureDependentConductivity,
+               double regolithLambdaContact,
+               double regolithRadiativeCoefficientB,
                SubsurfaceBottomBoundaryCondition bottomBoundary,
                double bottomTemperatureKelvin);
 
@@ -81,6 +91,9 @@ private:
     QVector<double> thermalConductivityByLayer_;
     QVector<double> densityByLayer_;
     QVector<double> specificHeatByLayer_;
+    bool temperatureDependentConductivity_ = false;
+    double regolithLambdaContact_ = 0.0;
+    double regolithRadiativeCoefficientB_ = 0.0;
     SubsurfaceBottomBoundaryCondition bottomBoundary_ =
         SubsurfaceBottomBoundaryCondition::Insulating;
     double bottomTemperatureKelvin_ = 3.0;
@@ -115,10 +128,13 @@ inline QString SubsurfaceModelSettings::profileSignature() const {
         }
         return parts.join(',');
     };
-    return QStringLiteral("k=%1|rho=%2|cp=%3")
+    return QStringLiteral("k=%1|rho=%2|cp=%3|lambdaContact=%4|b=%5|tempDep=%6")
         .arg(serialize(thermalConductivityByLayer),
              serialize(densityByLayer),
-             serialize(specificHeatByLayer));
+             serialize(specificHeatByLayer),
+             QString::number(regolithLambdaContact, 'g', 10),
+             QString::number(regolithRadiativeCoefficientB, 'g', 10),
+             temperatureDependentConductivity ? QStringLiteral("1") : QStringLiteral("0"));
 }
 
 inline QVector<double> SubsurfaceModelSettings::expandProfile(const QVector<double> &values,
