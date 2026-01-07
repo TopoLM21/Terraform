@@ -6,6 +6,12 @@
 
 namespace {
 constexpr double kMinHeatCapacity = 1e-6;
+
+double regolithConductivityAtT(double lambdaContact, double b, double temperatureKelvin) {
+    // b * T^3 описывает радиационный перенос тепла через поры реголита.
+    const double radiativeTerm = b * std::pow(qMax(0.0, temperatureKelvin), 3.0);
+    return qMax(1e-6, lambdaContact + radiativeTerm);
+}
 } // namespace
 
 SubsurfaceTemperatureSolver::SubsurfaceTemperatureSolver(
@@ -13,12 +19,18 @@ SubsurfaceTemperatureSolver::SubsurfaceTemperatureSolver(
     const QVector<double> &thermalConductivityByLayer,
     const QVector<double> &densityByLayer,
     const QVector<double> &specificHeatByLayer,
+    bool temperatureDependentConductivity,
+    double regolithLambdaContact,
+    double regolithRadiativeCoefficientB,
     SubsurfaceBottomBoundaryCondition bottomBoundary,
     double bottomTemperatureKelvin) {
     reset(grid,
           thermalConductivityByLayer,
           densityByLayer,
           specificHeatByLayer,
+          temperatureDependentConductivity,
+          regolithLambdaContact,
+          regolithRadiativeCoefficientB,
           bottomBoundary,
           bottomTemperatureKelvin);
 }
@@ -27,11 +39,17 @@ void SubsurfaceTemperatureSolver::reset(const SubsurfaceGrid &grid,
                                         const QVector<double> &thermalConductivityByLayer,
                                         const QVector<double> &densityByLayer,
                                         const QVector<double> &specificHeatByLayer,
+                                        bool temperatureDependentConductivity,
+                                        double regolithLambdaContact,
+                                        double regolithRadiativeCoefficientB,
                                         SubsurfaceBottomBoundaryCondition bottomBoundary,
                                         double bottomTemperatureKelvin) {
     grid_ = grid;
     bottomBoundary_ = bottomBoundary;
     bottomTemperatureKelvin_ = bottomTemperatureKelvin;
+    temperatureDependentConductivity_ = temperatureDependentConductivity;
+    regolithLambdaContact_ = regolithLambdaContact;
+    regolithRadiativeCoefficientB_ = regolithRadiativeCoefficientB;
 
     const int layers = grid_.layerCount();
     const auto normalizeProfile = [layers](const QVector<double> &values, double fallback) {
@@ -91,9 +109,20 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
     QVector<double> c(n, 0.0);
     QVector<double> d(n, 0.0);
 
-    const auto interfaceConductivity = [this](int upperIndex, int lowerIndex) {
-        const double kUpper = thermalConductivityByLayer_.value(upperIndex, 1.0);
-        const double kLower = thermalConductivityByLayer_.value(lowerIndex, kUpper);
+    const auto layerConductivity = [this](int index) {
+        const double fallback = thermalConductivityByLayer_.value(index, 1.0);
+        if (!temperatureDependentConductivity_) {
+            return fallback;
+        }
+        const double temperatureKelvin = temperatures_.value(index, 0.0);
+        return regolithConductivityAtT(regolithLambdaContact_,
+                                       regolithRadiativeCoefficientB_,
+                                       temperatureKelvin);
+    };
+
+    const auto interfaceConductivity = [&layerConductivity](int upperIndex, int lowerIndex) {
+        const double kUpper = layerConductivity(upperIndex);
+        const double kLower = layerConductivity(lowerIndex);
         const double sum = kUpper + kLower;
         if (sum <= 0.0) {
             return 0.0;
@@ -109,7 +138,7 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
         double kBottom = 0.0;
         if (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::FixedTemperature) {
             const double distBottom = 0.5 * dz[0];
-            kBottom = thermalConductivityByLayer_[0] / qMax(1e-6, distBottom);
+            kBottom = layerConductivity(0) / qMax(1e-6, distBottom);
         }
         a[0] = 0.0;
         b[0] = dtInv + kBottom;
@@ -144,7 +173,7 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
             double kBottom = 0.0;
             if (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::FixedTemperature) {
                 const double distBottom = 0.5 * dz[n - 1];
-                kBottom = thermalConductivityByLayer_[n - 1] / qMax(1e-6, distBottom);
+                kBottom = layerConductivity(n - 1) / qMax(1e-6, distBottom);
             }
             a[i] = -kUp;
             b[i] = dtInv + kUp + kBottom;

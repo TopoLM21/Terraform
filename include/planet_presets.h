@@ -16,6 +16,8 @@ struct SurfaceMaterial {
     double density;
     double specificHeat;
     double heatCapacity;
+    // Использовать температурную зависимость теплопроводности реголита.
+    bool temperatureDependentConductivity = false;
 };
 
 enum class HeightSourceType {
@@ -67,6 +69,20 @@ inline SubsurfaceModelSettings moonRegolithSubsurfaceSettings() {
     settings.thermalConductivityByLayer = {0.012, 0.08};
     settings.densityByLayer = {1100.0, 1800.0};
     settings.specificHeatByLayer = {680.0, 800.0};
+    settings.temperatureDependentConductivity = true;
+    settings.regolithLambdaContact = 0.01;
+    settings.regolithRadiativeCoefficientB = 2.5e-10;
+    return settings;
+}
+
+inline SubsurfaceModelSettings mercuryRegolithSubsurfaceSettings() {
+    SubsurfaceModelSettings settings;
+    settings.thermalConductivityByLayer = {0.02, 0.12};
+    settings.densityByLayer = {1400.0, 2000.0};
+    settings.specificHeatByLayer = {700.0, 850.0};
+    settings.temperatureDependentConductivity = true;
+    settings.regolithLambdaContact = 0.018;
+    settings.regolithRadiativeCoefficientB = 3.0e-10;
     return settings;
 }
 

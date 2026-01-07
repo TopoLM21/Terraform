@@ -29,10 +29,16 @@ SurfacePointState::SurfacePointState(double initialTemperatureKelvin,
         subsurfaceSettings.densityProfile(layerCount, material.density);
     const QVector<double> specificHeatProfile =
         subsurfaceSettings.specificHeatProfile(layerCount, material.specificHeat);
+    const bool temperatureDependentConductivity =
+        subsurfaceSettings.temperatureDependentConductivity ||
+        material.temperatureDependentConductivity;
     solver_.reset(grid,
                   thermalConductivityProfile,
                   densityProfile,
                   specificHeatProfile,
+                  temperatureDependentConductivity,
+                  subsurfaceSettings.regolithLambdaContact,
+                  subsurfaceSettings.regolithRadiativeCoefficientB,
                   subsurfaceSettings.bottomBoundary,
                   initialTemperatureKelvin);
     solver_.setInitialTemperature(qMax(minTemperatureKelvin_, initialTemperatureKelvin));
