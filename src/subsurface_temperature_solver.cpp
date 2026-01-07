@@ -10,32 +10,42 @@ constexpr double kMinHeatCapacity = 1e-6;
 
 SubsurfaceTemperatureSolver::SubsurfaceTemperatureSolver(
     const SubsurfaceGrid &grid,
-    double thermalConductivity,
-    double density,
-    double specificHeat,
+    const QVector<double> &thermalConductivityByLayer,
+    const QVector<double> &densityByLayer,
+    const QVector<double> &specificHeatByLayer,
     SubsurfaceBottomBoundaryCondition bottomBoundary,
     double bottomTemperatureKelvin) {
-    reset(grid, thermalConductivity, density, specificHeat, bottomBoundary, bottomTemperatureKelvin);
+    reset(grid,
+          thermalConductivityByLayer,
+          densityByLayer,
+          specificHeatByLayer,
+          bottomBoundary,
+          bottomTemperatureKelvin);
 }
 
 void SubsurfaceTemperatureSolver::reset(const SubsurfaceGrid &grid,
-                                        double thermalConductivity,
-                                        double density,
-                                        double specificHeat,
+                                        const QVector<double> &thermalConductivityByLayer,
+                                        const QVector<double> &densityByLayer,
+                                        const QVector<double> &specificHeatByLayer,
                                         SubsurfaceBottomBoundaryCondition bottomBoundary,
                                         double bottomTemperatureKelvin) {
     grid_ = grid;
-    thermalConductivity_ = qMax(1e-6, thermalConductivity);
-    density_ = qMax(1e-6, density);
-    specificHeat_ = qMax(1e-6, specificHeat);
-    // Коэффициент температуропроводности: alpha = lambda / (rho * c).
-    // Большая теплопроводность увеличивает скорость выравнивания,
-    // а высокая плотность/удельная теплоемкость повышают тепловую инерцию.
-    alpha_ = thermalConductivity_ / (density_ * specificHeat_);
     bottomBoundary_ = bottomBoundary;
     bottomTemperatureKelvin_ = bottomTemperatureKelvin;
 
     const int layers = grid_.layerCount();
+    const auto normalizeProfile = [layers](const QVector<double> &values, double fallback) {
+        QVector<double> result;
+        result.resize(layers);
+        for (int i = 0; i < layers; ++i) {
+            const double value = (i < values.size()) ? values[i] : fallback;
+            result[i] = qMax(1e-6, value);
+        }
+        return result;
+    };
+    thermalConductivityByLayer_ = normalizeProfile(thermalConductivityByLayer, 1.0);
+    densityByLayer_ = normalizeProfile(densityByLayer, 1.0);
+    specificHeatByLayer_ = normalizeProfile(specificHeatByLayer, 1.0);
     temperatures_.resize(layers);
 }
 
@@ -81,15 +91,25 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
     QVector<double> c(n, 0.0);
     QVector<double> d(n, 0.0);
 
-    const double volumetricHeatCapacity = qMax(kMinHeatCapacity, density_ * specificHeat_);
+    const auto interfaceConductivity = [this](int upperIndex, int lowerIndex) {
+        const double kUpper = thermalConductivityByLayer_.value(upperIndex, 1.0);
+        const double kLower = thermalConductivityByLayer_.value(lowerIndex, kUpper);
+        const double sum = kUpper + kLower;
+        if (sum <= 0.0) {
+            return 0.0;
+        }
+        return 2.0 * kUpper * kLower / sum;
+    };
 
     if (n == 1) {
+        const double volumetricHeatCapacity =
+            qMax(kMinHeatCapacity, densityByLayer_[0] * specificHeatByLayer_[0]);
         const double capacity = volumetricHeatCapacity * dz[0];
         const double dtInv = capacity / dtSeconds;
         double kBottom = 0.0;
         if (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::FixedTemperature) {
             const double distBottom = 0.5 * dz[0];
-            kBottom = thermalConductivity_ / qMax(1e-6, distBottom);
+            kBottom = thermalConductivityByLayer_[0] / qMax(1e-6, distBottom);
         }
         a[0] = 0.0;
         b[0] = dtInv + kBottom;
@@ -101,12 +121,15 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
     }
 
     for (int i = 0; i < n; ++i) {
+        const double volumetricHeatCapacity =
+            qMax(kMinHeatCapacity, densityByLayer_[i] * specificHeatByLayer_[i]);
         const double capacity = volumetricHeatCapacity * dz[i];
         const double dtInv = capacity / dtSeconds;
 
         if (i == 0) {
             const double distDown = 0.5 * (dz[0] + dz[1]);
-            const double kDown = thermalConductivity_ / qMax(1e-6, distDown);
+            const double kDown =
+                interfaceConductivity(0, 1) / qMax(1e-6, distDown);
             a[i] = 0.0;
             b[i] = dtInv + kDown;
             c[i] = -kDown;
@@ -116,11 +139,12 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
 
         if (i == n - 1) {
             const double distUp = 0.5 * (dz[n - 2] + dz[n - 1]);
-            const double kUp = thermalConductivity_ / qMax(1e-6, distUp);
+            const double kUp =
+                interfaceConductivity(n - 2, n - 1) / qMax(1e-6, distUp);
             double kBottom = 0.0;
             if (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::FixedTemperature) {
                 const double distBottom = 0.5 * dz[n - 1];
-                kBottom = thermalConductivity_ / qMax(1e-6, distBottom);
+                kBottom = thermalConductivityByLayer_[n - 1] / qMax(1e-6, distBottom);
             }
             a[i] = -kUp;
             b[i] = dtInv + kUp + kBottom;
@@ -131,8 +155,8 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
 
         const double distUp = 0.5 * (dz[i - 1] + dz[i]);
         const double distDown = 0.5 * (dz[i] + dz[i + 1]);
-        const double kUp = thermalConductivity_ / qMax(1e-6, distUp);
-        const double kDown = thermalConductivity_ / qMax(1e-6, distDown);
+        const double kUp = interfaceConductivity(i - 1, i) / qMax(1e-6, distUp);
+        const double kDown = interfaceConductivity(i, i + 1) / qMax(1e-6, distDown);
         a[i] = -kUp;
         b[i] = dtInv + kUp + kDown;
         c[i] = -kDown;
