@@ -1,6 +1,7 @@
 #include "surface_globe_widget.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include <QPainter>
 #include <QPalette>
@@ -11,6 +12,7 @@
 #include <QtMath>
 
 #include "height_color_scale.h"
+#include "star_color.h"
 #include "surface_realistic_color.h"
 #include "temperature_color_scale.h"
 
@@ -41,6 +43,9 @@ QVector3D latLonToCartesian(double latitudeDeg, double longitudeDeg) {
                      static_cast<float>(qSin(latRad)),
                      static_cast<float>(cosLat * qCos(lonRad)));
 }
+
+constexpr double kSolarRadiusMeters = 6.957e8;
+constexpr double kAstronomicalUnitMeters = 1.496e11;
 
 QVector<QVector3D> clipPolygonAgainstZ(const QVector<QVector3D> &input) {
     QVector<QVector3D> output;
@@ -194,6 +199,33 @@ void SurfaceGlobeWidget::setAxisTiltDegrees(double tiltDegrees) {
     update();
 }
 
+void SurfaceGlobeWidget::setStarDirection(const QVector3D &direction) {
+    setStarLightDirection(direction);
+}
+
+void SurfaceGlobeWidget::setStarTemperature(double temperatureK) {
+    if (temperatureK <= 0.0) {
+        return;
+    }
+    setStarColor(starColorFromTemperature(temperatureK));
+}
+
+void SurfaceGlobeWidget::setStarDistanceAu(double distanceAu) {
+    if (qFuzzyCompare(starDistanceAu_, distanceAu)) {
+        return;
+    }
+    starDistanceAu_ = qMax(0.0, distanceAu);
+    updateStarAngularDiameter();
+}
+
+void SurfaceGlobeWidget::setStarRadiusSolar(double radiusSolar) {
+    if (qFuzzyCompare(starRadiusSolar_, radiusSolar)) {
+        return;
+    }
+    starRadiusSolar_ = qMax(0.0, radiusSolar);
+    updateStarAngularDiameter();
+}
+
 void SurfaceGlobeWidget::setStarLightDirection(const QVector3D &direction) {
     if (direction.lengthSquared() < 1e-6f) {
         starLightDirection_ = QVector3D(0.0f, 0.0f, 1.0f);
@@ -213,6 +245,21 @@ void SurfaceGlobeWidget::setStarAngularDiameterDegrees(double angularDiameterDeg
         return;
     }
     starAngularDiameterDeg_ = qMax(0.0, angularDiameterDeg);
+    update();
+}
+
+void SurfaceGlobeWidget::updateStarAngularDiameter() {
+    if (starRadiusSolar_ <= 0.0 || starDistanceAu_ <= 0.0) {
+        starAngularDiameterDeg_ = 0.0;
+        update();
+        return;
+    }
+
+    const double radiusMeters = starRadiusSolar_ * kSolarRadiusMeters;
+    const double distanceMeters = starDistanceAu_ * kAstronomicalUnitMeters;
+    // Угловой диаметр: θ = 2 * atan(R / d).
+    const double angularDiameterRad = 2.0 * std::atan(radiusMeters / distanceMeters);
+    starAngularDiameterDeg_ = qRadiansToDegrees(angularDiameterRad);
     update();
 }
 

@@ -22,6 +22,10 @@ public:
     void setPressureRange(double minAtm, double maxAtm);
     void setMarkupVisible(bool visible);
     void setAxisTiltDegrees(double tiltDegrees);
+    void setStarDirection(const QVector3D &direction);
+    void setStarTemperature(double temperatureK);
+    void setStarDistanceAu(double distanceAu);
+    void setStarRadiusSolar(double radiusSolar);
     void setStarLightDirection(const QVector3D &direction);
     void setStarColor(const QColor &color);
     void setStarAngularDiameterDegrees(double angularDiameterDeg);
@@ -47,6 +51,7 @@ private:
     QColor applyLighting(const QColor &baseColor, double lightFactor) const;
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
     QVector3D applyRotation(const QVector3D &v) const;
+    void updateStarAngularDiameter();
 
     const PlanetSurfaceGrid *grid_ = nullptr;
     SurfaceMapMode mapMode_ = SurfaceMapMode::Temperature;
@@ -69,4 +74,6 @@ private:
     QVector3D starLightDirection_ = QVector3D(0.0f, 0.0f, 1.0f);
     QColor starColor_ = QColor(255, 244, 234);
     double starAngularDiameterDeg_ = 0.5;
+    double starRadiusSolar_ = 0.0;
+    double starDistanceAu_ = 0.0;
 };

@@ -47,6 +47,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QLoggingCategory>
 #include <QtGui/QDoubleValidator>
+#include <QtGui/QVector3D>
 #include <QtConcurrent/QtConcurrent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
@@ -148,6 +149,38 @@ double normalizeLongitudeRadians(double radians) {
 
 double longitudeDistanceRadians(double a, double b) {
     return std::abs(normalizeLongitudeRadians(a - b));
+}
+
+double resolveSubstellarLongitudeRadians(int hourIndex, int stepsPerDay, RotationMode rotationMode) {
+    if (rotationMode == RotationMode::TidalLocked) {
+        return 0.0;
+    }
+    if (stepsPerDay <= 0) {
+        return 0.0;
+    }
+    const double phase =
+        2.0 * M_PI * (static_cast<double>(hourIndex) + 0.5) / static_cast<double>(stepsPerDay);
+    const double hourAngle = phase - M_PI;
+    // Субзвёздная долгота — меридиан с нулевым часовым углом.
+    return -hourAngle;
+}
+
+QVector3D directionFromLatLonRadians(double latitudeRad, double longitudeRad) {
+    const double cosLat = std::cos(latitudeRad);
+    return QVector3D(static_cast<float>(cosLat * std::sin(longitudeRad)),
+                     static_cast<float>(std::sin(latitudeRad)),
+                     static_cast<float>(cosLat * std::cos(longitudeRad)));
+}
+
+QVector3D resolveStarDirection(double declinationDegrees,
+                               int hourIndex,
+                               int stepsPerDay,
+                               RotationMode rotationMode) {
+    const double declinationRadians = qDegreesToRadians(declinationDegrees);
+    const double substellarLongitude =
+        resolveSubstellarLongitudeRadians(hourIndex, stepsPerDay, rotationMode);
+    // Направление на звезду совпадает с нормалью подсолнечной точки.
+    return directionFromLatLonRadians(declinationRadians, substellarLongitude);
 }
 
 double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
@@ -2504,6 +2537,53 @@ private:
         refreshSurfaceLegend();
     }
 
+    bool readStellarParametersForRender(QLineEdit *radiusInput,
+                                        QLineEdit *temperatureInput,
+                                        StellarParameters &parameters) const {
+        if (!radiusInput || !temperatureInput) {
+            return false;
+        }
+        bool ok = false;
+        const double radius = radiusInput->text().toDouble(&ok);
+        if (!ok || radius <= 0.0) {
+            return false;
+        }
+        const double temperature = temperatureInput->text().toDouble(&ok);
+        if (!ok || temperature <= 0.0) {
+            return false;
+        }
+        parameters.radiusInSolarRadii = radius;
+        parameters.temperatureKelvin = temperature;
+        return true;
+    }
+
+    void updateSurfaceStarRendering(double declinationDegrees,
+                                    int stepsPerDay,
+                                    RotationMode rotationMode) {
+        if (!surfaceGlobeWidget_) {
+            return;
+        }
+
+        const QVector3D starDirection =
+            resolveStarDirection(declinationDegrees,
+                                 surfaceSimState_.hourIndex,
+                                 stepsPerDay,
+                                 rotationMode);
+        surfaceGlobeWidget_->setStarDirection(starDirection);
+
+        StellarParameters primary{};
+        if (readStellarParametersForRender(radiusInput_, temperatureInput_, primary)) {
+            // Для рендера используем основную звезду: направление для вторичной не задано.
+            surfaceGlobeWidget_->setStarTemperature(primary.temperatureKelvin);
+            surfaceGlobeWidget_->setStarRadiusSolar(primary.radiusInSolarRadii);
+        }
+
+        const double distanceAu = surfaceOrbitAnimation_.distanceAU();
+        if (distanceAu > 0.0) {
+            surfaceGlobeWidget_->setStarDistanceAu(distanceAu);
+        }
+    }
+
     void updateSurfaceWindField(const AtmosphereComposition &atmosphere,
                                 double atmospherePressureAtm,
                                 double dayLengthDays,
@@ -2617,6 +2697,7 @@ private:
         };
 
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
         double atmospherePressureAtm = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
@@ -2786,6 +2867,7 @@ private:
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
 
         applySurfaceGridToViews();
+        updateSurfaceStarRendering(declinationDegrees, stepsPerDay, rotationMode);
         if (hasTemperatureRange && minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
@@ -3113,6 +3195,7 @@ private:
         // Также обновляем виджеты, чтобы в них попали обновлённые поверхностные
         // температура и давление после шага переноса.
         applySurfaceGridToViews();
+        updateSurfaceStarRendering(declinationDegrees, stepsPerDay, rotationMode);
         if (minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
