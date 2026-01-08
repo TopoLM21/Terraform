@@ -10,6 +10,8 @@ class QTableWidget;
 class AtmosphereChartWidget;
 
 class AtmosphereWidget : public QGroupBox {
+    Q_OBJECT
+
 public:
     explicit AtmosphereWidget(QWidget *parent = nullptr, bool showTable = true);
 
@@ -17,6 +19,9 @@ public:
     void setComposition(const AtmosphereComposition &composition);
     void clearPlanetParameters();
     AtmosphereComposition composition(bool includeZeroes = false) const;
+
+signals:
+    void compositionChanged(const AtmosphereComposition &composition);
 
 private:
     void populateTable();

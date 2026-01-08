@@ -11,10 +11,18 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent Charts)
 add_executable(solar_constant
     include/atmosphere_chart_widget.h
     include/atmosphere_model.h
+    include/atmospheric_cell_state.h
     include/atmospheric_radiation_model.h
+    include/layered_radiation_model.h
+    include/radiation_model.h
+    include/radiation_model_utils.h
     include/atmospheric_circulation_model.h
     include/atmospheric_lapse_rate_model.h
+    include/atmospheric_thermodynamics.h
+    include/radiative_convective_profile.h
     include/atmosphere_widget.h
+    include/co2_convective_adjustment.h
+    include/emission_layer_model.h
     include/equal_area_projection.h
     include/mollweide_projection.h
     include/planet_surface_grid.h
@@ -23,29 +31,48 @@ add_executable(solar_constant
     include/height_color_scale.h
     include/surface_point_state.h
     include/surface_temperature_state.h
+    include/spectral_band_model.h
     include/subsurface_grid.h
     include/subsurface_temperature_solver.h
     include/surface_temperature_scale_widget.h
     include/surface_height_scale_widget.h
+    include/surface_wind_scale_widget.h
+    include/surface_pressure_scale_widget.h
     include/surface_map_mode.h
     include/surface_map_widget.h
     include/surface_map_interpolator.h
     include/surface_map_cache.h
     include/surface_cell.h
+    include/surface_advection_model.h
+    include/surface_pressure_transport_model.h
     include/surface_height_model.h
     include/surface_heightmap.h
     include/surface_globe_widget.h
     include/surface_point_status_dialog.h
+    include/surface_atmosphere_coupler.h
     include/temperature_color_scale.h
+    src/atmospheric_pressure_model.h
+    src/atmospheric_cell_state.cpp
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
+    src/atmospheric_pressure_model.cpp
     src/atmospheric_radiation_model.cpp
+    src/layered_radiation_model.cpp
+    src/radiation_model_factory.cpp
+    src/radiation_model_utils.cpp
+    src/radiative_convective_profile.cpp
+    src/spectral_band_model.cpp
     src/atmospheric_circulation_model.cpp
     src/atmospheric_lapse_rate_model.cpp
+    src/atmospheric_thermodynamics.cpp
     src/atmosphere_widget.cpp
+    src/co2_convective_adjustment.cpp
+    src/emission_layer_model.cpp
     src/mollweide_projection.cpp
     src/mode_illustration_widget.cpp
     src/mode_illustration_widget.h
+    src/orbit_animation_model.cpp
+    src/orbit_animation_model.h
     src/orbit_segment_calculator.cpp
     src/planet_surface_grid.cpp
     src/planet_presets.cpp
@@ -57,11 +84,16 @@ add_executable(solar_constant
     src/surface_map_interpolator.cpp
     src/surface_map_cache.cpp
     src/surface_globe_widget.cpp
+    src/surface_advection_model.cpp
+    src/surface_pressure_transport_model.cpp
     src/surface_height_model.cpp
     src/surface_heightmap.cpp
     src/surface_point_status_dialog.cpp
     src/surface_point_state.cpp
     src/surface_height_scale_widget.cpp
+    src/surface_wind_scale_widget.cpp
+    src/surface_pressure_scale_widget.cpp
+    src/surface_atmosphere_coupler.cpp
     src/surface_temperature_calculator.cpp
     src/surface_temperature_scale_widget.cpp
     src/surface_temperature_state.cpp
@@ -70,6 +102,8 @@ add_executable(solar_constant
     src/surface_temperature_plot.cpp
     src/temperature_plot_tracker.cpp
     src/temperature_color_scale.cpp
+    src/wind_field_model.cpp
+    src/wind_field_model.h
 )
 
 target_include_directories(solar_constant PRIVATE include src)

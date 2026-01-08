@@ -57,6 +57,15 @@ double calculatePressureAtm(double massTons, double planetMassEarths, double rad
 
 double calculatePressureAtmFromKg(double massKg, double planetMassEarths, double radiusKm);
 
+// Рассчитать давление на уровне поверхности для ячейки.
+// Модель: атмосфера равномерно распределена по сфере, масса столба в ячейке
+// пропорциональна её площади: m_cell = m_total * (area_cell / total_area).
+// Тогда давление P = (m_cell * g) / area_cell.
+double calculateCellPressureAtmFromKg(double totalMassKg,
+                                      double planetMassEarths,
+                                      double radiusKm,
+                                      double cellAreaKm2);
+
 // Рассчитать массу атмосферы в кг по давлению в атм (обратная формула).
 // Формула выводится из P = (m_atm * g) / (4 * π * R^2).
 double calculateAtmosphereMassKgFromPressureAtm(double pressureAtm,

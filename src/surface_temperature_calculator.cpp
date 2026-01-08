@@ -1,12 +1,15 @@
 #include "surface_temperature_calculator.h"
 
+#include "atmospheric_pressure_model.h"
+#include "surface_height_model.h"
 #include "surface_temperature_state.h"
+#include "surface_atmosphere_coupler.h"
+#include "radiation_model.h"
+#include "radiation_model_utils.h"
 
 #include <QtCore/QThread>
 #include <QtCore/QtMath>
 
-#include <algorithm>
-#include <array>
 #include <cmath>
 
 namespace {
@@ -21,23 +24,12 @@ constexpr double kDefaultBasinShape = 3.5;
 constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kDailyTimeSteps = 96;
 constexpr int kSpinUpDays = 6;
-
-struct TraceGasSpec {
-    const char *id;
-    double greenhousePower;
-};
-
-constexpr std::array<TraceGasSpec, 4> kTraceGases = {{
-    {"ch4", 0.5},
-    {"nh3", 1.5},
-    {"sf6", 300.0},
-    {"nf3", 250.0},
-}};
-
-
-double gasMassGigatons(const AtmosphereComposition &atmosphere, const QString &gasId) {
-    return qMax(0.0, atmosphere.massGigatons(gasId));
-}
+constexpr double kDryAirSpecificHeatJPerKgK = 1004.0;
+constexpr double kDryAirGasConstantJPerKgK = 287.05;
+constexpr double kEarthGravityMPerS2 = 9.80665;
+constexpr double kStandardPressurePa = 101325.0;
+constexpr double kDefaultHeatTransferWPerM2K = 8.0;
+constexpr double kDefaultAirLayerThicknessMeters = 200.0;
 
 double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
     // В текущем UI нет явного управления гидросферой, поэтому применяем мягкую эвристику:
@@ -55,11 +47,21 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
                                                            RotationMode rotationMode,
                                                            const AtmosphereComposition &atmosphere,
                                                            double greenhouseOpacity,
+                                                           bool manualGreenhouseOnTopOfAtmosphere,
+                                                           double presetCloudAlbedo,
                                                            double atmospherePressureAtm,
                                                            double surfaceGravity,
                                                            double planetRadiusKm,
                                                            bool useAtmosphericModel,
+                                                           RadiationModelType radiationModelType,
                                                            int meridionalTransportSteps,
+                                                           HeightSourceType heightSourceType,
+                                                           const QString &heightmapPath,
+                                                           double heightmapScaleKm,
+                                                           quint32 heightSeed,
+                                                           bool useContinentsHeight,
+                                                           bool hasSeaLevel,
+                                                           bool useFlatHeight,
                                                            const SubsurfaceModelSettings &subsurfaceSettings)
     : solarConstant_(solarConstant),
       material_(material),
@@ -67,11 +69,21 @@ SurfaceTemperatureCalculator::SurfaceTemperatureCalculator(double solarConstant,
       rotationMode_(rotationMode),
       atmosphere_(atmosphere),
       greenhouseOpacity_(qBound(0.0, greenhouseOpacity, 0.999)),
+      manualGreenhouseOnTopOfAtmosphere_(manualGreenhouseOnTopOfAtmosphere),
+      presetCloudAlbedo_(qBound(0.0, presetCloudAlbedo, 1.0)),
       atmospherePressureAtm_(atmospherePressureAtm),
       surfaceGravity_(surfaceGravity),
       planetRadiusKm_(planetRadiusKm),
       useAtmosphericModel_(useAtmosphericModel),
+      radiationModelType_(radiationModelType),
       meridionalTransportSteps_(qMax(1, meridionalTransportSteps)),
+      heightSourceType_(heightSourceType),
+      heightmapPath_(heightmapPath),
+      heightmapScaleKm_(heightmapScaleKm),
+      heightSeed_(heightSeed),
+      useContinentsHeight_(useContinentsHeight),
+      hasSeaLevel_(hasSeaLevel),
+      useFlatHeight_(useFlatHeight),
       subsurfaceSettings_(subsurfaceSettings) {}
 
 void SurfaceTemperatureCalculator::setMeridionalTransportSteps(int steps) {
@@ -253,12 +265,16 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
     const double surfaceGravity = qMax(0.0, surfaceGravity_);
     const double totalGas = atmosphere_.totalMassGigatons();
-    const double pressureAtm =
+    const double seaLevelPressureAtm =
         (totalGas > 0.0)
             ? (totalGas / kEarthAtmosphereMassGt) * (surfaceGravity / 9.8) / areaScale
             : 0.0;
-    const double co2Mass = gasMassGigatons(atmosphere_, QStringLiteral("co2"));
+    // "Массивную" атмосферу считаем по давлению у уровня моря: при больших значениях
+    // ручная непрозрачность может привести к двойному учёту парникового эффекта.
+    const double massiveAtmospherePressureAtm = 5.0;
+    const bool hasMassiveAtmosphere = seaLevelPressureAtm >= massiveAtmospherePressureAtm;
     const double waterGigatons = estimateSurfaceWaterGigatons(material_);
+    const bool hasSeaLevel = hasSeaLevel_;
     const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
     const double avgDepth = (planetAreaKm2 > 0.0) ? waterGigatons / planetAreaKm2 : 0.0;
     double potentialCoverage = 0.0;
@@ -268,84 +284,42 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
     }
     potentialCoverage = qBound(0.0, potentialCoverage, 1.0);
 
-    // Модель оптической толщины повторяет формулы из React-кода:
-    // tau_CO2 = ln(1 + M_CO2 * colDensity * power * 0.001) * broadening,
-    // где broadening учитывает расширение линий при росте давления.
-    const double colDensity = 1.0 / qMax(1.0, areaScale);
-    const double broadening = std::pow(qMax(0.5, pressureAtm * 2.0), 0.32);
-    const double baseTau =
-        std::log(1.0 + co2Mass * colDensity * 0.02 * 0.001) * broadening;
-    double traceTau = 0.0;
-    for (const auto &spec : kTraceGases) {
-        const double traceMass = gasMassGigatons(atmosphere_, QLatin1String(spec.id));
-        traceTau += (traceMass / qMax(1.0, areaScale)) * spec.greenhousePower * 1e-6 *
-                    broadening;
-    }
-
     const double albedo = qBound(0.0, material_.albedo, 1.0);
-    double pressureClouds = pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
-    const double surfAlbedoPre =
-        (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
-    const double tEffPre =
-        std::pow((segmentSolarConstant * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
-                     (4.0 * kStefanBoltzmannConstant),
+    const double baseRadiativeTemp =
+        std::pow((segmentSolarConstant * (1.0 - albedo)) / (4.0 * kStefanBoltzmannConstant),
                  0.25);
-    const double tBasePre =
-        tEffPre * std::pow(1.0 + 0.75 * (baseTau + traceTau), 0.25);
-
-    double evaporation = 0.0;
-    if (potentialCoverage > 0.0 && tBasePre > 263.0) {
-        evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
-    }
-    const double waterClouds = qMin(0.5, evaporation * 0.28);
-    const double cloudAlbedo = qMin(0.88, pressureClouds + waterClouds);
-    const double waterTau = qMin(8.0, evaporation * 1.5);
-    double totalTau = baseTau + traceTau + waterTau;
-    if (!useAtmosphericModel_ && greenhouseOpacity_ > 0.0) {
-        // Дополнительная непрозрачность, когда атмосферная модель выключена,
-        // но задана парниковая "шторка" вручную.
-        totalTau += -std::log(qMax(1e-6, 1.0 - greenhouseOpacity_));
-    }
-    const double ghMult = std::pow(1.0 + 0.75 * totalTau, 0.25);
-    // Приводим оптическую толщину к коэффициенту парникового эффекта для модели
-    // SurfaceTemperatureState: в стационаре T^4 ∝ 1 / (1 - G).
-    const double greenhouseOpacity =
-        (totalTau > 0.0) ? (1.0 - 1.0 / (1.0 + 0.75 * totalTau)) : 0.0;
-
-    const double transport =
-        (pressureAtm > 50.0)
-            ? 0.99
-            : (pressureAtm > 0.001
-                   ? qMin(1.0, 0.15 * std::log(pressureAtm * 100.0 + 1.0))
-                   : 0.0);
-    const double rotBlock =
-        (dayLengthDays_ < 2.0 && pressureAtm < 10.0) ? 0.65 : 1.0;
-    const double meridionalTransport = transport * rotBlock;
-
-    double dynamicSurfAlbedo = albedo * (1.0 - potentialCoverage);
-    if (tBasePre < 260.0) {
-        dynamicSurfAlbedo += potentialCoverage * 0.70;
-    } else {
-        dynamicSurfAlbedo += potentialCoverage * 0.06;
-    }
-    const double finalAlbedo = qMax(dynamicSurfAlbedo, cloudAlbedo);
-    const double tEff =
-        std::pow((segmentSolarConstant * (1.0 - finalAlbedo)) /
-                     (4.0 * kStefanBoltzmannConstant),
-                 0.25);
-    const double tGlobalAvg = tEff * ghMult;
+    const SurfaceHeightModel heightModel(heightSourceType_, heightmapPath_, heightmapScaleKm_,
+                                         heightSeed_, useContinentsHeight_, hasSeaLevel);
 
     const bool isTidallyLocked = rotationMode_ == RotationMode::TidalLocked;
     // Подбираем число шагов по длительности суток, чтобы шаг по времени не разрастался
     // на медленно вращающихся планетах (например, Меркурий).
     const int scaledStepsPerDay = qRound(dayLengthDays_ * 24.0);
     const int stepsPerDay = qMax(kDailyTimeSteps, scaledStepsPerDay);
-    const int spinUpDays = isTidallyLocked ? 2 : kSpinUpDays;
+    int spinUpDays = isTidallyLocked ? 2 : kSpinUpDays;
+    if (subsurfaceSettings_.geothermalFluxWPerM2 > 0.0) {
+        const double depthMeters = qMax(0.0, subsurfaceSettings_.bottomDepthMeters);
+        const double heatCapacityVolume =
+            qMax(0.0, material_.density) * qMax(0.0, material_.specificHeat);
+        const double alpha =
+            (material_.thermalConductivity > 0.0 && heatCapacityVolume > 0.0)
+                ? (material_.thermalConductivity / heatCapacityVolume)
+                : 0.0;
+        if (depthMeters > 0.0 && alpha > 0.0) {
+            // Диффузия тепла задаёт время, за которое геотермальная волна поднимается к поверхности.
+            const double diffusionTimeSeconds = (depthMeters * depthMeters) / alpha;
+            const double diffusionTimeDays = diffusionTimeSeconds / 86400.0;
+            const double dayLengthDays = qMax(0.01, dayLengthDays_);
+            const int diffusionSpinUpDays =
+                static_cast<int>(std::ceil(diffusionTimeDays / dayLengthDays));
+            spinUpDays = qMax(spinUpDays, diffusionSpinUpDays);
+        }
+    }
     const double dayLengthSeconds = qMax(0.01, dayLengthDays_) * 86400.0;
     const double timeStepSeconds =
         (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
-    // Глобальный средний поток перед альбедо: отражение применяется в SurfaceTemperatureState,
-    // чтобы избежать повторного учета в суточной итерации.
+    // Глобальный средний поток на границе атмосферы (TOA): альбедо поверхности применяется
+    // позже в SurfaceTemperatureState, а планетарное альбедо используется в ТОА-балансе.
     const double globalAverageInsolation = segmentSolarConstant / 4.0;
 
     for (int i = 0; i < latitudePoints; ++i) {
@@ -384,12 +358,122 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
             kPi;
         const bool hasInsolation = dailyFactor > 0.0;
 
+        // Высоту берём из карты рельефа на меридиане 0°, переводя километры в метры.
+        // При принудительном обнулении высоты игнорируем рельеф, чтобы все расчёты
+        // давления и температуры оставались на уровне моря.
+        const double heightMeters =
+            useFlatHeight_ ? 0.0 : (heightModel.heightKmAt(axisDegrees, 0.0) * 1000.0);
+        // Давление по барометрической формуле рассчитываем от уровня моря с учётом высоты.
+        const double pressureAtm = AtmosphericPressureModel::pressureAtHeightAtm(
+            seaLevelPressureAtm,
+            heightMeters,
+            qMax(1.0, baseRadiativeTemp),
+            atmosphere_,
+            surfaceGravity);
+
+        double pressureClouds =
+            pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
+        const double surfaceAlbedoPre =
+            (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
+        // Планетарное (TOA) альбедо учитывает отражение облаками до поверхности.
+        const double planetaryAlbedoPre =
+            pressureClouds + (1.0 - pressureClouds) * surfaceAlbedoPre;
+        const double tEffPre =
+            std::pow((segmentSolarConstant * (1.0 - planetaryAlbedoPre)) /
+                         (4.0 * kStefanBoltzmannConstant),
+                     0.25);
+        // Базовая оценка парникового эффекта берём через коэффициент пропускания
+        // исходящего излучения, чтобы обе модели (Fast/Layered) масштабировались
+        // в одинаковых терминах T^4 ∝ 1 / T_lw.
+        const auto preRadiationModel = makeRadiationModel(atmosphere_,
+                                                          pressureAtm,
+                                                          tEffPre,
+                                                          tEffPre,
+                                                          surfaceGravity,
+                                                          radiationModelType_);
+        const double baseLongwaveTransmission =
+            qMax(1e-6, preRadiationModel->outgoingTransmission());
+        const double tBasePre =
+            tEffPre * std::pow(1.0 / baseLongwaveTransmission, 0.25);
+
+        double evaporation = 0.0;
+        if (potentialCoverage > 0.0 && tBasePre > 263.0) {
+            evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
+        }
+        const double waterClouds = qMin(0.5, evaporation * 0.28);
+        // Сернокислотные облака (H₂SO₄) Венеры отражают больше, чем водные облака,
+        // поэтому учитываем минимум по пресету, даже если испарение воды отсутствует.
+        const double dynamicCloudAlbedo = qMin(0.88, pressureClouds + waterClouds);
+        const double presetCloudAlbedo = qBound(0.0, presetCloudAlbedo_, 0.88);
+        const double cloudAlbedo = qMax(dynamicCloudAlbedo, presetCloudAlbedo);
+        // Коэффициент прохождения коротковолнового излучения через облака:
+        // альбедо описывает отражение в космос, а оставшаяся часть частично
+        // поглощается/рассеивается в облачном слое (особенно для H₂SO₄ облаков Венеры).
+        double cloudShortwaveTransmission = 1.0 - cloudAlbedo;
+        if (cloudAlbedo > 0.7) {
+            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            cloudShortwaveTransmission *= 0.2;
+        }
+        cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+
+        double surfaceAlbedo = albedo * (1.0 - potentialCoverage);
+        if (tBasePre < 260.0) {
+            surfaceAlbedo += potentialCoverage * 0.70;
+        } else {
+            surfaceAlbedo += potentialCoverage * 0.06;
+        }
+        // Планетарное (TOA) альбедо складывается из облачного отражения и доли,
+        // прошедшей к поверхности и обратно.
+        const double planetaryAlbedo = cloudAlbedo + (1.0 - cloudAlbedo) * surfaceAlbedo;
+        const double tEff =
+            // TOA-баланс: используем планетарное альбедо, а не альбедо поверхности.
+            std::pow((segmentSolarConstant * (1.0 - planetaryAlbedo)) /
+                         (4.0 * kStefanBoltzmannConstant),
+                     0.25);
+
+        // Атмосферное поглощение SW оцениваем через простую модель оптической толщины.
+        const auto radiationModel = makeRadiationModel(atmosphere_,
+                                                       pressureAtm,
+                                                       tBasePre,
+                                                       tEff,
+                                                       surfaceGravity,
+                                                       radiationModelType_);
+        // Дополнительный водяной пар (испарение) усиливает длинноволновое поглощение.
+        const double waterTau = qMin(8.0, evaporation * 1.5);
+        double extraTau = waterTau;
+        const bool allowManualGreenhouse =
+            manualGreenhouseOnTopOfAtmosphere_ || (!useAtmosphericModel_ && !hasMassiveAtmosphere);
+        if (greenhouseOpacity_ > 0.0 && allowManualGreenhouse) {
+            // Дополнительная непрозрачность: либо в режиме ручной надстройки,
+            // либо без атмосферной модели при отсутствии массивной атмосферы.
+            extraTau += opticalDepthFromGreenhouseOpacity(greenhouseOpacity_, radiationModelType_);
+        }
+        const double extraLongwaveTransmission =
+            longwaveTransmissionForOpticalDepth(extraTau, radiationModelType_);
+        const double totalLongwaveTransmission =
+            qMax(1e-6, radiationModel->outgoingTransmission() * extraLongwaveTransmission);
+        // Приводим пропускание к коэффициенту парникового эффекта для модели
+        // SurfaceTemperatureState: в стационаре T^4 ∝ 1 / (1 - G).
+        const double greenhouseOpacity =
+            qBound(0.0, 1.0 - totalLongwaveTransmission, 0.999);
+
+        const double transport =
+            (pressureAtm > 50.0)
+                ? 0.99
+                : (pressureAtm > 0.001
+                       ? qMin(1.0, 0.15 * std::log(pressureAtm * 100.0 + 1.0))
+                       : 0.0);
+        const double rotBlock =
+            (dayLengthDays_ < 2.0 && pressureAtm < 10.0) ? 0.65 : 1.0;
+        const double meridionalTransport = transport * rotBlock;
+
+        const double tGlobalAvg = tEff;
+
         const double tLatRad =
             std::pow(qMax(0.1,
-                          segmentSolarConstant * (1.0 - finalAlbedo) * dailyFactor) /
+                          segmentSolarConstant * (1.0 - planetaryAlbedo) * dailyFactor) /
                          kStefanBoltzmannConstant,
-                     0.25) *
-            ghMult;
+                     0.25);
         const double tBase =
             tLatRad * (1.0 - meridionalTransport) + tGlobalAvg * meridionalTransport;
 
@@ -401,11 +485,36 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
         // S_inst = S0 * cos(zenith) при освещении, иначе 0.
         // Поток смешивается с глобальным средним, чтобы имитировать меридиональный перенос.
         SurfaceTemperatureState state(tBase,
-                                      finalAlbedo,
+                                      // Альбедо поверхности влияет только на локальное поглощение,
+                                      // а планетарное применяется в ТОА-балансе выше.
+                                      surfaceAlbedo,
                                       greenhouseOpacity,
                                       absFloor,
                                       material_,
                                       subsurfaceSettings_);
+        const double gravity = (surfaceGravity_ > 0.0) ? surfaceGravity_ : kEarthGravityMPerS2;
+        const double pressurePa = (pressureAtm > 0.0) ? (pressureAtm * kStandardPressurePa) : 0.0;
+        const double airTemperatureForDensity = qMax(1.0, state.temperatureKelvin());
+        // Модель приземного слоя для «обитаемости»: используем массу тонкого слоя воздуха,
+        // а не всей атмосферной колонки.
+        // rho = P / (R * T_air); m_layer = rho * h_layer.
+        const double airDensityKgPerM3 =
+            (pressurePa > 0.0)
+                ? (pressurePa / (kDryAirGasConstantJPerKgK * airTemperatureForDensity))
+                : 0.0;
+        const double airLayerMassKgPerM2 = airDensityKgPerM3 * kDefaultAirLayerThicknessMeters;
+        const double airHeatCapacity = airLayerMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
+        AtmosphericCellState airState(tBase, airHeatCapacity);
+        // Коэффициент теплообмена h_c в Вт/(м^2·К) связывает поверхность и воздух.
+        // В реальности он зависит от ветра, давления и турбулентности; здесь масштабируем
+        // от давления, чтобы тонкая атмосфера слабее влияла на поверхность.
+        // Для плотных атмосфер конвекция усиливается: у Венеры приземный слой более
+        // теплопроводный и турбулентный, поэтому связывание растет и после 1 атм.
+        const double couplingScale =
+            (pressureAtm <= 1.0)
+                ? qBound(0.0, pressureAtm, 1.0)
+                : 1.0 + 0.3 * std::log1p(pressureAtm - 1.0);
+        SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K * couplingScale);
 
         const int totalSteps = stepsPerDay * (spinUpDays + 1);
         double tMin = state.temperatureKelvin();
@@ -426,16 +535,56 @@ QVector<TemperatureRangePoint> SurfaceTemperatureCalculator::radiativeBalanceByL
                 std::sin(latitudeRadians) * std::sin(declinationRadians) +
                 std::cos(latitudeRadians) * std::cos(declinationRadians) *
                     std::cos(hourAngle);
-            // Суточная инсоляция до учета альбедо.
+            // Суточная инсоляция до учета альбедо поверхности и поглощения атмосферы/облаков.
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
             const double blendedInsolation =
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
 
-            const double absorbedFlux = state.absorbedFlux(blendedInsolation);
+            // Пересчитываем оптическую толщину атмосферы на основе текущей температуры
+            // приземного слоя, чтобы коэффициенты не "застывали" на старте широты.
+            const double radiationTemperature =
+                qMax(1.0, airState.airTemperatureKelvin());
+            const auto stepRadiationModel = makeRadiationModel(atmosphere_,
+                                                               pressureAtm,
+                                                               radiationTemperature,
+                                                               tEff,
+                                                               surfaceGravity,
+                                                               radiationModelType_);
+            const double incomingTransmission = stepRadiationModel->incomingTransmission();
+            const double outgoingTransmission = stepRadiationModel->outgoingTransmission();
+
+            // До поверхности доходит только прошедший через атмосферу и облака поток.
+            const double transmittedInsolation =
+                blendedInsolation * (incomingTransmission * cloudShortwaveTransmission);
+            const double absorbedFlux = state.absorbedFlux(transmittedInsolation);
             const double emittedFlux = state.emittedFlux();
             state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
+            // Радиационный баланс атмосферы:
+            // Q_sw_air = S_blend * T_cloud * (1 - T_atm), где T_atm = incomingTransmission().
+            // Q_lw_air = F_surf * (1 - T_lw), где T_lw = outgoingTransmission().
+            // Потоки в Вт/м^2 переводим в ΔT: ΔT = (Q * Δt) / C_air.
+            const double shortwaveAbsorbedByAir =
+                blendedInsolation * cloudShortwaveTransmission *
+                (1.0 - incomingTransmission);
+            // Поверхность уже излучает как слой τ≈1 (см. SurfaceTemperatureState),
+            // поэтому в схеме через emission layer не ослабляем поток повторно.
+            const double longwaveAbsorbedByAir = emittedFlux;
+            // Длинноволновое охлаждение атмосферы за счет собственного излучения в космос:
+            // F_lw_air = σ * T_air^4, но видимость космоса ограничена оптической толщиной.
+            const double airLongwaveToSpace =
+                kStefanBoltzmannConstant * std::pow(airState.airTemperatureKelvin(), 4.0) *
+                outgoingTransmission;
+            const double airRadiativeHeatingFlux =
+                shortwaveAbsorbedByAir + longwaveAbsorbedByAir - airLongwaveToSpace;
+            if (airHeatCapacity > 0.0) {
+                const double airDeltaTemp =
+                    airRadiativeHeatingFlux * timeStepSeconds / airHeatCapacity;
+                airState.setAirTemperatureKelvin(
+                    airState.airTemperatureKelvin() + airDeltaTemp);
+            }
+            coupler.exchangeSensibleHeat(state, airState, timeStepSeconds);
 
             if (step >= stepsPerDay * spinUpDays) {
                 const double temp = state.temperatureKelvin();

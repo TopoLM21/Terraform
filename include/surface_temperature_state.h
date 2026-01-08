@@ -18,8 +18,10 @@ public:
 
     double absorbedFlux(double solarIrradiance) const;
     double emittedFlux() const;
+    double topLayerHeatCapacityJPerM2K() const;
 
     void updateTemperature(double absorbedFlux, double emittedFlux, double dtSeconds);
+    void applySurfaceFlux(double netFlux, double dtSeconds);
 
 private:
     void clampProfile();

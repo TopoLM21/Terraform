@@ -26,6 +26,11 @@ struct GlobeCell {
     QColor color;
 };
 
+struct ClippedSegment {
+    QVector3D start;
+    QVector3D end;
+};
+
 QVector3D latLonToCartesian(double latitudeDeg, double longitudeDeg) {
     const double latRad = qDegreesToRadians(latitudeDeg);
     const double lonRad = qDegreesToRadians(longitudeDeg);
@@ -60,6 +65,48 @@ QVector<QVector3D> clipPolygonAgainstZ(const QVector<QVector3D> &input) {
     }
     return output;
 }
+
+bool clipLineSegmentAgainstZ(const QVector3D &a, const QVector3D &b, ClippedSegment *segment) {
+    const bool aInside = a.z() > 0.0f;
+    const bool bInside = b.z() > 0.0f;
+    if (!aInside && !bInside) {
+        return false;
+    }
+    QVector3D start = a;
+    QVector3D end = b;
+    if (aInside != bInside) {
+        const float t = (0.0f - a.z()) / (b.z() - a.z());
+        const QVector3D intersection = a + t * (b - a);
+        if (aInside) {
+            end = intersection;
+        } else {
+            start = intersection;
+        }
+    }
+    segment->start = start;
+    segment->end = end;
+    return true;
+}
+
+QVector<QVector3D> buildLongitudeLine(double longitudeDeg, int segments) {
+    QVector<QVector3D> points;
+    points.reserve(segments + 1);
+    for (int i = 0; i <= segments; ++i) {
+        const double latitude = -90.0 + 180.0 * (static_cast<double>(i) / segments);
+        points.push_back(latLonToCartesian(latitude, longitudeDeg));
+    }
+    return points;
+}
+
+QVector<QVector3D> buildLatitudeLine(double latitudeDeg, int segments) {
+    QVector<QVector3D> points;
+    points.reserve(segments + 1);
+    for (int i = 0; i <= segments; ++i) {
+        const double longitude = -180.0 + 360.0 * (static_cast<double>(i) / segments);
+        points.push_back(latLonToCartesian(latitudeDeg, longitude));
+    }
+    return points;
+}
 } // namespace
 
 SurfaceGlobeWidget::SurfaceGlobeWidget(QWidget *parent)
@@ -72,16 +119,28 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
         double maxTemp = minTemp;
         double minHeight = grid_->points().first().heightKm;
         double maxHeight = minHeight;
+        double minWind = grid_->points().first().windSpeedMps;
+        double maxWind = minWind;
+        double minPressure = grid_->points().first().pressureAtm;
+        double maxPressure = minPressure;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
             minHeight = qMin(minHeight, point.heightKm);
             maxHeight = qMax(maxHeight, point.heightKm);
+            minWind = qMin(minWind, point.windSpeedMps);
+            maxWind = qMax(maxWind, point.windSpeedMps);
+            minPressure = qMin(minPressure, point.pressureAtm);
+            maxPressure = qMax(maxPressure, point.pressureAtm);
         }
         minTemperatureK_ = minTemp;
         maxTemperatureK_ = maxTemp;
         minHeightKm_ = minHeight;
         maxHeightKm_ = maxHeight;
+        minWindSpeedMps_ = minWind;
+        maxWindSpeedMps_ = maxWind;
+        minPressureAtm_ = minPressure;
+        maxPressureAtm_ = maxPressure;
     }
     update();
 }
@@ -97,6 +156,34 @@ void SurfaceGlobeWidget::setMapMode(SurfaceMapMode mode) {
 void SurfaceGlobeWidget::setTemperatureRange(double minK, double maxK) {
     minTemperatureK_ = minK;
     maxTemperatureK_ = maxK;
+    update();
+}
+
+void SurfaceGlobeWidget::setWindRange(double minMps, double maxMps) {
+    minWindSpeedMps_ = minMps;
+    maxWindSpeedMps_ = maxMps;
+    update();
+}
+
+void SurfaceGlobeWidget::setPressureRange(double minAtm, double maxAtm) {
+    minPressureAtm_ = minAtm;
+    maxPressureAtm_ = maxAtm;
+    update();
+}
+
+void SurfaceGlobeWidget::setMarkupVisible(bool visible) {
+    if (markupVisible_ == visible) {
+        return;
+    }
+    markupVisible_ = visible;
+    update();
+}
+
+void SurfaceGlobeWidget::setAxisTiltDegrees(double tiltDegrees) {
+    if (qFuzzyCompare(axisTiltDegrees_, tiltDegrees)) {
+        return;
+    }
+    axisTiltDegrees_ = tiltDegrees;
     update();
 }
 
@@ -138,9 +225,17 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         globePoint.z = normal.z();
         globePoint.pointIndex = pointIndex;
         // Освещение отключено по требованию отображения без теней и подсветок.
-        globePoint.color = (mapMode_ == SurfaceMapMode::Temperature)
-                               ? temperatureToColor(point.temperatureK)
-                               : heightToColor(point.heightKm);
+        if (mapMode_ == SurfaceMapMode::Temperature) {
+            globePoint.color = temperatureToColor(point.temperatureK);
+        } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+            globePoint.color = temperatureToColor(point.airTemperatureK);
+        } else if (mapMode_ == SurfaceMapMode::Height) {
+            globePoint.color = heightToColor(point.heightKm);
+        } else if (mapMode_ == SurfaceMapMode::Pressure) {
+            globePoint.color = pressureToColor(point.pressureAtm);
+        } else {
+            globePoint.color = windToColor(point.windSpeedMps);
+        }
         visiblePoints.push_back(globePoint);
         projectedPoints_.push_back(ProjectedPoint{projected, pointIndex});
     }
@@ -188,9 +283,17 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             cellDraw.path = path;
             cellDraw.depth = depthSum / static_cast<double>(clipped.size());
             const SurfacePoint &cellPoint = grid_->points().at(cell.pointIndex);
-            cellDraw.color = (mapMode_ == SurfaceMapMode::Temperature)
-                                 ? temperatureToColor(cellPoint.temperatureK)
-                                 : heightToColor(cellPoint.heightKm);
+            if (mapMode_ == SurfaceMapMode::Temperature) {
+                cellDraw.color = temperatureToColor(cellPoint.temperatureK);
+            } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                cellDraw.color = temperatureToColor(cellPoint.airTemperatureK);
+            } else if (mapMode_ == SurfaceMapMode::Height) {
+                cellDraw.color = heightToColor(cellPoint.heightKm);
+            } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                cellDraw.color = pressureToColor(cellPoint.pressureAtm);
+            } else {
+                cellDraw.color = windToColor(cellPoint.windSpeedMps);
+            }
             visibleCells.push_back(cellDraw);
         }
 
@@ -217,6 +320,105 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     const double dotRadius = pointRadiusPx(visiblePoints.size(), sphereRadius);
     lastPointRadiusPx_ = dotRadius;
 
+    if (markupVisible_) {
+        const QColor markupColor(255, 255, 255, 160);
+        QPen markupPen(markupColor, qMax(1.0, sphereRadius * 0.004));
+        markupPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(markupPen);
+        painter.setBrush(Qt::NoBrush);
+
+        const int lineSegments = 72;
+        const auto drawLineStrip = [&](const QVector<QVector3D> &line) {
+            if (line.size() < 2) {
+                return;
+            }
+            for (int i = 1; i < line.size(); ++i) {
+                const QVector3D start = applyRotation(line[i - 1]);
+                const QVector3D end = applyRotation(line[i]);
+                ClippedSegment segment;
+                if (!clipLineSegmentAgainstZ(start, end, &segment)) {
+                    continue;
+                }
+                const QPointF p1(center.x() + segment.start.x() * sphereRadius,
+                                 center.y() - segment.start.y() * sphereRadius);
+                const QPointF p2(center.x() + segment.end.x() * sphereRadius,
+                                 center.y() - segment.end.y() * sphereRadius);
+                painter.drawLine(p1, p2);
+            }
+        };
+
+        const int gridStepDeg = 30;
+        for (int latitude = -90 + gridStepDeg; latitude < 90; latitude += gridStepDeg) {
+            drawLineStrip(buildLatitudeLine(latitude, lineSegments));
+        }
+        for (int longitude = 0; longitude < 360; longitude += gridStepDeg) {
+            drawLineStrip(buildLongitudeLine(longitude, lineSegments));
+        }
+
+        // Линия через полюса выделена отдельно, чтобы отличаться от прочей разметки.
+        QPen polarPen(QColor(180, 220, 255, 200), qMax(1.0, sphereRadius * 0.0045));
+        polarPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(polarPen);
+        drawLineStrip(buildLongitudeLine(0.0, lineSegments));
+
+        // Географическая ось (истинный полюс) — через широты ±90°.
+        const QVector3D geographicAxis = applyRotation(latLonToCartesian(90.0, 0.0));
+        QPen geographicAxisPen(QColor(120, 200, 255, 200), qMax(1.0, sphereRadius * 0.0045));
+        geographicAxisPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(geographicAxisPen);
+        const QVector3D geographicStart = -geographicAxis;
+        const QVector3D geographicEnd = geographicAxis;
+        ClippedSegment geographicSegment;
+        if (clipLineSegmentAgainstZ(geographicStart, geographicEnd, &geographicSegment)) {
+            const QPointF p1(center.x() + geographicSegment.start.x() * sphereRadius,
+                             center.y() - geographicSegment.start.y() * sphereRadius);
+            const QPointF p2(center.x() + geographicSegment.end.x() * sphereRadius,
+                             center.y() - geographicSegment.end.y() * sphereRadius);
+            painter.drawLine(p1, p2);
+        }
+
+        // Ось вращения: поворачиваем географическую ось на угол обликости вокруг оси X,
+        // моделируя физический наклон оси вращения относительно истинного полюса.
+        QMatrix4x4 obliquityRotation;
+        obliquityRotation.rotate(static_cast<float>(axisTiltDegrees_), 1.0f, 0.0f, 0.0f);
+        const QVector3D tiltedAxis =
+            applyRotation(obliquityRotation.mapVector(latLonToCartesian(90.0, 0.0)));
+        QPen rotationAxisPen(QColor(255, 180, 120, 220), qMax(1.0, sphereRadius * 0.0055));
+        rotationAxisPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(rotationAxisPen);
+        const QVector3D axisStart = -tiltedAxis;
+        const QVector3D axisEnd = tiltedAxis;
+        ClippedSegment axisSegment;
+        if (clipLineSegmentAgainstZ(axisStart, axisEnd, &axisSegment)) {
+            const QPointF p1(center.x() + axisSegment.start.x() * sphereRadius,
+                             center.y() - axisSegment.start.y() * sphereRadius);
+            const QPointF p2(center.x() + axisSegment.end.x() * sphereRadius,
+                             center.y() - axisSegment.end.y() * sphereRadius);
+            painter.drawLine(p1, p2);
+        }
+    }
+}
+
+QColor SurfaceGlobeWidget::windToColor(double speedMps) const {
+    if (qFuzzyCompare(minWindSpeedMps_, maxWindSpeedMps_)) {
+        return temperatureColorForRatio(0.5);
+    }
+    const double t = qBound(0.0,
+                            (speedMps - minWindSpeedMps_) /
+                                (maxWindSpeedMps_ - minWindSpeedMps_),
+                            1.0);
+    return temperatureColorForRatio(t);
+}
+
+QColor SurfaceGlobeWidget::pressureToColor(double pressureAtm) const {
+    if (qFuzzyCompare(minPressureAtm_, maxPressureAtm_)) {
+        return temperatureColorForRatio(0.5);
+    }
+    const double t = qBound(0.0,
+                            (pressureAtm - minPressureAtm_) /
+                                (maxPressureAtm_ - minPressureAtm_),
+                            1.0);
+    return temperatureColorForRatio(t);
 }
 
 void SurfaceGlobeWidget::mousePressEvent(QMouseEvent *event) {

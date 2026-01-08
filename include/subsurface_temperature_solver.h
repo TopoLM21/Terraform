@@ -17,27 +17,12 @@ enum class SubsurfaceBottomBoundaryCondition {
 
 struct SubsurfaceModelSettings {
     int layerCount = 24;
-    double topLayerThicknessMeters = 0.02;
+    // Верхний слой ~5 см: ближе к типичной суточной глубине прогрева лунного реголита.
+    double topLayerThicknessMeters = 0.05;
     double bottomDepthMeters = 2.0;
     SubsurfaceBottomBoundaryCondition bottomBoundary =
         SubsurfaceBottomBoundaryCondition::Insulating;
-    // Профиль теплопроводности (λ), плотности (ρ) и теплоемкости (c).
-    // Если задан один элемент — он копируется на все слои; если два — интерполируются
-    // от поверхности к дну; при большем числе значений интерполяция линейная
-    // по нормированной глубине.
-    QVector<double> thermalConductivityByLayer;
-    QVector<double> densityByLayer;
-    QVector<double> specificHeatByLayer;
-
-    QVector<double> thermalConductivityProfile(int layers, double defaultValue) const;
-    QVector<double> densityProfile(int layers, double defaultValue) const;
-    QVector<double> specificHeatProfile(int layers, double defaultValue) const;
-    QString profileSignature() const;
-
-private:
-    static QVector<double> expandProfile(const QVector<double> &values,
-                                         int layers,
-                                         double defaultValue);
+    double geothermalFluxWPerM2 = 0.0;
 };
 
 Q_DECLARE_METATYPE(SubsurfaceModelSettings)
@@ -50,20 +35,23 @@ public:
                                 const QVector<double> &densityByLayer,
                                 const QVector<double> &specificHeatByLayer,
                                 SubsurfaceBottomBoundaryCondition bottomBoundary,
-                                double bottomTemperatureKelvin);
+                                double bottomTemperatureKelvin,
+                                double geothermalFluxWPerM2);
 
     void reset(const SubsurfaceGrid &grid,
                const QVector<double> &thermalConductivityByLayer,
                const QVector<double> &densityByLayer,
                const QVector<double> &specificHeatByLayer,
                SubsurfaceBottomBoundaryCondition bottomBoundary,
-               double bottomTemperatureKelvin);
+               double bottomTemperatureKelvin,
+               double geothermalFluxWPerM2);
 
     void setInitialTemperature(double temperatureKelvin);
     void setTemperatures(const QVector<double> &temperatures);
 
     const QVector<double> &temperatures() const;
     double surfaceTemperatureKelvin() const;
+    double topLayerHeatCapacity() const;
 
     void stepImplicit(double netSurfaceFlux, double dtSeconds);
 
@@ -84,6 +72,7 @@ private:
     SubsurfaceBottomBoundaryCondition bottomBoundary_ =
         SubsurfaceBottomBoundaryCondition::Insulating;
     double bottomTemperatureKelvin_ = 3.0;
+    double geothermalFluxWPerM2_ = 0.0;
 };
 
 inline QVector<double> SubsurfaceModelSettings::thermalConductivityProfile(

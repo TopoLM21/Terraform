@@ -2,6 +2,7 @@
 #include "surface_height_model.h"
 
 #include <algorithm>
+#include <limits>
 
 #include <QHash>
 #include <QVector3D>
@@ -17,6 +18,19 @@ double radiansToDegrees(double radians) {
 
 double degreesToRadians(double degrees) {
     return degrees * kPi / 180.0;
+}
+
+void setPointLatLonRadians(SurfacePoint *point, double latitudeRad, double longitudeRad) {
+    point->latitudeDeg = radiansToDegrees(latitudeRad);
+    point->longitudeDeg = radiansToDegrees(longitudeRad);
+    point->latitudeRadians = latitudeRad;
+    point->longitudeRadians = longitudeRad;
+    point->sinLatitude = qSin(latitudeRad);
+    point->cosLatitude = qCos(latitudeRad);
+}
+
+void setPointLatLonDegrees(SurfacePoint *point, double latitudeDeg, double longitudeDeg) {
+    setPointLatLonRadians(point, degreesToRadians(latitudeDeg), degreesToRadians(longitudeDeg));
 }
 
 struct GridVertex {
@@ -113,8 +127,7 @@ void PlanetSurfaceGrid::generateFibonacciPoints(int pointCount) {
         const double longitude = qAtan2(qSin(kGoldenAngle * i), qCos(kGoldenAngle * i));
 
         SurfacePoint point;
-        point.latitudeDeg = radiansToDegrees(latitude);
-        point.longitudeDeg = radiansToDegrees(longitude);
+        setPointLatLonRadians(&point, latitude, longitude);
         point.radiusKm = radiusKm_;
         points_.push_back(point);
     }
@@ -181,12 +194,14 @@ void PlanetSurfaceGrid::setHeightSource(HeightSourceType sourceType,
                                         const QString &heightmapPath,
                                         double heightmapScaleKm,
                                         quint32 heightSeed,
-                                        bool useContinentsHeight) {
+                                        bool useContinentsHeight,
+                                        bool hasSeaLevel) {
     heightSourceType_ = sourceType;
     heightmapPath_ = heightmapPath;
     heightmapScaleKm_ = heightmapScaleKm;
     heightSeed_ = heightSeed;
     useContinentsHeight_ = useContinentsHeight;
+    hasSeaLevel_ = hasSeaLevel;
 }
 
 void PlanetSurfaceGrid::rebuildIcosahedronCells(int subdivisionLevel) {
@@ -265,8 +280,7 @@ void PlanetSurfaceGrid::rebuildIcosahedronCells(int subdivisionLevel) {
         const SurfaceVertex latLon = cartesianToLatLon(centroid);
 
         SurfacePoint point;
-        point.latitudeDeg = latLon.latitudeDeg;
-        point.longitudeDeg = latLon.longitudeDeg;
+        setPointLatLonDegrees(&point, latLon.latitudeDeg, latLon.longitudeDeg);
         point.radiusKm = radiusKm_;
         points_.push_back(point);
 
@@ -317,8 +331,19 @@ void PlanetSurfaceGrid::rebuildIcosahedronCells(int subdivisionLevel) {
 
 void PlanetSurfaceGrid::applyHeightModel() {
     SurfaceHeightModel heightModel(heightSourceType_, heightmapPath_, heightmapScaleKm_,
-                                   heightSeed_, useContinentsHeight_);
+                                   heightSeed_, useContinentsHeight_, hasSeaLevel_);
     for (auto &point : points_) {
         point.heightKm = heightModel.heightKmAt(point.latitudeDeg, point.longitudeDeg);
+    }
+    double minHeight = std::numeric_limits<double>::max();
+    for (const auto &point : points_) {
+        minHeight = std::min(minHeight, point.heightKm);
+    }
+    if (minHeight < 0.0) {
+        // Global shift enforces "negative heights forbidden" so pressure model stays stable.
+        const double heightShift = -minHeight;
+        for (auto &point : points_) {
+            point.heightKm += heightShift;
+        }
     }
 }

@@ -38,20 +38,25 @@ QVector<OrbitSegment> OrbitSegmentCalculator::segments(int count) const {
 
     for (int i = 0; i < count; ++i) {
         const double meanAnomaly = step * static_cast<double>(i);
-        const double eccentricAnomaly = solveKeplerEquation(meanAnomaly, eccentricity_);
-        const double trueAnomaly = 2.0 * std::atan2(std::sqrt(1.0 + eccentricity_) *
-                                                       std::sin(eccentricAnomaly / 2.0),
-                                                   std::sqrt(1.0 - eccentricity_) *
-                                                       std::cos(eccentricAnomaly / 2.0));
-        const double distance = semiMajorAxisAU_ * (1.0 - eccentricity_ * std::cos(eccentricAnomaly));
-
-        OrbitSegment segment;
+        OrbitSegment segment = orbitAtMeanAnomaly(meanAnomaly);
         segment.index = i;
-        segment.meanAnomalyRadians = meanAnomaly;
-        segment.trueAnomalyRadians = trueAnomaly;
-        segment.distanceAU = distance;
         result.push_back(segment);
     }
 
     return result;
+}
+
+OrbitSegment OrbitSegmentCalculator::orbitAtMeanAnomaly(double meanAnomalyRadians) const {
+    const double eccentricAnomaly = solveKeplerEquation(meanAnomalyRadians, eccentricity_);
+    const double trueAnomaly = 2.0 * std::atan2(std::sqrt(1.0 + eccentricity_) *
+                                                   std::sin(eccentricAnomaly / 2.0),
+                                               std::sqrt(1.0 - eccentricity_) *
+                                                   std::cos(eccentricAnomaly / 2.0));
+    const double distance = semiMajorAxisAU_ * (1.0 - eccentricity_ * std::cos(eccentricAnomaly));
+
+    OrbitSegment segment;
+    segment.meanAnomalyRadians = meanAnomalyRadians;
+    segment.trueAnomalyRadians = trueAnomaly;
+    segment.distanceAU = distance;
+    return segment;
 }

@@ -28,7 +28,8 @@ public:
                          const QString &heightmapPath,
                          double heightmapScaleKm,
                          quint32 heightSeed,
-                         bool useContinentsHeight);
+                         bool useContinentsHeight,
+                         bool hasSeaLevel);
 
 private:
     void rebuildIcosahedronCells(int subdivisionLevel);
@@ -41,6 +42,7 @@ private:
     double heightmapScaleKm_ = 0.0;
     quint32 heightSeed_ = 0;
     bool useContinentsHeight_ = false;
+    bool hasSeaLevel_ = true;
     QVector<SurfacePoint> points_;
     QVector<SurfaceCell> cells_;
 };

@@ -1,5 +1,6 @@
 #include "orbit_segment_calculator.h"
 #include "mode_illustration_widget.h"
+#include "orbit_animation_model.h"
 #include "planet_presets.h"
 #include "segment_selector_widget.h"
 #include "solar_calculator.h"
@@ -10,11 +11,23 @@
 #include "surface_map_widget.h"
 #include "surface_globe_widget.h"
 #include "surface_point_status_dialog.h"
+#include "surface_atmosphere_coupler.h"
 #include "surface_temperature_scale_widget.h"
 #include "surface_height_scale_widget.h"
+#include "surface_wind_scale_widget.h"
+#include "surface_pressure_scale_widget.h"
 #include "surface_map_mode.h"
+#include "surface_advection_model.h"
+#include "surface_pressure_transport_model.h"
+#include "wind_field_model.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
+#include "radiation_model.h"
+#include "layered_radiation_model.h"
+#include "radiation_model_utils.h"
+#include "atmospheric_pressure_model.h"
+#include "atmospheric_cell_state.h"
+#include "atmosphere_model.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -34,6 +47,7 @@
 #include <QtCore/QHash>
 #include <QtCore/QHashFunctions>
 #include <QtCore/QStringList>
+#include <QtCore/QLoggingCategory>
 #include <QtEndian>
 #include <QtGui/QDoubleValidator>
 #include <QtConcurrent/QtConcurrent>
@@ -52,9 +66,7 @@
 #include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QSpinBox>
 #include <algorithm>
-#include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QPushButton>
-#include <QtWidgets/QRadioButton>
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QTabWidget>
@@ -68,6 +80,29 @@
 #include <cstring>
 
 namespace {
+Q_LOGGING_CATEGORY(solarRadiationLog, "solar.radiation")
+
+bool isSolarRadiationLoggingEnabledFromEnvironment() {
+    if (!qEnvironmentVariableIsSet("SOLAR_RADIATION_LOG")) {
+        return false;
+    }
+
+    const QByteArray rawValue = qgetenv("SOLAR_RADIATION_LOG").trimmed().toLower();
+    if (rawValue.isEmpty()) {
+        return true;
+    }
+    return rawValue != "0" && rawValue != "false" && rawValue != "off";
+}
+
+void enableSolarRadiationLogging() {
+    QString rules = QString::fromLocal8Bit(qgetenv("QT_LOGGING_RULES"));
+    if (!rules.isEmpty()) {
+        rules.append('\n');
+    }
+    rules.append(QStringLiteral("solar.radiation.info=true\nsolar.radiation.debug=true"));
+    QLoggingCategory::setFilterRules(rules);
+}
+
 constexpr int kRoleSemiMajorAxis = Qt::UserRole;
 constexpr int kRoleIsCustom = Qt::UserRole + 1;
 constexpr int kRolePlanetName = Qt::UserRole + 2;
@@ -81,16 +116,123 @@ constexpr int kRoleRadiusKm = Qt::UserRole + 9;
 constexpr int kRoleRotationMode = Qt::UserRole + 10;
 constexpr int kRoleAtmosphere = Qt::UserRole + 11;
 constexpr int kRoleGreenhouseOpacity = Qt::UserRole + 12;
-constexpr int kRoleHeightSourceType = Qt::UserRole + 13;
-constexpr int kRoleHeightmapPath = Qt::UserRole + 14;
-constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 15;
-constexpr int kRoleHeightSeed = Qt::UserRole + 16;
-constexpr int kRoleUseContinentsHeight = Qt::UserRole + 17;
-constexpr int kRoleSubsurfaceSettings = Qt::UserRole + 18;
+constexpr int kRoleCloudAlbedo = Qt::UserRole + 13;
+constexpr int kRoleHeightSourceType = Qt::UserRole + 14;
+constexpr int kRoleHeightmapPath = Qt::UserRole + 15;
+constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 16;
+constexpr int kRoleHeightSeed = Qt::UserRole + 17;
+constexpr int kRoleUseContinentsHeight = Qt::UserRole + 18;
+constexpr int kRoleHasSeaLevel = Qt::UserRole + 19;
+constexpr int kRoleFlatHeight = Qt::UserRole + 20;
+constexpr int kRoleManualGreenhouseOnTopOfAtmosphere = Qt::UserRole + 21;
+constexpr int kRoleAdvancedRadiationModel = Qt::UserRole + 22;
+constexpr int kRoleGeothermalFlux = Qt::UserRole + 23;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
+constexpr int kSurfaceOrbitSegmentsPerYear = 360;
+constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
+constexpr double kStandardPressurePa = 101325.0;
+constexpr double kDryAirSpecificHeatJPerKgK = 1004.0;
+constexpr double kDefaultHeatTransferWPerM2K = 8.0;
+constexpr double kEarthAreaKm2 = 510072000.0;
+constexpr double kDefaultSurfaceRoughness = 20.0;
+constexpr double kDefaultBasinShape = 3.5;
+constexpr double kEarthWaterGigatons = 1.4e9;
+
+double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
+    // В текущем UI нет явного управления гидросферой, поэтому применяем мягкую эвристику:
+    // океаническую поверхность считаем водной, остальные материалы — сухими.
+    if (material.id == QLatin1String("ocean")) {
+        return kEarthWaterGigatons;
+    }
+    return 0.0;
+}
+
+double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
+                                     const SurfaceMaterial &material,
+                                     double pressureAtm,
+                                     double planetRadiusKm,
+                                     double surfaceGravity,
+                                     double blendedInsolation,
+                                     double manualGreenhouseOpacity,
+                                     bool useAtmosphericModel,
+                                     RadiationModelType radiationModelType,
+                                     bool manualGreenhouseOnTopOfAtmosphere,
+                                     bool logDetails) {
+    const double safeRadiusKm = qMax(0.1, planetRadiusKm);
+    const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
+
+    const double waterGigatons = estimateSurfaceWaterGigatons(material);
+    const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
+    const double avgDepth = (planetAreaKm2 > 0.0) ? waterGigatons / planetAreaKm2 : 0.0;
+    double potentialCoverage = 0.0;
+    if (waterGigatons > 0.0) {
+        const double fillFactor = (avgDepth * kDefaultBasinShape) / kDefaultSurfaceRoughness;
+        potentialCoverage = 1.0 - std::exp(-fillFactor * 3.0);
+    }
+    potentialCoverage = qBound(0.0, potentialCoverage, 1.0);
+
+    // Давление также усиливает облачность: давление выше порога повышает отражение.
+    const double pressureClouds =
+        pressureAtm > 0.05 ? 0.25 * (1.0 - std::exp(-pressureAtm)) : 0.0;
+    const double albedo = qBound(0.0, material.albedo, 1.0);
+    const double surfAlbedoPre =
+        (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
+    const double tEffPre =
+        std::pow((blendedInsolation * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
+                     (4.0 * kStefanBoltzmannConstant),
+                 0.25);
+    const auto preRadiationModel = makeRadiationModel(atmosphere,
+                                                      pressureAtm,
+                                                      tEffPre,
+                                                      tEffPre,
+                                                      surfaceGravity,
+                                                      radiationModelType);
+    const double baseLongwaveTransmission =
+        qMax(1e-6, preRadiationModel->outgoingTransmission());
+    const double tBasePre =
+        tEffPre * std::pow(1.0 / baseLongwaveTransmission, 0.25);
+
+    double evaporation = 0.0;
+    if (potentialCoverage > 0.0 && tBasePre > 263.0) {
+        evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
+    }
+    const double waterTau = qMin(8.0, evaporation * 1.5);
+    double extraTau = waterTau;
+    if (manualGreenhouseOpacity > 0.0 &&
+        (!useAtmosphericModel || manualGreenhouseOnTopOfAtmosphere)) {
+        // Дополнительная непрозрачность: либо без атмосферной модели,
+        // либо поверх неё по явному переключателю.
+        extraTau += opticalDepthFromGreenhouseOpacity(manualGreenhouseOpacity,
+                                                      radiationModelType);
+    }
+
+    const double extraLongwaveTransmission =
+        longwaveTransmissionForOpticalDepth(extraTau, radiationModelType);
+    const double totalLongwaveTransmission =
+        qMax(1e-6, baseLongwaveTransmission * extraLongwaveTransmission);
+
+    // Приводим пропускание к коэффициенту парникового эффекта для SurfacePointState.
+    const double greenhouseOpacity = 1.0 - totalLongwaveTransmission;
+    if (logDetails) {
+        qCInfo(solarRadiationLog) << "Local greenhouse opacity"
+                                 << "pressureAtm=" << pressureAtm
+                                 << "blendedInsolation=" << blendedInsolation
+                                 << "surfAlbedoPre=" << surfAlbedoPre
+                                 << "pressureClouds=" << pressureClouds
+                                 << "tEffPre=" << tEffPre
+                                 << "baseLongwaveTransmission=" << baseLongwaveTransmission
+                                 << "tBasePre=" << tBasePre
+                                 << "evaporation=" << evaporation
+                                 << "waterTau=" << waterTau
+                                 << "extraTau=" << extraTau
+                                 << "totalLongwaveTransmission=" << totalLongwaveTransmission
+                                 << "greenhouseOpacity=" << greenhouseOpacity;
+    }
+    return qBound(0.0, greenhouseOpacity, 0.999);
+}
 
 struct TemperatureCacheKey {
     double solarConstant = 0.0;
@@ -99,6 +241,9 @@ struct TemperatureCacheKey {
     double atmospherePressureAtm = 0.0;
     double surfaceGravity = 0.0;
     double greenhouseOpacity = 0.0;
+    bool manualGreenhouseOnTopOfAtmosphere = false;
+    RadiationModelType radiationModelType = RadiationModelType::Fast;
+    double cloudAlbedo = 0.0;
     double dayLength = 0.0;
     double referenceDistanceAU = 0.0;
     double semiMajorAxis = 0.0;
@@ -106,12 +251,19 @@ struct TemperatureCacheKey {
     double obliquity = 0.0;
     double perihelionArgument = 0.0;
     double planetRadiusKm = 0.0;
+    HeightSourceType heightSourceType = HeightSourceType::Procedural;
+    QString heightmapPath;
+    double heightmapScaleKm = 0.0;
+    quint32 heightSeed = 0;
+    bool useContinentsHeight = false;
+    bool hasSeaLevel = false;
+    bool useFlatHeight = false;
     int subsurfaceLayers = 0;
     double subsurfaceTopThicknessMeters = 0.0;
     double subsurfaceDepthMeters = 0.0;
     SubsurfaceBottomBoundaryCondition subsurfaceBoundary =
         SubsurfaceBottomBoundaryCondition::Insulating;
-    QString subsurfaceProfileSignature;
+    double subsurfaceGeothermalFluxWPerM2 = 0.0;
     int latitudePoints = 0;
     int segmentCount = 0;
     RotationMode rotationMode = RotationMode::Normal;
@@ -123,6 +275,9 @@ struct TemperatureCacheKey {
                atmospherePressureAtm == other.atmospherePressureAtm &&
                surfaceGravity == other.surfaceGravity &&
                greenhouseOpacity == other.greenhouseOpacity &&
+               manualGreenhouseOnTopOfAtmosphere == other.manualGreenhouseOnTopOfAtmosphere &&
+               radiationModelType == other.radiationModelType &&
+               cloudAlbedo == other.cloudAlbedo &&
                dayLength == other.dayLength &&
                referenceDistanceAU == other.referenceDistanceAU &&
                semiMajorAxis == other.semiMajorAxis &&
@@ -130,11 +285,18 @@ struct TemperatureCacheKey {
                obliquity == other.obliquity &&
                perihelionArgument == other.perihelionArgument &&
                planetRadiusKm == other.planetRadiusKm &&
+               heightSourceType == other.heightSourceType &&
+               heightmapPath == other.heightmapPath &&
+               heightmapScaleKm == other.heightmapScaleKm &&
+               heightSeed == other.heightSeed &&
+               useContinentsHeight == other.useContinentsHeight &&
+               hasSeaLevel == other.hasSeaLevel &&
+               useFlatHeight == other.useFlatHeight &&
                subsurfaceLayers == other.subsurfaceLayers &&
                subsurfaceTopThicknessMeters == other.subsurfaceTopThicknessMeters &&
                subsurfaceDepthMeters == other.subsurfaceDepthMeters &&
                subsurfaceBoundary == other.subsurfaceBoundary &&
-               subsurfaceProfileSignature == other.subsurfaceProfileSignature &&
+               subsurfaceGeothermalFluxWPerM2 == other.subsurfaceGeothermalFluxWPerM2 &&
                latitudePoints == other.latitudePoints &&
                segmentCount == other.segmentCount &&
                rotationMode == other.rotationMode;
@@ -160,6 +322,9 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.atmospherePressureAtm), seed);
     seed = qHash(hashDoubleBits(key.surfaceGravity), seed);
     seed = qHash(hashDoubleBits(key.greenhouseOpacity), seed);
+    seed = qHash(key.manualGreenhouseOnTopOfAtmosphere, seed);
+    seed = qHash(static_cast<int>(key.radiationModelType), seed);
+    seed = qHash(hashDoubleBits(key.cloudAlbedo), seed);
     seed = qHash(hashDoubleBits(key.dayLength), seed);
     seed = qHash(hashDoubleBits(key.referenceDistanceAU), seed);
     seed = qHash(hashDoubleBits(key.semiMajorAxis), seed);
@@ -167,11 +332,18 @@ uint qHash(const TemperatureCacheKey &key, uint seed = 0) {
     seed = qHash(hashDoubleBits(key.obliquity), seed);
     seed = qHash(hashDoubleBits(key.perihelionArgument), seed);
     seed = qHash(hashDoubleBits(key.planetRadiusKm), seed);
+    seed = qHash(static_cast<int>(key.heightSourceType), seed);
+    seed = qHash(key.heightmapPath, seed);
+    seed = qHash(hashDoubleBits(key.heightmapScaleKm), seed);
+    seed = qHash(static_cast<quint32>(key.heightSeed), seed);
+    seed = qHash(key.useContinentsHeight, seed);
+    seed = qHash(key.hasSeaLevel, seed);
+    seed = qHash(key.useFlatHeight, seed);
     seed = qHash(key.subsurfaceLayers, seed);
     seed = qHash(hashDoubleBits(key.subsurfaceTopThicknessMeters), seed);
     seed = qHash(hashDoubleBits(key.subsurfaceDepthMeters), seed);
     seed = qHash(static_cast<int>(key.subsurfaceBoundary), seed);
-    seed = qHash(key.subsurfaceProfileSignature, seed);
+    seed = qHash(hashDoubleBits(key.subsurfaceGeothermalFluxWPerM2), seed);
     seed = qHash(key.latitudePoints, seed);
     seed = qHash(key.segmentCount, seed);
     seed = qHash(static_cast<int>(key.rotationMode), seed);
@@ -356,15 +528,29 @@ public:
             static_cast<int>(RotationMode::TidalLocked));
         heightSeedSpinBox_ = new QSpinBox(this);
         heightSeedSpinBox_->setRange(0, std::numeric_limits<int>::max());
+        flatHeightButton_ = new QPushButton(QStringLiteral("Обнулить высоту"), this);
+        flatHeightButton_->setCheckable(true);
+        flatHeightButton_->setEnabled(false);
+        updateFlatHeightButtonText(false);
+        cloudAlbedoSpinBox_ = new QDoubleSpinBox(this);
+        cloudAlbedoSpinBox_->setRange(0.0, 1.0);
+        cloudAlbedoSpinBox_->setDecimals(2);
+        cloudAlbedoSpinBox_->setSingleStep(0.05);
+        manualGreenhouseOnTopCheckBox_ = new QCheckBox(
+            QStringLiteral("Добавлять ручную парниковую непрозрачность поверх атмосферы"), this);
+        manualGreenhouseOnTopCheckBox_->setToolTip(
+            QStringLiteral("Если включено, значение парниковой непрозрачности добавляется\n"
+                           "к атмосферной модели и используется как дополнительный фактор."));
+        advancedRadiationCheckBox_ = new QCheckBox(
+            QStringLiteral("Точная радиационная модель (многослойная)"), this);
+        advancedRadiationCheckBox_->setToolTip(
+            QStringLiteral("Уточняет передачу коротковолнового и длинноволнового излучения\n"
+                           "через атмосферу в многослойной аппроксимации.\n"
+                           "По умолчанию точная модель включена."));
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
-        latitudeStepFastRadio_ = new QRadioButton(QStringLiteral("Через 1° (быстрые)"), this);
-        latitudeStepSlowRadio_ = new QRadioButton(QStringLiteral("Через 10° (медленные)"), this);
-        latitudeStepGroup_ = new QButtonGroup(this);
-        latitudeStepGroup_->addButton(latitudeStepFastRadio_);
-        latitudeStepGroup_->addButton(latitudeStepSlowRadio_);
-        latitudeStepFastRadio_->setChecked(true);
+        auto *latitudeStepLabel = new QLabel(QStringLiteral("Через 1° (быстрые)"), this);
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
         deletePlanetButton_ = new QPushButton(this);
         deletePlanetButton_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
@@ -397,10 +583,11 @@ public:
         rotationModeLayout->addWidget(rotationModeComboBox_);
         auto *rotationModeWidget = new QWidget(this);
         rotationModeWidget->setLayout(rotationModeLayout);
-        auto *latitudeStepLayout = new QHBoxLayout();
-        latitudeStepLayout->addWidget(latitudeStepFastRadio_);
-        latitudeStepLayout->addWidget(latitudeStepSlowRadio_);
         auto *latitudeStepWidget = new QWidget(this);
+        auto *latitudeStepLayout = new QHBoxLayout();
+        latitudeStepLayout->addWidget(latitudeStepLabel);
+        latitudeStepLayout->addStretch();
+        latitudeStepLayout->setContentsMargins(0, 0, 0, 0);
         latitudeStepWidget->setLayout(latitudeStepLayout);
 
         auto *planetColumnsLayout = new QHBoxLayout();
@@ -411,6 +598,10 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         planetControlsLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
         planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
+        planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), flatHeightButton_);
+        planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
+        planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
+        planetControlsLayout->addRow(QString(), advancedRadiationCheckBox_);
         planetControlsLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
         planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
 
@@ -428,6 +619,19 @@ public:
 
         atmosphereWidget_ = new AtmosphereWidget(this, false);
         atmosphereWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        connect(atmosphereWidget_, &AtmosphereWidget::compositionChanged, this,
+                [this](const AtmosphereComposition &composition) {
+                    if (!planetComboBox_) {
+                        return;
+                    }
+                    const int currentIndex = planetComboBox_->currentIndex();
+                    if (currentIndex < 0) {
+                        return;
+                    }
+                    planetComboBox_->setItemData(
+                        currentIndex, QVariant::fromValue(composition), kRoleAtmosphere);
+                    updateSurfaceGridTemperatures();
+                });
 
         auto *starsPanelLayout = new QVBoxLayout();
         starsPanelLayout->addWidget(primaryGroupBox_);
@@ -473,20 +677,34 @@ public:
         temperatureElapsedLabel_ = new QLabel(QStringLiteral("Прошло: 00:00"), this);
         surfaceSeamlessCheckBox_ = new QCheckBox(QStringLiteral("Бесшовная карта"), this);
         surfaceMapModeComboBox_ = new QComboBox(this);
-        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура"),
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура поверхности"),
                                          static_cast<int>(SurfaceMapMode::Temperature));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Температура нижнего слоя атмосферы"),
+                                         static_cast<int>(SurfaceMapMode::AirTemperature));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Высота"),
                                          static_cast<int>(SurfaceMapMode::Height));
-        surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
-        surfaceViewToggleButton_->setCheckable(true);
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Ветер"),
+                                         static_cast<int>(SurfaceMapMode::Wind));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Давление"),
+                                         static_cast<int>(SurfaceMapMode::Pressure));
         subsurfaceLayersSpinBox_ = new QSpinBox(this);
         subsurfaceLayersSpinBox_->setRange(1, 200);
         subsurfaceLayersSpinBox_->setValue(24);
+        surfaceViewToggleButton_ = new QPushButton(QStringLiteral("3D вид"), this);
+        surfaceViewToggleButton_->setCheckable(true);
+        surfaceMarkupCheckBox_ = new QCheckBox(QStringLiteral("Разметка"), this);
+        surfaceMarkupCheckBox_->setChecked(true);
+        surfaceGlobeWidget_->setMarkupVisible(surfaceMarkupCheckBox_->isChecked());
+        connect(surfaceMarkupCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+            if (surfaceGlobeWidget_) {
+                surfaceGlobeWidget_->setMarkupVisible(checked);
+            }
+        });
         subsurfaceTopThicknessSpinBox_ = new QDoubleSpinBox(this);
         subsurfaceTopThicknessSpinBox_->setRange(0.001, 10.0);
         subsurfaceTopThicknessSpinBox_->setDecimals(3);
         subsurfaceTopThicknessSpinBox_->setSingleStep(0.01);
-        subsurfaceTopThicknessSpinBox_->setValue(0.02);
+        subsurfaceTopThicknessSpinBox_->setValue(0.05);
         subsurfaceTopThicknessSpinBox_->setSuffix(QStringLiteral(" м"));
         subsurfaceDepthSpinBox_ = new QDoubleSpinBox(this);
         subsurfaceDepthSpinBox_->setRange(0.1, 200.0);
@@ -494,6 +712,15 @@ public:
         subsurfaceDepthSpinBox_->setSingleStep(0.1);
         subsurfaceDepthSpinBox_->setValue(2.0);
         subsurfaceDepthSpinBox_->setSuffix(QStringLiteral(" м"));
+        subsurfaceGeothermalFluxSpinBox_ = new QDoubleSpinBox(this);
+        subsurfaceGeothermalFluxSpinBox_->setRange(0.0, 1.0);
+        subsurfaceGeothermalFluxSpinBox_->setDecimals(4);
+        subsurfaceGeothermalFluxSpinBox_->setSingleStep(0.005);
+        // Типичный диапазон геотермального потока для безатмосферных тел: 0.01–0.02 Вт/м².
+        subsurfaceGeothermalFluxSpinBox_->setValue(0.015);
+        subsurfaceGeothermalFluxSpinBox_->setSuffix(QStringLiteral(" Вт/м²"));
+        subsurfaceGeothermalFluxSpinBox_->setToolTip(
+            QStringLiteral("Типичный диапазон для безатмосферных тел: 0.01–0.02 Вт/м²."));
         subsurfaceBoundaryComboBox_ = new QComboBox(this);
         subsurfaceBoundaryComboBox_->addItem(QStringLiteral("Поток = 0"),
                                              static_cast<int>(SubsurfaceBottomBoundaryCondition::Insulating));
@@ -505,9 +732,17 @@ public:
         heightScaleWidget_ = new SurfaceHeightScaleWidget(this);
         heightScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         heightScaleWidget_->setMinimumHeight(18);
+        windScaleWidget_ = new SurfaceWindScaleWidget(this);
+        windScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        windScaleWidget_->setMinimumHeight(18);
+        pressureScaleWidget_ = new SurfacePressureScaleWidget(this);
+        pressureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        pressureScaleWidget_->setMinimumHeight(18);
         surfaceLegendScaleStack_ = new QStackedWidget(this);
         surfaceLegendScaleStack_->addWidget(temperatureScaleWidget_);
         surfaceLegendScaleStack_->addWidget(heightScaleWidget_);
+        surfaceLegendScaleStack_->addWidget(windScaleWidget_);
+        surfaceLegendScaleStack_->addWidget(pressureScaleWidget_);
         surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
         auto *surfaceLegendTopLayout = new QHBoxLayout();
         surfaceLegendTopLayout->addWidget(surfaceMinTemperatureLabel_);
@@ -524,6 +759,7 @@ public:
         surfaceControlLayout->addWidget(new QLabel(QStringLiteral("Карта:"), this));
         surfaceControlLayout->addWidget(surfaceMapModeComboBox_);
         surfaceControlLayout->addWidget(surfaceViewToggleButton_);
+        surfaceControlLayout->addWidget(surfaceMarkupCheckBox_);
         surfaceControlLayout->addStretch();
         auto *surfaceLegendBottomLayout = new QHBoxLayout();
         surfaceLegendBottomLayout->addStretch();
@@ -534,6 +770,8 @@ public:
         subsurfaceFormLayout->addRow(QStringLiteral("Верхняя толщина:"), subsurfaceTopThicknessSpinBox_);
         subsurfaceFormLayout->addRow(QStringLiteral("Глубина модели:"), subsurfaceDepthSpinBox_);
         subsurfaceFormLayout->addRow(QStringLiteral("Граница снизу:"), subsurfaceBoundaryComboBox_);
+        subsurfaceFormLayout->addRow(QStringLiteral("Геотермальный поток:"),
+                                     subsurfaceGeothermalFluxSpinBox_);
         auto *subsurfaceGroupBox = new QGroupBox(QStringLiteral("Подповерхностная модель"), this);
         subsurfaceGroupBox->setLayout(subsurfaceFormLayout);
         auto *surfaceMapLayout = new QVBoxLayout();
@@ -571,6 +809,16 @@ public:
         rightTabs->addTab(plotGroupBox, tr("Температура"));
         rightTabs->addTab(atmosphereWidget_, tr("Атмосфера"));
         rightTabs->addTab(surfaceMapContainer, tr("Поверхность"));
+        connect(rightTabs, &QTabWidget::currentChanged, this,
+                [this, rightTabs, surfaceMapContainer](int) {
+                    if (rightTabs->currentWidget() != surfaceMapContainer) {
+                        return;
+                    }
+                    // Пересчитываем поверхность только при первом открытии вкладки.
+                    if (surfaceGrid_.points().isEmpty()) {
+                        updateSurfaceGridTemperatures();
+                    }
+                });
 
         auto *rightLayout = new QVBoxLayout();
         rightLayout->addWidget(rightTabs, 1);
@@ -585,7 +833,8 @@ public:
         QThreadPool::globalInstance()->setMaxThreadCount(
             qMax(1, QThread::idealThreadCount() - 1));
 
-        connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this, rightTabs, surfaceMapContainer](int) {
             cancelTemperatureCalculation();
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
@@ -595,10 +844,17 @@ public:
             updateAtmospherePlanetParameters();
             updateAtmosphereComposition();
             updatePlanetOrbitLabels();
-            updateLatitudePointsDefault();
             syncMaterialWithPlanet();
+            if (rightTabs->currentWidget() == surfaceMapContainer) {
+                updateSurfaceGridTemperatures();
+            }
             syncRotationModeWithPlanet();
             syncHeightSeedWithPlanet();
+            syncFlatHeightWithPlanet();
+            syncCloudAlbedoWithPlanet();
+            syncGeothermalFluxWithPlanet();
+            syncManualGreenhouseOnTopWithPlanet();
+            syncAdvancedRadiationWithPlanet();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
                 (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -658,13 +914,45 @@ public:
             updateSurfaceGridTemperatures();
         });
 
-        connect(latitudeStepFastRadio_, &QRadioButton::toggled, this, [this](bool checked) {
-            if (!checked) {
+        connect(flatHeightButton_, &QPushButton::toggled, this, [this](bool checked) {
+            if (planetComboBox_->currentIndex() < 0) {
                 return;
             }
-            latitudePointsManuallySet_ = true;
+            syncPlanetFlatHeightWithSelection(checked);
             clearTemperatureCache();
             updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
+        });
+
+        connect(cloudAlbedoSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+                [this](double) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetCloudAlbedoWithSelection();
+            clearTemperatureCache();
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
+        });
+
+        connect(manualGreenhouseOnTopCheckBox_, &QCheckBox::toggled, this, [this](bool) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetManualGreenhouseOnTopWithSelection();
+            clearTemperatureCache();
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
+        });
+
+        connect(advancedRadiationCheckBox_, &QCheckBox::toggled, this, [this](bool) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetAdvancedRadiationWithSelection();
+            clearTemperatureCache();
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
         });
 
         connect(temperaturePauseButton_, &QPushButton::clicked, this, [this]() {
@@ -715,6 +1003,10 @@ public:
                 this, [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
         connect(subsurfaceDepthSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
                 [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
+        connect(subsurfaceGeothermalFluxSpinBox_,
+                QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this,
+                [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
         connect(subsurfaceBoundaryComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [onSubsurfaceChanged](int) { onSubsurfaceChanged(); });
 
@@ -727,15 +1019,6 @@ public:
                                                     : static_cast<QWidget *>(surfaceMapWidget_));
             surfaceViewToggleButton_->setText(checked ? QStringLiteral("2D вид")
                                                       : QStringLiteral("3D вид"));
-        });
-
-        connect(latitudeStepSlowRadio_, &QRadioButton::toggled, this, [this](bool checked) {
-            if (!checked) {
-                return;
-            }
-            latitudePointsManuallySet_ = true;
-            clearTemperatureCache();
-            updateTemperaturePlot();
         });
 
         connect(segmentSelectorWidget_, &SegmentSelectorWidget::currentIndexChanged, this,
@@ -752,7 +1035,7 @@ public:
 
         applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
         applySecondary(std::nullopt);
-        setPlanetPresets(solarSystemPresets(), QStringLiteral("Земля"));
+        setPlanetPresets(solarSystemPresets(), QStringLiteral("Венера"));
     }
 
 private:
@@ -855,6 +1138,18 @@ private:
         QMessageBox::warning(this, QStringLiteral("Некорректный ввод"), message);
     }
 
+    bool shouldLogRadiationForPoint(int pointIndex) const {
+        if (surfaceGrid_.points().isEmpty()) {
+            return false;
+        }
+        int targetIndex = selectedSurfacePointIndex_;
+        if (targetIndex < 0 || targetIndex >= surfaceGrid_.points().size()) {
+            // Если ячейка не выбрана, логируем нулевую — так лог остаётся однострочным и предсказуемым.
+            targetIndex = 0;
+        }
+        return pointIndex == targetIndex;
+    }
+
     QLineEdit *radiusInput_ = nullptr;
     QLineEdit *temperatureInput_ = nullptr;
 
@@ -877,10 +1172,11 @@ private:
     QComboBox *materialComboBox_ = nullptr;
     QComboBox *rotationModeComboBox_ = nullptr;
     QSpinBox *heightSeedSpinBox_ = nullptr;
+    QPushButton *flatHeightButton_ = nullptr;
+    QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
+    QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
+    QCheckBox *advancedRadiationCheckBox_ = nullptr;
     ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
-    QRadioButton *latitudeStepFastRadio_ = nullptr;
-    QRadioButton *latitudeStepSlowRadio_ = nullptr;
-    QButtonGroup *latitudeStepGroup_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
     AtmosphereWidget *atmosphereWidget_ = nullptr;
@@ -902,12 +1198,16 @@ private:
     QCheckBox *surfaceSeamlessCheckBox_ = nullptr;
     QComboBox *surfaceMapModeComboBox_ = nullptr;
     QPushButton *surfaceViewToggleButton_ = nullptr;
+    QCheckBox *surfaceMarkupCheckBox_ = nullptr;
     QSpinBox *subsurfaceLayersSpinBox_ = nullptr;
     QDoubleSpinBox *subsurfaceTopThicknessSpinBox_ = nullptr;
     QDoubleSpinBox *subsurfaceDepthSpinBox_ = nullptr;
     QComboBox *subsurfaceBoundaryComboBox_ = nullptr;
+    QDoubleSpinBox *subsurfaceGeothermalFluxSpinBox_ = nullptr;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
+    SurfaceWindScaleWidget *windScaleWidget_ = nullptr;
+    SurfacePressureScaleWidget *pressureScaleWidget_ = nullptr;
     QStackedWidget *surfaceLegendScaleStack_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
@@ -932,11 +1232,19 @@ private:
     double surfaceMinTemperatureK_ = 0.0;
     double surfaceMaxTemperatureK_ = 0.0;
     bool hasSurfaceTemperatureRange_ = false;
+    double surfaceMinAirTemperatureK_ = 0.0;
+    double surfaceMaxAirTemperatureK_ = 0.0;
+    bool hasSurfaceAirTemperatureRange_ = false;
     double surfaceMinHeightKm_ = 0.0;
     double surfaceMaxHeightKm_ = 0.0;
     bool hasSurfaceHeightRange_ = false;
+    double surfaceMinWindSpeedMps_ = 0.0;
+    double surfaceMaxWindSpeedMps_ = 0.0;
+    bool hasSurfaceWindRange_ = false;
+    double surfaceMinPressureAtm_ = 0.0;
+    double surfaceMaxPressureAtm_ = 0.0;
+    bool hasSurfacePressureRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
-    bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
     QHash<TemperatureCacheKey, TemperatureCacheEntry> temperatureCache_;
@@ -946,10 +1254,17 @@ private:
     struct SurfaceSimulationState {
         int dayIndex = 0;
         int hourIndex = 0;
-        int segmentIndex = 0;
-        double declinationDegrees = 0.0;
     } surfaceSimState_;
-    QVector<OrbitSegment> surfaceSimSegments_;
+    OrbitAnimationModel surfaceOrbitAnimation_;
+    bool surfaceOrbitAnimationInitialized_ = false;
+
+    void updateFlatHeightButtonText(bool useFlatHeight) {
+        if (!flatHeightButton_) {
+            return;
+        }
+        flatHeightButton_->setText(useFlatHeight ? QStringLiteral("Вернуть высоту")
+                                                 : QStringLiteral("Обнулить высоту"));
+    }
 
     void updateTemperaturePauseUi(bool paused) {
         if (temperaturePauseButton_) {
@@ -999,11 +1314,37 @@ private:
     void resetSurfaceSimulation() {
         surfaceSimRunning_ = false;
         surfaceSimState_ = {};
-        surfaceSimSegments_.clear();
+        resetSurfaceOrbitAnimation();
         if (surfaceSimTimer_) {
             surfaceSimTimer_->stop();
         }
         updateSurfaceSimulationUi();
+    }
+
+    void resetSurfaceOrbitAnimation() {
+        if (!planetComboBox_) {
+            surfaceOrbitAnimation_.reset(1.0, 0.0, 0.0, 0.0, kSurfaceOrbitSegmentsPerYear);
+            surfaceOrbitAnimationInitialized_ = true;
+            return;
+        }
+        const double semiMajorAxis = planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble();
+        const double eccentricity = planetComboBox_->currentData(kRoleEccentricity).toDouble();
+        const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
+        const double perihelionArgument =
+            planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
+        surfaceOrbitAnimation_.reset(semiMajorAxis,
+                                     eccentricity,
+                                     obliquity,
+                                     perihelionArgument,
+                                     kSurfaceOrbitSegmentsPerYear);
+        surfaceOrbitAnimationInitialized_ = true;
+    }
+
+    void ensureSurfaceOrbitAnimationReady() {
+        if (surfaceOrbitAnimationInitialized_) {
+            return;
+        }
+        resetSurfaceOrbitAnimation();
     }
 
     void updateSurfacePointStatusDialog() {
@@ -1046,10 +1387,13 @@ private:
         updateAtmospherePlanetParameters();
         updateAtmosphereComposition();
         updatePlanetOrbitLabels();
-        updateLatitudePointsDefault();
         syncMaterialWithPlanet();
         syncRotationModeWithPlanet();
         syncHeightSeedWithPlanet();
+        syncFlatHeightWithPlanet();
+        syncCloudAlbedoWithPlanet();
+        syncManualGreenhouseOnTopWithPlanet();
+        syncAdvancedRadiationWithPlanet();
         updatePlanetActions();
     }
 
@@ -1077,6 +1421,24 @@ private:
         if (heightSeedSpinBox_) {
             const QSignalBlocker seedBlocker(heightSeedSpinBox_);
             heightSeedSpinBox_->setValue(0);
+        }
+        if (flatHeightButton_) {
+            const QSignalBlocker flatBlocker(flatHeightButton_);
+            flatHeightButton_->setChecked(false);
+            flatHeightButton_->setEnabled(false);
+            updateFlatHeightButtonText(false);
+        }
+        if (cloudAlbedoSpinBox_) {
+            const QSignalBlocker cloudBlocker(cloudAlbedoSpinBox_);
+            cloudAlbedoSpinBox_->setValue(0.0);
+        }
+        if (manualGreenhouseOnTopCheckBox_) {
+            const QSignalBlocker greenhouseBlocker(manualGreenhouseOnTopCheckBox_);
+            manualGreenhouseOnTopCheckBox_->setChecked(false);
+        }
+        if (advancedRadiationCheckBox_) {
+            const QSignalBlocker advancedBlocker(advancedRadiationCheckBox_);
+            advancedRadiationCheckBox_->setChecked(false);
         }
         updatePlanetActions();
         updateTemperaturePlot();
@@ -1233,37 +1595,11 @@ private:
     }
 
     int latitudeStepDegrees() const {
-        if (latitudeStepSlowRadio_ && latitudeStepSlowRadio_->isChecked()) {
-            return 10;
-        }
         return 1;
     }
 
     int latitudePoints() const {
         return 180 / latitudeStepDegrees() + 1;
-    }
-
-    void updateLatitudePointsDefault() {
-        if (latitudePointsManuallySet_) {
-            return;
-        }
-
-        const QVariant value = planetComboBox_->currentData(kRoleDayLength);
-        if (!value.isValid()) {
-            return;
-        }
-
-        const double dayLength = value.toDouble();
-        // Для медленных планет увеличиваем шаг широты, чтобы профили быстро считались
-        // и оставались читаемыми при малом числе характерных широт.
-        const bool useSlowStep = (dayLength > 30.0);
-        const QSignalBlocker fastBlocker(latitudeStepFastRadio_);
-        const QSignalBlocker slowBlocker(latitudeStepSlowRadio_);
-        if (useSlowStep) {
-            latitudeStepSlowRadio_->setChecked(true);
-        } else {
-            latitudeStepFastRadio_->setChecked(true);
-        }
     }
 
     void updatePlanetOrbitLabels() {
@@ -1274,11 +1610,17 @@ private:
             planetEccentricityLabel_->setText(QStringLiteral("—"));
             planetObliquityLabel_->setText(QStringLiteral("—"));
             planetPerihelionArgumentLabel_->setText(QStringLiteral("—"));
+            if (surfaceGlobeWidget_) {
+                surfaceGlobeWidget_->setAxisTiltDegrees(0.0);
+            }
             return;
         }
         planetEccentricityLabel_->setText(formatEccentricity(eccentricity.toDouble()));
         planetObliquityLabel_->setText(formatAngle(obliquity.toDouble()));
         planetPerihelionArgumentLabel_->setText(formatAngle(perihelionArgument.toDouble()));
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setAxisTiltDegrees(obliquity.toDouble());
+        }
     }
 
     bool hasPrimaryInputs() const {
@@ -1309,15 +1651,22 @@ private:
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
         planetComboBox_->setItemData(index, QVariant::fromValue(planet.atmosphere), kRoleAtmosphere);
         planetComboBox_->setItemData(index, planet.greenhouseOpacity, kRoleGreenhouseOpacity);
+        planetComboBox_->setItemData(index,
+                                     planet.manualGreenhouseOnTopOfAtmosphere,
+                                     kRoleManualGreenhouseOnTopOfAtmosphere);
+        planetComboBox_->setItemData(index,
+                                     static_cast<int>(RadiationModelType::Layered),
+                                     kRoleAdvancedRadiationModel);
+        planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
+        planetComboBox_->setItemData(index, planet.geothermalFluxWPerM2, kRoleGeothermalFlux);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
                                      kRoleHeightSourceType);
         planetComboBox_->setItemData(index, planet.heightmapPath, kRoleHeightmapPath);
         planetComboBox_->setItemData(index, planet.heightmapScaleKm, kRoleHeightmapScaleKm);
         planetComboBox_->setItemData(index, planet.heightSeed, kRoleHeightSeed);
         planetComboBox_->setItemData(index, planet.useContinentsHeight, kRoleUseContinentsHeight);
-        planetComboBox_->setItemData(index,
-                                     QVariant::fromValue(planet.subsurfaceSettings),
-                                     kRoleSubsurfaceSettings);
+        planetComboBox_->setItemData(index, planet.hasSeaLevel, kRoleHasSeaLevel);
+        planetComboBox_->setItemData(index, false, kRoleFlatHeight);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -1392,6 +1741,17 @@ private:
         greenhouseValidator->setLocale(QLocale::C);
         greenhouseOpacityInput->setValidator(greenhouseValidator);
 
+        auto *cloudAlbedoInput = new QDoubleSpinBox(&dialog);
+        cloudAlbedoInput->setRange(0.0, 1.0);
+        cloudAlbedoInput->setDecimals(2);
+        cloudAlbedoInput->setSingleStep(0.05);
+
+        auto *manualGreenhouseOnTopInput = new QCheckBox(
+            QStringLiteral("Добавлять поверх атмосферной модели"), &dialog);
+        manualGreenhouseOnTopInput->setToolTip(
+            QStringLiteral("Использовать значение парниковой непрозрачности как дополнительный\n"
+                           "фактор поверх атмосферной модели (например, для проверки гипотез)."));
+
         auto *heightSeedInput = new QSpinBox(&dialog);
         heightSeedInput->setRange(0, std::numeric_limits<int>::max());
         heightSeedInput->setValue(0);
@@ -1407,6 +1767,9 @@ private:
         formLayout->addRow(QStringLiteral("Аргумент перицентра (°):"), perihelionArgumentInput);
         formLayout->addRow(QStringLiteral("Парниковая непрозрачность (0..1):"),
                            greenhouseOpacityInput);
+        formLayout->addRow(QStringLiteral("Парниковая непрозрачность поверх атмосферы:"),
+                           manualGreenhouseOnTopInput);
+        formLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoInput);
         formLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedInput);
 
         auto *materialInput = new QComboBox(&dialog);
@@ -1456,8 +1819,9 @@ private:
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
                 [&dialog, nameInput, axisInput, dayLengthInput, massInput, radiusInput,
                  eccentricityInput, obliquityInput, perihelionArgumentInput,
-                 greenhouseOpacityInput, heightSeedInput, materialInput, rotationModeInput,
-                 atmosphereInput, this]() {
+                 greenhouseOpacityInput, manualGreenhouseOnTopInput, cloudAlbedoInput,
+                 heightSeedInput, materialInput,
+                 rotationModeInput, atmosphereInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -1521,6 +1885,10 @@ private:
                     return;
                 }
             }
+            const bool manualGreenhouseOnTop = manualGreenhouseOnTopInput->isChecked();
+            const double cloudAlbedo = cloudAlbedoInput->value();
+            const double geothermalFlux =
+                subsurfaceGeothermalFluxSpinBox_ ? subsurfaceGeothermalFluxSpinBox_->value() : 0.0;
 
             const int existingIndex = findPlanetIndexByName(name);
             const QString materialId = materialInput->currentData().toString();
@@ -1529,10 +1897,16 @@ private:
             const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
             const quint32 heightSeed = static_cast<quint32>(heightSeedInput->value());
             const AtmosphereComposition composition = atmosphereInput->composition(false);
+            const bool existingHasSeaLevel =
+                existingIndex >= 0
+                    ? planetComboBox_->itemData(existingIndex, kRoleHasSeaLevel).toBool()
+                    : false;
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
-                                composition, greenhouseOpacity, tidallyLocked};
+                                composition, greenhouseOpacity, manualGreenhouseOnTop,
+                                cloudAlbedo, geothermalFlux, tidallyLocked};
             preset.heightSeed = heightSeed;
+            preset.hasSeaLevel = existingHasSeaLevel;
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -1557,6 +1931,21 @@ private:
                 planetComboBox_->setItemData(existingIndex, preset.greenhouseOpacity,
                                              kRoleGreenhouseOpacity);
                 planetComboBox_->setItemData(existingIndex,
+                                             preset.manualGreenhouseOnTopOfAtmosphere,
+                                             kRoleManualGreenhouseOnTopOfAtmosphere);
+                const QVariant advancedRadiationValue =
+                    planetComboBox_->itemData(existingIndex, kRoleAdvancedRadiationModel);
+                const QVariant fallbackRadiation =
+                    static_cast<int>(RadiationModelType::Layered);
+                planetComboBox_->setItemData(
+                    existingIndex,
+                    advancedRadiationValue.isValid() ? advancedRadiationValue : fallbackRadiation,
+                    kRoleAdvancedRadiationModel);
+                planetComboBox_->setItemData(existingIndex, preset.cloudAlbedo, kRoleCloudAlbedo);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.geothermalFluxWPerM2,
+                                             kRoleGeothermalFlux);
+                planetComboBox_->setItemData(existingIndex,
                                              static_cast<int>(preset.heightSourceType),
                                              kRoleHeightSourceType);
                 planetComboBox_->setItemData(existingIndex, preset.heightmapPath, kRoleHeightmapPath);
@@ -1565,6 +1954,10 @@ private:
                 planetComboBox_->setItemData(existingIndex, preset.heightSeed, kRoleHeightSeed);
                 planetComboBox_->setItemData(existingIndex, preset.useContinentsHeight,
                                              kRoleUseContinentsHeight);
+                planetComboBox_->setItemData(existingIndex, preset.hasSeaLevel, kRoleHasSeaLevel);
+                planetComboBox_->setItemData(existingIndex,
+                                             planetComboBox_->itemData(existingIndex, kRoleFlatHeight),
+                                             kRoleFlatHeight);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
@@ -1644,6 +2037,103 @@ private:
         heightSeedSpinBox_->setValue(heightSeed);
     }
 
+    void syncFlatHeightWithPlanet() {
+        if (!flatHeightButton_) {
+            return;
+        }
+
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            const QSignalBlocker blocker(flatHeightButton_);
+            flatHeightButton_->setChecked(false);
+            flatHeightButton_->setEnabled(false);
+            updateFlatHeightButtonText(false);
+            return;
+        }
+
+        const bool useFlatHeight = planetComboBox_->itemData(index, kRoleFlatHeight).toBool();
+        const QSignalBlocker blocker(flatHeightButton_);
+        flatHeightButton_->setChecked(useFlatHeight);
+        flatHeightButton_->setEnabled(true);
+        updateFlatHeightButtonText(useFlatHeight);
+    }
+
+    void syncCloudAlbedoWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !cloudAlbedoSpinBox_) {
+            return;
+        }
+
+        const double cloudAlbedo = planetComboBox_->itemData(index, kRoleCloudAlbedo).toDouble();
+        const QSignalBlocker blocker(cloudAlbedoSpinBox_);
+        cloudAlbedoSpinBox_->setValue(cloudAlbedo);
+    }
+
+    void syncGeothermalFluxWithPlanet() {
+        if (!subsurfaceGeothermalFluxSpinBox_) {
+            return;
+        }
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+
+        const QString planetName = planetComboBox_->itemData(index, kRolePlanetName).toString();
+        if (planetName != QStringLiteral("Луна")) {
+            return;
+        }
+
+        const double geothermalFlux =
+            planetComboBox_->itemData(index, kRoleGeothermalFlux).toDouble();
+        const QSignalBlocker blocker(subsurfaceGeothermalFluxSpinBox_);
+        subsurfaceGeothermalFluxSpinBox_->setValue(geothermalFlux);
+    }
+
+    void syncManualGreenhouseOnTopWithPlanet() {
+        if (!manualGreenhouseOnTopCheckBox_) {
+            return;
+        }
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            const QSignalBlocker blocker(manualGreenhouseOnTopCheckBox_);
+            manualGreenhouseOnTopCheckBox_->setChecked(false);
+            return;
+        }
+
+        const bool manualOnTop =
+            planetComboBox_->itemData(index, kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
+        const QSignalBlocker blocker(manualGreenhouseOnTopCheckBox_);
+        manualGreenhouseOnTopCheckBox_->setChecked(manualOnTop);
+    }
+
+    void syncAdvancedRadiationWithPlanet() {
+        if (!advancedRadiationCheckBox_) {
+            return;
+        }
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            const QSignalBlocker blocker(advancedRadiationCheckBox_);
+            advancedRadiationCheckBox_->setChecked(false);
+            return;
+        }
+
+        const int modelTypeValue =
+            planetComboBox_->itemData(index, kRoleAdvancedRadiationModel).toInt();
+        const auto modelType = static_cast<RadiationModelType>(modelTypeValue);
+        const bool useAdvanced = modelType == RadiationModelType::Layered;
+        const QSignalBlocker blocker(advancedRadiationCheckBox_);
+        advancedRadiationCheckBox_->setChecked(useAdvanced);
+    }
+
+    void syncPlanetFlatHeightWithSelection(bool useFlatHeight) {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+        planetComboBox_->setItemData(index, useFlatHeight, kRoleFlatHeight);
+        updateFlatHeightButtonText(useFlatHeight);
+    }
+
     void syncPlanetMaterialWithSelection() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0) {
@@ -1666,6 +2156,38 @@ private:
             return;
         }
         planetComboBox_->setItemData(index, heightSeedSpinBox_->value(), kRoleHeightSeed);
+    }
+
+    void syncPlanetCloudAlbedoWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !cloudAlbedoSpinBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(index, cloudAlbedoSpinBox_->value(), kRoleCloudAlbedo);
+    }
+
+    void syncPlanetManualGreenhouseOnTopWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !manualGreenhouseOnTopCheckBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(
+            index,
+            manualGreenhouseOnTopCheckBox_->isChecked(),
+            kRoleManualGreenhouseOnTopOfAtmosphere);
+    }
+
+    void syncPlanetAdvancedRadiationWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !advancedRadiationCheckBox_) {
+            return;
+        }
+        const auto modelType = advancedRadiationCheckBox_->isChecked()
+                                   ? RadiationModelType::Layered
+                                   : RadiationModelType::Fast;
+        planetComboBox_->setItemData(index,
+                                     static_cast<int>(modelType),
+                                     kRoleAdvancedRadiationModel);
     }
 
     void updateRotationModeIllustration() {
@@ -1813,8 +2335,14 @@ private:
             planetComboBox_->currentData(kRoleHeightSeed).toUInt();
         const bool useContinentsHeight =
             planetComboBox_->currentData(kRoleUseContinentsHeight).toBool();
+        const bool useFlatHeight =
+            planetComboBox_->currentData(kRoleFlatHeight).toBool();
+        // Уровень моря задаётся пресетом, чтобы отделение суши/океана не зависело
+        // от выбранного материала (например, у Венеры остаются "океаны" даже на песке).
+        const bool hasSeaLevel =
+            planetComboBox_->currentData(kRoleHasSeaLevel).toBool();
         surfaceGrid_.setHeightSource(heightSource, heightmapPath, heightmapScaleKm,
-                                     heightSeed, useContinentsHeight);
+                                     heightSeed, useContinentsHeight, hasSeaLevel);
 
         if (radiusKm <= 0.0) {
             surfaceGrid_.generateIcosahedronGrid(0);
@@ -1829,6 +2357,12 @@ private:
         const double ratio = qMax(1.0, static_cast<double>(targetPointCount) / 20.0);
         const int subdivisionLevel = qMax(0, static_cast<int>(qRound(qLn(ratio) / qLn(4.0))));
         surfaceGrid_.generateIcosahedronGrid(subdivisionLevel);
+
+        if (useFlatHeight) {
+            for (auto &point : surfaceGrid_.points()) {
+                point.heightKm = 0.0;
+            }
+        }
     }
 
     struct SurfacePointStateDefaults {
@@ -1861,6 +2395,26 @@ private:
         return defaults;
     }
 
+    QString resolveSurfaceMaterialIdForPoint(const AtmosphereComposition &atmosphere,
+                                             double massEarths,
+                                             double radiusKm) const {
+        const QString planetName = planetComboBox_->currentData(kRolePlanetName).toString();
+        if (planetName == QStringLiteral("Церрера")) {
+            return QStringLiteral("ice");
+        }
+
+        double atmospherePressureAtm = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+        }
+        if (atmospherePressureAtm > 0.0) {
+            return QStringLiteral("desert");
+        }
+
+        // Без атмосферы выбираем лунный реголит как типичный пылевой покров для безвоздушных тел.
+        return QStringLiteral("regolith_moon");
+    }
+
     SubsurfaceModelSettings buildSubsurfaceSettings() const {
         SubsurfaceModelSettings settings;
         if (subsurfaceLayersSpinBox_) {
@@ -1876,15 +2430,8 @@ private:
             settings.bottomBoundary = static_cast<SubsurfaceBottomBoundaryCondition>(
                 subsurfaceBoundaryComboBox_->currentData().toInt());
         }
-        if (planetComboBox_) {
-            const QVariant presetSettings = planetComboBox_->currentData(kRoleSubsurfaceSettings);
-            if (presetSettings.isValid()) {
-                const SubsurfaceModelSettings presetProfile =
-                    presetSettings.value<SubsurfaceModelSettings>();
-                settings.thermalConductivityByLayer = presetProfile.thermalConductivityByLayer;
-                settings.densityByLayer = presetProfile.densityByLayer;
-                settings.specificHeatByLayer = presetProfile.specificHeatByLayer;
-            }
+        if (subsurfaceGeothermalFluxSpinBox_) {
+            settings.geothermalFluxWPerM2 = subsurfaceGeothermalFluxSpinBox_->value();
         }
         return settings;
     }
@@ -1899,12 +2446,110 @@ private:
         updateSurfacePointStatusDialog();
     }
 
+    double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
+                                       double pressureAtm,
+                                       double gravity,
+                                       double initialAirTemperature,
+                                       double blendedInsolation,
+                                       double cloudShortwaveTransmission,
+                                       RadiationModelType radiationModelType,
+                                       const RadiationModel &radiationModel,
+                                       double timeStepSeconds) const {
+        if (radiationModelType == RadiationModelType::Layered) {
+            const auto *layeredModel = dynamic_cast<const LayeredRadiationModel *>(&radiationModel);
+            if (layeredModel) {
+                return layeredModel->bottomLayerTemperatureKelvin();
+            }
+        }
+        return estimateAirTemperatureKelvin(surfaceState,
+                                            pressureAtm,
+                                            gravity,
+                                            initialAirTemperature,
+                                            blendedInsolation,
+                                            cloudShortwaveTransmission,
+                                            radiationModel,
+                                            timeStepSeconds);
+    }
+
+    double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
+                                        double pressureAtm,
+                                        double gravity,
+                                        double initialAirTemperature,
+                                        double blendedInsolation,
+                                        double cloudShortwaveTransmission,
+                                        const RadiationModel &radiationModel,
+                                        double timeStepSeconds) const {
+        if (pressureAtm <= 0.0 || gravity <= 0.0) {
+            return surfaceState.temperatureKelvin();
+        }
+        const double columnMassKgPerM2 =
+            (pressureAtm * kStandardPressurePa) / gravity;
+        const double airHeatCapacity = columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
+        if (airHeatCapacity <= 0.0) {
+            return surfaceState.temperatureKelvin();
+        }
+
+        AtmosphericCellState airState(qMax(0.0, initialAirTemperature), airHeatCapacity);
+        const double couplingScale = qBound(0.0, pressureAtm, 1.0);
+        const double heatTransfer = kDefaultHeatTransferWPerM2K * couplingScale;
+        if (timeStepSeconds <= 0.0) {
+            return airState.airTemperatureKelvin();
+        }
+
+        // Радиационный нагрев воздуха:
+        // Q_sw_air = S_blend * T_cloud * (1 - T_atm), где T_atm = incomingTransmission().
+        // Q_lw_air = F_surf * (1 - T_lw), где T_lw = outgoingTransmission().
+        const double emittedFlux = surfaceState.emittedFlux();
+        const double shortwaveAbsorbedByAir =
+            blendedInsolation * cloudShortwaveTransmission *
+            (1.0 - radiationModel.incomingTransmission());
+        const double longwaveAbsorbedByAir =
+            emittedFlux * (1.0 - radiationModel.outgoingTransmission());
+        const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveAbsorbedByAir;
+        const double airRadiativeDelta =
+            airRadiativeHeatingFlux * timeStepSeconds / airHeatCapacity;
+        airState.setAirTemperatureKelvin(airState.airTemperatureKelvin() + airRadiativeDelta);
+
+        if (heatTransfer <= 0.0) {
+            return airState.airTemperatureKelvin();
+        }
+
+        // Оцениваем изменение температуры воздуха без изменения поверхности,
+        // чтобы не модифицировать вычисленное состояние карты.
+        const double surfaceTemperature = surfaceState.temperatureKelvin();
+        const double airTemperature = airState.airTemperatureKelvin();
+        const double fluxWPerM2 = heatTransfer * (surfaceTemperature - airTemperature);
+        const double maxStableDt = 0.5 * airHeatCapacity / heatTransfer;
+        const double stableDt = qMin(timeStepSeconds, maxStableDt);
+        const double airDelta = fluxWPerM2 * stableDt / airHeatCapacity;
+        airState.setAirTemperatureKelvin(airTemperature + airDelta);
+        return airState.airTemperatureKelvin();
+    }
+
     void applySurfaceTemperatureRangeToViews(double minTemperature, double maxTemperature) {
         if (surfaceMapWidget_) {
             surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
         }
         if (surfaceGlobeWidget_) {
             surfaceGlobeWidget_->setTemperatureRange(minTemperature, maxTemperature);
+        }
+    }
+
+    void applySurfaceWindRangeToViews(double minWindSpeed, double maxWindSpeed) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setWindRange(minWindSpeed, maxWindSpeed);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setWindRange(minWindSpeed, maxWindSpeed);
+        }
+    }
+
+    void applySurfacePressureRangeToViews(double minPressureAtm, double maxPressureAtm) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setPressureRange(minPressureAtm, maxPressureAtm);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setPressureRange(minPressureAtm, maxPressureAtm);
         }
     }
 
@@ -1916,16 +2561,103 @@ private:
         if (surfaceGlobeWidget_) {
             surfaceGlobeWidget_->setMapMode(mode);
         }
+        if (mode == SurfaceMapMode::Temperature && hasSurfaceTemperatureRange_) {
+            applySurfaceTemperatureRangeToViews(surfaceMinTemperatureK_, surfaceMaxTemperatureK_);
+        } else if (mode == SurfaceMapMode::AirTemperature && hasSurfaceAirTemperatureRange_) {
+            applySurfaceTemperatureRangeToViews(surfaceMinAirTemperatureK_,
+                                                surfaceMaxAirTemperatureK_);
+        }
         refreshSurfaceLegend();
+    }
+
+    void updateSurfaceWindField(const AtmosphereComposition &atmosphere,
+                                double atmospherePressureAtm,
+                                double dayLengthDays,
+                                double surfaceGravity) {
+        Q_UNUSED(atmosphere)
+        Q_UNUSED(atmospherePressureAtm)
+        Q_UNUSED(surfaceGravity)
+        if (surfaceGrid_.points().isEmpty()) {
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+            return;
+        }
+
+        QVector<double> pressuresAtm;
+        QVector<double> temperatures;
+        pressuresAtm.reserve(surfaceGrid_.points().size());
+        temperatures.reserve(surfaceGrid_.points().size());
+        for (auto &point : surfaceGrid_.points()) {
+            pressuresAtm.push_back(qMax(0.0, point.pressureAtm));
+            temperatures.push_back(point.temperatureK);
+        }
+
+        WindFieldModel windModel;
+        const QVector<WindVector> wind =
+            windModel.buildField(surfaceGrid_,
+                                 pressuresAtm,
+                                 temperatures,
+                                 qMax(0.0, dayLengthDays) * 86400.0,
+                                 2);
+        if (wind.size() != surfaceGrid_.points().size()) {
+            for (auto &point : surfaceGrid_.points()) {
+                point.windEastMps = 0.0;
+                point.windNorthMps = 0.0;
+                point.windSpeedMps = 0.0;
+            }
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+            return;
+        }
+
+        double minWind = std::numeric_limits<double>::max();
+        double maxWind = std::numeric_limits<double>::lowest();
+        for (int i = 0; i < wind.size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
+            point.windEastMps = wind.at(i).eastMps;
+            point.windNorthMps = wind.at(i).northMps;
+            point.windSpeedMps = std::hypot(point.windEastMps, point.windNorthMps);
+            minWind = qMin(minWind, point.windSpeedMps);
+            maxWind = qMax(maxWind, point.windSpeedMps);
+        }
+
+        if (minWind <= maxWind) {
+            applySurfaceWindRangeToViews(minWind, maxWind);
+            updateSurfaceWindLegend(true, minWind, maxWind);
+        } else {
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+        }
     }
 
     void updateSurfaceGridTemperatures() {
         resetSurfaceSimulation();
         rebuildSurfaceGrid();
         updateSurfaceHeightLegendFromGrid();
+        AtmosphereComposition atmosphere;
+        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
+        if (atmosphereValue.isValid()) {
+            atmosphere = atmosphereValue.value<AtmosphereComposition>();
+        }
+        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
+        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        const double cloudAlbedo =
+            qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
+        const QString baseMaterialId =
+            resolveSurfaceMaterialIdForPoint(atmosphere, massEarths, radiusKm);
+        for (auto &point : surfaceGrid_.points()) {
+            if (surfaceMaxHeightKm_ > 0.0 &&
+                point.heightKm >= 0.75 * surfaceMaxHeightKm_) {
+                // Высотный порог для скальных пород: доля от максимума дает масштабируемый
+                // критерий для разных планетных рельефов.
+                point.materialId = QStringLiteral("rocky");
+            } else {
+                point.materialId = baseMaterialId;
+            }
+        }
         if (surfaceGrid_.points().isEmpty()) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+            updateSurfacePressureLegend(false, 0.0, 0.0);
             return;
         }
 
@@ -1933,8 +2665,22 @@ private:
         if (!stateDefaults) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+            updateSurfacePressureLegend(false, 0.0, 0.0);
             return;
         }
+
+        QHash<QString, SurfaceMaterial> materialsById;
+        const auto materials = surfaceMaterials();
+        materialsById.reserve(materials.size());
+        for (const auto &material : materials) {
+            materialsById.insert(material.id, material);
+        }
+        const auto materialForPoint = [&materialsById, &stateDefaults](const QString &materialId) {
+            const auto it = materialsById.constFind(materialId);
+            return it != materialsById.cend() ? *it : stateDefaults->material;
+        };
 
         // Вкладка «Поверхность» всегда использует модель поверхности без атмосферных поправок.
         const QVector<TemperatureSummaryPoint> *summarySource = nullptr;
@@ -1947,89 +2693,140 @@ private:
             segmentSource = &lastTemperatureSegmentsSurfaceOnly_.first();
         }
 
-        if (!summarySource && !segmentSource) {
-            for (auto &point : surfaceGrid_.points()) {
-                point.temperatureK = stateDefaults->minTemperatureKelvin;
-                point.state = SurfacePointState(point.temperatureK,
-                                                stateDefaults->albedo,
-                                                stateDefaults->greenhouseOpacity,
-                                                stateDefaults->minTemperatureKelvin,
-                                                stateDefaults->material,
-                                                stateDefaults->subsurfaceSettings);
-            }
-            applySurfaceGridToViews();
-            updateSurfaceTemperatureLegend(false, 0.0, 0.0);
-            return;
-        }
-
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
-        const RotationMode rotationMode =
-            static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
-        const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
-        const double phase =
-            2.0 * M_PI *
-            (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
-            static_cast<double>(stepsPerDay);
-        const double baseHourAngle =
-            (rotationMode == RotationMode::TidalLocked) ? 0.0 : (phase - M_PI);
-        // Субзвёздная долгота - долгота, где часовой угол равен нулю.
-        // Для приливной синхронизации она фиксирована в системе долгот карты.
-        const double substellarLongitudeRadians =
-            (rotationMode == RotationMode::TidalLocked) ? 0.0 : -baseHourAngle;
-
-        double declinationDegrees = surfaceSimState_.declinationDegrees;
-        if (lastOrbitSegments_.size() > 0) {
-            const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
-            const double perihelionArgument =
-                planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
-            const double obliquityRadians = qDegreesToRadians(obliquity);
-            const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgument);
-            const int segmentIndex = surfaceSimState_.segmentIndex % lastOrbitSegments_.size();
-            const OrbitSegment &segment = lastOrbitSegments_.at(segmentIndex);
-            // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
-            const double solarLongitude = segment.trueAnomalyRadians + perihelionArgumentRadians;
-            declinationDegrees = qRadiansToDegrees(
-                std::asin(std::sin(obliquityRadians) * std::sin(solarLongitude)));
-        }
-        const double declinationRadians = qDegreesToRadians(declinationDegrees);
-
-        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
-        AtmosphereComposition atmosphere;
-        if (atmosphereValue.isValid()) {
-            atmosphere = atmosphereValue.value<AtmosphereComposition>();
-        }
-        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
-        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         double atmospherePressureAtm = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
         }
-        const double transport =
-            (atmospherePressureAtm > 50.0)
-                ? 0.99
-                : (atmospherePressureAtm > 0.001
-                       ? qMin(1.0, 0.15 * std::log(atmospherePressureAtm * 100.0 + 1.0))
-                       : 0.0);
-        const double rotBlock =
-            (dayLengthDays < 2.0 && atmospherePressureAtm < 10.0) ? 0.65 : 1.0;
-        const double meridionalTransport = transport * rotBlock;
-
-        double segmentSolarConstant = lastSolarConstant_;
-        if (!lastOrbitSegments_.isEmpty() && lastSolarConstantDistanceAU_ > 0.0) {
-            const int segmentIndex = surfaceSimState_.segmentIndex % lastOrbitSegments_.size();
-            const OrbitSegment &segment = lastOrbitSegments_.at(segmentIndex);
-            segmentSolarConstant =
-                lastSolarConstant_ *
-                std::pow(lastSolarConstantDistanceAU_ / segment.distanceAU, 2.0);
+        const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
+        const double localSeaLevelPressureAtm =
+            calculateCellPressureAtmFromKg(atmosphere.totalMassKg(),
+                                           massEarths,
+                                           radiusKm,
+                                           surfaceGrid_.pointAreaKm2());
+        double surfaceGravity = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            const double radiusMeters = radiusKm * 1000.0;
+            const double planetMassKg = massEarths * kEarthMassKg;
+            surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
-        // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
-        const double globalAverageInsolation = segmentSolarConstant / 4.0;
-        const double timeStepSeconds = 3600.0;
+        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+        const double manualGreenhouseOpacity = stateDefaults->greenhouseOpacity;
+        const bool manualGreenhouseOnTop =
+            planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
+        const auto radiationModelType = static_cast<RadiationModelType>(
+            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
 
-        auto interpolateBaselineTemperature = [summarySource, segmentSource](double latitudeDeg) {
-            // Базовая температура зависит от широты и используется как старт для мгновенного шага.
-            if (summarySource) {
-                const auto &points = *summarySource;
+        bool hasTemperatureRange = true;
+        double minTemperature = std::numeric_limits<double>::max();
+        double maxTemperature = std::numeric_limits<double>::lowest();
+        double minAirTemperature = std::numeric_limits<double>::max();
+        double maxAirTemperature = std::numeric_limits<double>::lowest();
+        QVector<double> blendedInsolations;
+        blendedInsolations.reserve(surfaceGrid_.points().size());
+        QVector<double> baselineAirTemperatures;
+        baselineAirTemperatures.reserve(surfaceGrid_.points().size());
+        const double timeStepSeconds = 3600.0;
+        // Коэффициент прохождения коротковолнового излучения через облака.
+        double cloudShortwaveTransmission = 1.0 - cloudAlbedo;
+        if (cloudAlbedo > 0.7) {
+            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            cloudShortwaveTransmission *= 0.2;
+        }
+        cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+        if (!summarySource && !segmentSource) {
+            const double fallbackInsolation =
+                (lastSolarConstant_ > 0.0) ? (lastSolarConstant_ / 4.0) : 0.0;
+            for (auto &point : surfaceGrid_.points()) {
+                const SurfaceMaterial material = materialForPoint(point.materialId);
+                // Альбедо и теплофизика зависят от материала ячейки, но облака перекрывают
+                // поверхность, поэтому берём максимум между материалом и облаками.
+                const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+                const double albedo = qMax(materialAlbedo, cloudAlbedo);
+                point.temperatureK = stateDefaults->minTemperatureKelvin;
+                point.airTemperatureK = point.temperatureK;
+                point.state = SurfacePointState(point.temperatureK,
+                                                albedo,
+                                                stateDefaults->greenhouseOpacity,
+                                                stateDefaults->minTemperatureKelvin,
+                                                material,
+                                                stateDefaults->subsurfaceSettings);
+                blendedInsolations.push_back(fallbackInsolation);
+                baselineAirTemperatures.push_back(point.temperatureK);
+            }
+            hasTemperatureRange = false;
+        } else {
+            const RotationMode rotationMode =
+                static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
+            const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
+            const double phase =
+                2.0 * M_PI *
+                (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
+                static_cast<double>(stepsPerDay);
+            const double baseHourAngle =
+                (rotationMode == RotationMode::TidalLocked) ? 0.0 : (phase - M_PI);
+            // Субзвёздная долгота - долгота, где часовой угол равен нулю.
+            // Для приливной синхронизации она фиксирована в системе долгот карты.
+            const double substellarLongitudeRadians =
+                (rotationMode == RotationMode::TidalLocked) ? 0.0 : -baseHourAngle;
+
+            ensureSurfaceOrbitAnimationReady();
+            const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
+            const double declinationRadians = qDegreesToRadians(declinationDegrees);
+            const double sinDeclination = std::sin(declinationRadians);
+            const double cosDeclination = std::cos(declinationRadians);
+
+            const double transport =
+                (atmospherePressureAtm > 50.0)
+                    ? 0.99
+                    : (atmospherePressureAtm > 0.001
+                           ? qMin(1.0, 0.15 * std::log(atmospherePressureAtm * 100.0 + 1.0))
+                           : 0.0);
+            const double rotBlock =
+                (dayLengthDays < 2.0 && atmospherePressureAtm < 10.0) ? 0.65 : 1.0;
+            const double meridionalTransport = transport * rotBlock;
+
+            double segmentSolarConstant = lastSolarConstant_;
+            if (lastSolarConstantDistanceAU_ > 0.0) {
+                const double distanceAU = surfaceOrbitAnimation_.distanceAU();
+                segmentSolarConstant =
+                    lastSolarConstant_ *
+                    std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
+            }
+            // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
+            const double globalAverageInsolation = segmentSolarConstant / 4.0;
+            auto interpolateBaselineTemperature = [summarySource, segmentSource](double latitudeDeg) {
+                // Базовая температура зависит от широты и используется как старт для мгновенного шага.
+                if (summarySource) {
+                    const auto &points = *summarySource;
+                    auto interpolate = [&points, latitudeDeg](auto valueForPoint) {
+                        if (points.size() == 1) {
+                            return valueForPoint(points.first());
+                        }
+                        if (latitudeDeg <= points.first().latitudeDegrees) {
+                            return valueForPoint(points.first());
+                        }
+                        if (latitudeDeg >= points.last().latitudeDegrees) {
+                            return valueForPoint(points.last());
+                        }
+                        for (int i = 1; i < points.size(); ++i) {
+                            if (latitudeDeg <= points[i].latitudeDegrees) {
+                                const auto &lower = points[i - 1];
+                                const auto &upper = points[i];
+                                const double span = upper.latitudeDegrees - lower.latitudeDegrees;
+                                const double t =
+                                    span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
+                                return valueForPoint(lower) + t * (valueForPoint(upper) - valueForPoint(lower));
+                            }
+                        }
+                        return valueForPoint(points.last());
+                    };
+                    return interpolate([](const TemperatureSummaryPoint &point) {
+                        return point.meanAnnualKelvin;
+                    });
+                }
+
+                const auto &points = *segmentSource;
                 auto interpolate = [&points, latitudeDeg](auto valueForPoint) {
                     if (points.size() == 1) {
                         return valueForPoint(points.first());
@@ -2052,80 +2849,157 @@ private:
                     }
                     return valueForPoint(points.last());
                 };
-                return interpolate([](const TemperatureSummaryPoint &point) {
-                    return point.meanAnnualKelvin;
+                return interpolate([](const TemperatureRangePoint &point) {
+                    return point.meanDailyKelvin;
                 });
-            }
-
-            const auto &points = *segmentSource;
-            auto interpolate = [&points, latitudeDeg](auto valueForPoint) {
-                if (points.size() == 1) {
-                    return valueForPoint(points.first());
-                }
-                if (latitudeDeg <= points.first().latitudeDegrees) {
-                    return valueForPoint(points.first());
-                }
-                if (latitudeDeg >= points.last().latitudeDegrees) {
-                    return valueForPoint(points.last());
-                }
-                for (int i = 1; i < points.size(); ++i) {
-                    if (latitudeDeg <= points[i].latitudeDegrees) {
-                        const auto &lower = points[i - 1];
-                        const auto &upper = points[i];
-                        const double span = upper.latitudeDegrees - lower.latitudeDegrees;
-                        const double t =
-                            span > 0.0 ? (latitudeDeg - lower.latitudeDegrees) / span : 0.0;
-                        return valueForPoint(lower) + t * (valueForPoint(upper) - valueForPoint(lower));
-                    }
-                }
-                return valueForPoint(points.last());
             };
-            return interpolate([](const TemperatureRangePoint &point) {
-                return point.meanDailyKelvin;
-            });
-        };
 
-        double minTemperature = std::numeric_limits<double>::max();
-        double maxTemperature = std::numeric_limits<double>::lowest();
-        for (auto &point : surfaceGrid_.points()) {
-            const double baselineTemperature =
-                interpolateBaselineTemperature(point.latitudeDeg);
-            const double latitudeRadians = qDegreesToRadians(point.latitudeDeg);
-            const double longitudeRadians = qDegreesToRadians(point.longitudeDeg);
-            const double localHourAngle = longitudeRadians - substellarLongitudeRadians;
-            const double cosZenith =
-                std::sin(latitudeRadians) * std::sin(declinationRadians) +
-                std::cos(latitudeRadians) * std::cos(declinationRadians) *
-                    std::cos(localHourAngle);
-            // Синхронизация формул инициализации и шага нужна, чтобы при старте
-            // не было скачков температуры и мерцания на освещенной стороне.
-            const double localInsolation =
-                segmentSolarConstant * qMax(0.0, cosZenith);
-            const double blendedInsolation =
-                localInsolation * (1.0 - meridionalTransport) +
-                globalAverageInsolation * meridionalTransport;
+            for (auto &point : surfaceGrid_.points()) {
+                const SurfaceMaterial material = materialForPoint(point.materialId);
+                // Альбедо и теплофизика зависят от материала ячейки, но облака перекрывают
+                // поверхность, поэтому берём максимум между материалом и облаками.
+                const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+                const double albedo = qMax(materialAlbedo, cloudAlbedo);
+                const double baselineTemperature =
+                    interpolateBaselineTemperature(point.latitudeDeg);
+                baselineAirTemperatures.push_back(baselineTemperature);
+                const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
+                const double cosZenith =
+                    point.sinLatitude * sinDeclination +
+                    point.cosLatitude * cosDeclination * std::cos(localHourAngle);
+                // Синхронизация формул инициализации и шага нужна, чтобы при старте
+                // не было скачков температуры и мерцания на освещенной стороне.
+                const double localInsolation =
+                    segmentSolarConstant * qMax(0.0, cosZenith);
+                const double blendedInsolation =
+                    localInsolation * (1.0 - meridionalTransport) +
+                    globalAverageInsolation * meridionalTransport;
 
-            SurfacePointState state(baselineTemperature,
-                                    stateDefaults->albedo,
-                                    stateDefaults->greenhouseOpacity,
-                                    stateDefaults->minTemperatureKelvin,
-                                    stateDefaults->material,
-                                    stateDefaults->subsurfaceSettings);
-            const double absorbedFlux = state.absorbedFlux(blendedInsolation);
-            const double emittedFlux = state.emittedFlux();
-            state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
-            point.state = state;
-            point.temperatureK = point.state.temperatureKelvin();
-            minTemperature = qMin(minTemperature, point.temperatureK);
-            maxTemperature = qMax(maxTemperature, point.temperatureK);
+                SurfacePointState state(baselineTemperature,
+                                        albedo,
+                                        stateDefaults->greenhouseOpacity,
+                                        stateDefaults->minTemperatureKelvin,
+                                        material,
+                                        stateDefaults->subsurfaceSettings);
+                const double absorbedFlux = state.absorbedFlux(blendedInsolation);
+                const double emittedFlux = state.emittedFlux();
+                state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
+                point.state = state;
+                blendedInsolations.push_back(blendedInsolation);
+                // Обновляем поверхностную температуру для карт и переноса.
+                point.temperatureK = point.state.temperatureKelvin();
+                minTemperature = qMin(minTemperature, point.temperatureK);
+                maxTemperature = qMax(maxTemperature, point.temperatureK);
+            }
         }
 
+        double minPressureAtm = std::numeric_limits<double>::max();
+        double maxPressureAtm = std::numeric_limits<double>::lowest();
+        for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
+            // Инициализируем поверхностное давление (на уровне рельефа), чтобы дальше
+            // переносить его ветром без пересчёта из всей атмосферы каждый тик.
+            // Это нужно и в fallback-ветке, чтобы карта давления/ветра не оставалась с нулями.
+            // Масса газового столба в ячейке пропорциональна её площади, поэтому P = (m_cell * g) / area_cell.
+            const double pressureAtm =
+                AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
+                                                              point.heightKm * 1000.0,
+                                                              point.temperatureK,
+                                                              atmosphere,
+                                                              gravity);
+            // Храним поверхностное давление в точке для последующего переноса по ветру.
+            point.pressureAtm = qMax(0.0, pressureAtm);
+            minPressureAtm = qMin(minPressureAtm, point.pressureAtm);
+            maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
+            const double blendedInsolation =
+                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const bool logDetails = shouldLogRadiationForPoint(i);
+            const double localGreenhouseOpacity =
+                computeLocalGreenhouseOpacity(atmosphere,
+                                              material,
+                                              point.pressureAtm,
+                                              radiusKm,
+                                              gravity,
+                                              blendedInsolation,
+                                              manualGreenhouseOpacity,
+                                              useAtmosphericModel,
+                                              radiationModelType,
+                                              manualGreenhouseOnTop,
+                                              logDetails);
+            point.state.setGreenhouseOpacity(localGreenhouseOpacity);
+            // Воздух интегрируется по времени, иначе он будет “сбрасываться” каждый тик.
+            // Поэтому используем предыдущее значение, а базу только для первичной инициализации.
+            const double initialAirTemperature =
+                (point.airTemperatureK > 0.0)
+                    ? point.airTemperatureK
+                    : ((i < baselineAirTemperatures.size())
+                           ? baselineAirTemperatures.at(i)
+                           : point.temperatureK);
+            // Используем локальную оценку ТОА-потока через blendedInsolation и планетарное
+            // альбедо (облака перекрывают поверхность), чтобы связать оптическую толщину
+            // с физически корректным источником излучения.
+            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+            const double planetaryAlbedo = qMax(materialAlbedo, cloudAlbedo);
+            const double effectiveFlux =
+                blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
+            const double effectiveTemperatureKelvin =
+                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
+            if (logDetails) {
+                qCInfo(solarRadiationLog) << "Radiation inputs (init)"
+                                          << "index=" << i
+                                          << "blendedInsolation=" << blendedInsolation
+                                          << "planetaryAlbedo=" << planetaryAlbedo
+                                          << "effectiveFlux=" << effectiveFlux
+                                          << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
+            }
+            const auto radiationModel =
+                makeRadiationModel(atmosphere,
+                                   point.pressureAtm,
+                                   point.state.temperatureKelvin(),
+                                   effectiveTemperatureKelvin,
+                                   gravity,
+                                   radiationModelType);
+            point.airTemperatureK =
+                resolveAirTemperatureKelvin(point.state,
+                                            point.pressureAtm,
+                                            gravity,
+                                            initialAirTemperature,
+                                            blendedInsolation,
+                                            cloudShortwaveTransmission,
+                                            radiationModelType,
+                                            *radiationModel,
+                                            timeStepSeconds);
+            if (logDetails) {
+                qCInfo(solarRadiationLog) << "Resolved air temperature (init)"
+                                          << "index=" << i
+                                          << "airTemperatureK=" << point.airTemperatureK;
+            }
+            minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
+            maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
+        }
+        updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
+
         applySurfaceGridToViews();
-        if (minTemperature <= maxTemperature) {
+        if (hasTemperatureRange && minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
+        }
+        if (hasTemperatureRange && minAirTemperature <= maxAirTemperature) {
+            if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
+                applySurfaceTemperatureRangeToViews(minAirTemperature, maxAirTemperature);
+            }
+            updateSurfaceAirTemperatureLegend(true, minAirTemperature, maxAirTemperature);
+        } else {
+            updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
+        }
+        if (minPressureAtm <= maxPressureAtm) {
+            applySurfacePressureRangeToViews(minPressureAtm, maxPressureAtm);
+            updateSurfacePressureLegend(true, minPressureAtm, maxPressureAtm);
+        } else {
+            updateSurfacePressureLegend(false, 0.0, 0.0);
         }
     }
 
@@ -2166,16 +3040,11 @@ private:
             return;
         }
 
-        const auto material = currentMaterial();
-        if (!material) {
+        const auto defaultMaterial = currentMaterial();
+        if (!defaultMaterial) {
             return;
         }
 
-        const double semiMajorAxis = planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble();
-        const double eccentricity = planetComboBox_->currentData(kRoleEccentricity).toDouble();
-        const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
-        const double perihelionArgument =
-            planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
         const RotationMode rotationMode =
             static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
@@ -2187,33 +3056,50 @@ private:
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         double atmospherePressureAtm = 0.0;
+        double surfaceGravity = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+            const double radiusMeters = radiusKm * 1000.0;
+            const double planetMassKg = massEarths * kEarthMassKg;
+            surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
+        const double localSeaLevelPressureAtm =
+            calculateCellPressureAtmFromKg(atmosphere.totalMassKg(),
+                                           massEarths,
+                                           radiusKm,
+                                           surfaceGrid_.pointAreaKm2());
+        const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
+        const double manualGreenhouseOpacity =
+            planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        const bool manualGreenhouseOnTop =
+            planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
+        const auto radiationModelType = static_cast<RadiationModelType>(
+            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
+        const double cloudAlbedo =
+            qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
+
+        QHash<QString, SurfaceMaterial> materialsById;
+        const auto materials = surfaceMaterials();
+        materialsById.reserve(materials.size());
+        for (const auto &material : materials) {
+            materialsById.insert(material.id, material);
+        }
+        const auto materialForPoint = [&materialsById, &defaultMaterial](const QString &materialId) {
+            const auto it = materialsById.constFind(materialId);
+            return it != materialsById.cend() ? *it : *defaultMaterial;
+        };
 
         const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
-        const int segmentCount = 12;
-        if (surfaceSimSegments_.size() != segmentCount || surfaceSimSegments_.isEmpty()) {
-            OrbitSegmentCalculator orbitCalculator(semiMajorAxis, eccentricity);
-            surfaceSimSegments_ = orbitCalculator.segments(segmentCount);
-        }
-        if (surfaceSimSegments_.isEmpty()) {
-            return;
-        }
 
-        const int segmentIndex = surfaceSimState_.segmentIndex % surfaceSimSegments_.size();
-        const OrbitSegment &segment = surfaceSimSegments_.at(segmentIndex);
-        const double obliquityRadians = qDegreesToRadians(obliquity);
-        const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgument);
+        ensureSurfaceOrbitAnimationReady();
         // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
-        const double solarLongitude = segment.trueAnomalyRadians + perihelionArgumentRadians;
-        surfaceSimState_.declinationDegrees =
-            qRadiansToDegrees(std::asin(std::sin(obliquityRadians) * std::sin(solarLongitude)));
+        const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
 
         // Инсоляция меняется с расстоянием как 1 / r^2 относительно опорной дистанции.
+        const double distanceAU = surfaceOrbitAnimation_.distanceAU();
         const double segmentSolarConstant =
             lastSolarConstant_ *
-            std::pow(lastSolarConstantDistanceAU_ / segment.distanceAU, 2.0);
+            std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
         const double transport =
             (atmospherePressureAtm > 50.0)
                 ? 0.99
@@ -2226,9 +3112,15 @@ private:
         // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
         const double globalAverageInsolation = segmentSolarConstant / 4.0;
 
-        const double dayLengthSeconds = qMax(0.01, dayLengthDays) * 86400.0;
-        // Шаг должен совпадать с фазой суточного цикла, иначе появляются пульсации и нестабильный прогрев.
-        const double timeStepSeconds = dayLengthSeconds / static_cast<double>(stepsPerDay);
+        // Один тик = 1 час планетарных суток, ускорение реализовано уменьшением интервала таймера.
+        const double timeStepSeconds = 3600.0;
+        // Коэффициент прохождения коротковолнового излучения через облака.
+        double cloudShortwaveTransmission = 1.0 - cloudAlbedo;
+        if (cloudAlbedo > 0.7) {
+            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            cloudShortwaveTransmission *= 0.2;
+        }
+        cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
         const double phase =
             2.0 * M_PI *
             (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
@@ -2238,35 +3130,176 @@ private:
         // Субзвёздная долгота задает меридиан с нулевым часовым углом.
         const double substellarLongitudeRadians =
             (rotationMode == RotationMode::TidalLocked) ? 0.0 : -hourAngle;
-        const double declinationRadians = qDegreesToRadians(surfaceSimState_.declinationDegrees);
+        const double declinationRadians = qDegreesToRadians(declinationDegrees);
+        const double sinDeclination = std::sin(declinationRadians);
+        const double cosDeclination = std::cos(declinationRadians);
 
-        double minTemperature = std::numeric_limits<double>::max();
-        double maxTemperature = std::numeric_limits<double>::lowest();
+        QVector<double> blendedInsolations;
+        blendedInsolations.reserve(surfaceGrid_.points().size());
         for (auto &point : surfaceGrid_.points()) {
-            const double latitudeRadians = qDegreesToRadians(point.latitudeDeg);
-            const double longitudeRadians = qDegreesToRadians(point.longitudeDeg);
-            const double localHourAngle = longitudeRadians - substellarLongitudeRadians;
+            const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
             const double cosZenith =
-                std::sin(latitudeRadians) * std::sin(declinationRadians) +
-                std::cos(latitudeRadians) * std::cos(declinationRadians) *
-                    std::cos(localHourAngle);
+                point.sinLatitude * sinDeclination +
+                point.cosLatitude * cosDeclination * std::cos(localHourAngle);
             // S_inst = S0 * cos(zenith) при освещении, иначе 0.
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
             const double blendedInsolation =
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
+            blendedInsolations.push_back(blendedInsolation);
 
             const double absorbedFlux = point.state.absorbedFlux(blendedInsolation);
             const double emittedFlux = point.state.emittedFlux();
             // Применяем шаговый радиационный баланс для состояния точки.
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
+            // Обновляем поверхностную температуру до переноса в соседние точки.
+            point.temperatureK = point.state.temperatureKelvin();
+        }
+
+        updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
+
+        QVector<double> temperatures;
+        QVector<double> pressuresAtm;
+        QVector<double> windEast;
+        QVector<double> windNorth;
+        temperatures.reserve(surfaceGrid_.points().size());
+        pressuresAtm.reserve(surfaceGrid_.points().size());
+        windEast.reserve(surfaceGrid_.points().size());
+        windNorth.reserve(surfaceGrid_.points().size());
+        for (const auto &point : surfaceGrid_.points()) {
+            temperatures.push_back(point.temperatureK);
+            pressuresAtm.push_back(qMax(0.0, point.pressureAtm));
+            windEast.push_back(point.windEastMps);
+            windNorth.push_back(point.windNorthMps);
+        }
+
+        // Переносим поверхностное давление (уровень рельефа) по полю ветра.
+        SurfacePressureTransportModel pressureTransportModel;
+        QVector<double> advectedPressures =
+            pressureTransportModel.advectPressure(surfaceGrid_,
+                                                  pressuresAtm,
+                                                  windEast,
+                                                  windNorth,
+                                                  timeStepSeconds,
+                                                  1,
+                                                  0.0);
+        if (advectedPressures.size() != surfaceGrid_.points().size()) {
+            advectedPressures = pressuresAtm;
+        }
+        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+        constexpr double kPressureRelaxFactor = 0.1;
+        double minPressureAtm = std::numeric_limits<double>::max();
+        double maxPressureAtm = std::numeric_limits<double>::lowest();
+        for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
+            const double advectedAtm = advectedPressures.at(i);
+            // Барометрическая релаксация возвращает поле давления к
+            // физически согласованному профилю P(z) при текущей температуре.
+            const double barometricAtm =
+                AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
+                                                              point.heightKm * 1000.0,
+                                                              point.temperatureK,
+                                                              atmosphere,
+                                                              gravity);
+            const double relaxedAtm =
+                advectedAtm + (barometricAtm - advectedAtm) * kPressureRelaxFactor;
+            // Фиксируем перенесённое поверхностное давление для UI и динамики.
+            point.pressureAtm = qMax(0.0, relaxedAtm);
+            minPressureAtm = qMin(minPressureAtm, point.pressureAtm);
+            maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
+            const double blendedInsolation =
+                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const bool logDetails = shouldLogRadiationForPoint(i);
+            const double localGreenhouseOpacity =
+                computeLocalGreenhouseOpacity(atmosphere,
+                                              material,
+                                              point.pressureAtm,
+                                              radiusKm,
+                                              gravity,
+                                              blendedInsolation,
+                                              manualGreenhouseOpacity,
+                                              useAtmosphericModel,
+                                              radiationModelType,
+                                              manualGreenhouseOnTop,
+                                              logDetails);
+            point.state.setGreenhouseOpacity(localGreenhouseOpacity);
+        }
+
+        SurfaceAdvectionModel advectionModel;
+        QVector<double> advectedTemperatures =
+            advectionModel.advectTemperature(surfaceGrid_,
+                                             temperatures,
+                                             windEast,
+                                             windNorth,
+                                             timeStepSeconds,
+                                             1,
+                                             1.0);
+        if (advectedTemperatures.size() != surfaceGrid_.points().size()) {
+            advectedTemperatures = temperatures;
+        }
+
+        double minTemperature = std::numeric_limits<double>::max();
+        double maxTemperature = std::numeric_limits<double>::lowest();
+        double minAirTemperature = std::numeric_limits<double>::max();
+        double maxAirTemperature = std::numeric_limits<double>::lowest();
+        for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
+            point.state.setTemperatureKelvin(advectedTemperatures.at(i));
+            // Температура после переноса хранится как поверхностная величина.
             point.temperatureK = point.state.temperatureKelvin();
             minTemperature = qMin(minTemperature, point.temperatureK);
             maxTemperature = qMax(maxTemperature, point.temperatureK);
+            const double initialAirTemperature =
+                (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
+            const double blendedInsolation =
+                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const bool logDetails = shouldLogRadiationForPoint(i);
+            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+            const double planetaryAlbedo = qMax(materialAlbedo, cloudAlbedo);
+            const double effectiveFlux =
+                blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
+            const double effectiveTemperatureKelvin =
+                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
+            if (logDetails) {
+                qCInfo(solarRadiationLog) << "Radiation inputs (tick)"
+                                          << "index=" << i
+                                          << "blendedInsolation=" << blendedInsolation
+                                          << "planetaryAlbedo=" << planetaryAlbedo
+                                          << "effectiveFlux=" << effectiveFlux
+                                          << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
+            }
+            const auto radiationModel =
+                makeRadiationModel(atmosphere,
+                                   point.pressureAtm,
+                                   point.state.temperatureKelvin(),
+                                   effectiveTemperatureKelvin,
+                                   gravity,
+                                   radiationModelType);
+            point.airTemperatureK =
+                resolveAirTemperatureKelvin(point.state,
+                                            point.pressureAtm,
+                                            gravity,
+                                            initialAirTemperature,
+                                            blendedInsolation,
+                                            cloudShortwaveTransmission,
+                                            radiationModelType,
+                                            *radiationModel,
+                                            timeStepSeconds);
+            if (logDetails) {
+                qCInfo(solarRadiationLog) << "Resolved air temperature (tick)"
+                                          << "index=" << i
+                                          << "airTemperatureK=" << point.airTemperatureK;
+            }
+            minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
+            maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
 
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
+        // Также обновляем виджеты, чтобы в них попали обновлённые поверхностные
+        // температура и давление после шага переноса.
         applySurfaceGridToViews();
         if (minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
@@ -2274,12 +3307,26 @@ private:
         } else {
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
         }
+        if (minAirTemperature <= maxAirTemperature) {
+            if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
+                applySurfaceTemperatureRangeToViews(minAirTemperature, maxAirTemperature);
+            }
+            updateSurfaceAirTemperatureLegend(true, minAirTemperature, maxAirTemperature);
+        } else {
+            updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
+        }
+        if (minPressureAtm <= maxPressureAtm) {
+            applySurfacePressureRangeToViews(minPressureAtm, maxPressureAtm);
+            updateSurfacePressureLegend(true, minPressureAtm, maxPressureAtm);
+        } else {
+            updateSurfacePressureLegend(false, 0.0, 0.0);
+        }
 
         ++surfaceSimState_.hourIndex;
         if (surfaceSimState_.hourIndex >= stepsPerDay) {
             surfaceSimState_.hourIndex = 0;
             ++surfaceSimState_.dayIndex;
-            surfaceSimState_.segmentIndex = (surfaceSimState_.segmentIndex + 1) % segmentCount;
+            surfaceOrbitAnimation_.advanceSegment();
         }
         updateSurfaceSimulationUi();
     }
@@ -2291,6 +3338,41 @@ private:
             surfaceMaxTemperatureK_ = maxTemperature;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Temperature) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceAirTemperatureLegend(bool hasRange,
+                                           double minTemperature,
+                                           double maxTemperature) {
+        hasSurfaceAirTemperatureRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinAirTemperatureK_ = minTemperature;
+            surfaceMaxAirTemperatureK_ = maxTemperature;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceWindLegend(bool hasRange, double minWindSpeed, double maxWindSpeed) {
+        hasSurfaceWindRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinWindSpeedMps_ = minWindSpeed;
+            surfaceMaxWindSpeedMps_ = maxWindSpeed;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::Wind) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfacePressureLegend(bool hasRange, double minPressureAtm, double maxPressureAtm) {
+        hasSurfacePressureRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinPressureAtm_ = minPressureAtm;
+            surfaceMaxPressureAtm_ = maxPressureAtm;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::Pressure) {
             refreshSurfaceLegend();
         }
     }
@@ -2351,24 +3433,94 @@ private:
             return;
         }
 
-        if (surfaceLegendScaleStack_) {
-            surfaceLegendScaleStack_->setCurrentWidget(heightScaleWidget_);
+        if (surfaceMapMode_ == SurfaceMapMode::AirTemperature) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
+            }
+            if (!hasSurfaceAirTemperatureRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (temperatureScaleWidget_) {
+                    temperatureScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 K").arg(locale.toString(surfaceMinAirTemperatureK_, 'f', 1)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 K").arg(locale.toString(surfaceMaxAirTemperatureK_, 'f', 1)));
+            if (temperatureScaleWidget_) {
+                temperatureScaleWidget_->setTemperatureRange(surfaceMinAirTemperatureK_,
+                                                             surfaceMaxAirTemperatureK_);
+            }
+            return;
         }
-        if (!hasSurfaceHeightRange_) {
+
+        if (surfaceMapMode_ == SurfaceMapMode::Height) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(heightScaleWidget_);
+            }
+            if (!hasSurfaceHeightRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (heightScaleWidget_) {
+                    heightScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 км").arg(locale.toString(surfaceMinHeightKm_, 'f', 1)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 км").arg(locale.toString(surfaceMaxHeightKm_, 'f', 1)));
+            if (heightScaleWidget_) {
+                heightScaleWidget_->setHeightRange(surfaceMinHeightKm_, surfaceMaxHeightKm_);
+            }
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::Wind) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(windScaleWidget_);
+            }
+            if (!hasSurfaceWindRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (windScaleWidget_) {
+                    windScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 м/с").arg(locale.toString(surfaceMinWindSpeedMps_, 'f', 1)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 м/с").arg(locale.toString(surfaceMaxWindSpeedMps_, 'f', 1)));
+            if (windScaleWidget_) {
+                windScaleWidget_->setWindRange(surfaceMinWindSpeedMps_, surfaceMaxWindSpeedMps_);
+            }
+            return;
+        }
+
+        if (surfaceLegendScaleStack_) {
+            surfaceLegendScaleStack_->setCurrentWidget(pressureScaleWidget_);
+        }
+        if (!hasSurfacePressureRange_) {
             surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
             surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
-            if (heightScaleWidget_) {
-                heightScaleWidget_->clearRange();
+            if (pressureScaleWidget_) {
+                pressureScaleWidget_->clearRange();
             }
             return;
         }
 
         surfaceMinTemperatureLabel_->setText(
-            QStringLiteral("Мин: %1 км").arg(locale.toString(surfaceMinHeightKm_, 'f', 1)));
+            QStringLiteral("Мин: %1 атм").arg(locale.toString(surfaceMinPressureAtm_, 'f', 3)));
         surfaceMaxTemperatureLabel_->setText(
-            QStringLiteral("Макс: %1 км").arg(locale.toString(surfaceMaxHeightKm_, 'f', 1)));
-        if (heightScaleWidget_) {
-            heightScaleWidget_->setHeightRange(surfaceMinHeightKm_, surfaceMaxHeightKm_);
+            QStringLiteral("Макс: %1 атм").arg(locale.toString(surfaceMaxPressureAtm_, 'f', 3)));
+        if (pressureScaleWidget_) {
+            pressureScaleWidget_->setPressureRange(surfaceMinPressureAtm_, surfaceMaxPressureAtm_);
         }
     }
 
@@ -2469,6 +3621,12 @@ private:
     void updateTemperaturePlot() {
         cancelTemperatureCalculation();
 
+        // График температуры временно отключён: основная модель теперь "Поверхность" с ячейками.
+        // Оставляем только очистку сегментов, чтобы UI не отображал устаревшие кривые.
+        clearTemperatureSegments();
+        return;
+
+#if 0
         if (!hasSolarConstant_) {
             clearTemperatureSegments();
             return;
@@ -2522,6 +3680,25 @@ private:
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         const double greenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        const bool manualGreenhouseOnTop =
+            planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
+        const double cloudAlbedo =
+            planetComboBox_->currentData(kRoleCloudAlbedo).toDouble();
+        const auto radiationModelType = static_cast<RadiationModelType>(
+            planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
+        const HeightSourceType heightSourceType =
+            static_cast<HeightSourceType>(planetComboBox_->currentData(kRoleHeightSourceType)
+                                              .toInt());
+        const QString heightmapPath =
+            planetComboBox_->currentData(kRoleHeightmapPath).toString();
+        const double heightmapScaleKm =
+            planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
+        const quint32 heightSeed =
+            planetComboBox_->currentData(kRoleHeightSeed).toUInt();
+        const bool useContinentsHeight =
+            planetComboBox_->currentData(kRoleUseContinentsHeight).toBool();
+        const bool hasSeaLevel =
+            planetComboBox_->currentData(kRoleHasSeaLevel).toBool();
         double atmospherePressureAtm = 0.0;
         double surfaceGravity = 0.0;
         if (massEarths > 0.0 && radiusKm > 0.0) {
@@ -2543,6 +3720,9 @@ private:
                                             atmospherePressureAtm,
                                             surfaceGravity,
                                             greenhouseOpacity,
+                                            manualGreenhouseOnTop,
+                                            radiationModelType,
+                                            cloudAlbedo,
                                             dayLength,
                                             referenceDistanceAU,
                                             semiMajorAxis,
@@ -2552,11 +3732,18 @@ private:
                                             // Радиус влияет на столбовую плотность и водный баланс, поэтому он
                                             // должен входить в ключ кэша температурных расчётов.
                                             radiusKm,
+                                            heightSourceType,
+                                            heightmapPath,
+                                            heightmapScaleKm,
+                                            heightSeed,
+                                            useContinentsHeight,
+                                            hasSeaLevel,
+                                            useFlatHeight,
                                             subsurfaceSettings.layerCount,
                                             subsurfaceSettings.topLayerThicknessMeters,
                                             subsurfaceSettings.bottomDepthMeters,
                                             subsurfaceSettings.bottomBoundary,
-                                            subsurfaceSettings.profileSignature(),
+                                            subsurfaceSettings.geothermalFluxWPerM2,
                                             latitudePointCount,
                                             segmentCount,
                                             rotationMode};
@@ -2567,6 +3754,9 @@ private:
                                                       0.0,
                                                       surfaceGravity,
                                                       0.0,
+                                                      false,
+                                                      radiationModelType,
+                                                      0.0,
                                                       dayLength,
                                                       referenceDistanceAU,
                                                       semiMajorAxis,
@@ -2576,11 +3766,18 @@ private:
                                                       // Радиус влияет на столбовую плотность и водный баланс, поэтому он
                                                       // должен входить в ключ кэша температурных расчётов.
                                                       radiusKm,
+                                                      heightSourceType,
+                                                      heightmapPath,
+                                                      heightmapScaleKm,
+                                                      heightSeed,
+                                                      useContinentsHeight,
+                                                      hasSeaLevel,
+                                                      useFlatHeight,
                                                       subsurfaceSettings.layerCount,
                                                       subsurfaceSettings.topLayerThicknessMeters,
                                                       subsurfaceSettings.bottomDepthMeters,
                                                       subsurfaceSettings.bottomBoundary,
-                                                      subsurfaceSettings.profileSignature(),
+                                                      subsurfaceSettings.geothermalFluxWPerM2,
                                                       latitudePointCount,
                                                       segmentCount,
                                                       rotationMode};
@@ -2592,7 +3789,15 @@ private:
              surfaceOnlyAtmosphere,
              surfaceGravity,
              radiusKm,
+             radiationModelType,
              subsurfaceSettings,
+             heightSourceType,
+             heightmapPath,
+             heightmapScaleKm,
+             heightSeed,
+             useContinentsHeight,
+             hasSeaLevel,
+             useFlatHeight,
              latitudePointCount,
              referenceDistanceAU,
              obliquity,
@@ -2606,11 +3811,21 @@ private:
                                                                   rotationMode,
                                                                   surfaceOnlyAtmosphere,
                                                                   0.0,
+                                                                  false,
+                                                                  0.0,
                                                                   0.0,
                                                                   surfaceGravity,
                                                                   radiusKm,
                                                                   false,
+                                                                  radiationModelType,
                                                                   8,
+                                                                  heightSourceType,
+                                                                  heightmapPath,
+                                                                  heightmapScaleKm,
+                                                                  heightSeed,
+                                                                  useContinentsHeight,
+                                                                  hasSeaLevel,
+                                                                  useFlatHeight,
                                                                   subsurfaceSettings);
                 startTemperatureElapsedUi(requestId, QPointer<QProgressDialog>());
                 auto *surfaceWatcher =
@@ -2769,11 +3984,21 @@ private:
         // При наличии атмосферы включаем расширенную модель с парниковым слоем и циркуляцией.
         SurfaceTemperatureCalculator calculator(lastSolarConstant_, *material, dayLength,
                                                 rotationMode, atmosphere, greenhouseOpacity,
+                                                manualGreenhouseOnTop,
+                                                cloudAlbedo,
                                                 atmospherePressureAtm,
                                                 surfaceGravity,
                                                 radiusKm,
                                                 hasAtmosphere,
+                                                radiationModelType,
                                                 8,
+                                                heightSourceType,
+                                                heightmapPath,
+                                                heightmapScaleKm,
+                                                heightSeed,
+                                                useContinentsHeight,
+                                                hasSeaLevel,
+                                                useFlatHeight,
                                                 subsurfaceSettings);
         auto *watcher = new QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>(this);
         connect(watcher, &QFutureWatcher<QVector<QVector<TemperatureRangePoint>>>::finished, this,
@@ -2864,6 +4089,7 @@ private:
             }
             return results;
         }));
+#endif
     }
 
     void cancelTemperatureCalculation() {
@@ -2891,7 +4117,8 @@ private:
 ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
                                                   QTextStream &output,
                                                   BinarySystemParameters &parameters,
-                                                  int &precision) {
+                                                  int &precision,
+                                                  bool &enableRadiationLog) {
     QCommandLineParser parser;
     parser.setApplicationDescription(
         QStringLiteral("Вычисление солнечной постоянной по параметрам звезды."));
@@ -2920,10 +4147,15 @@ ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
                                        QStringLiteral("Количество значащих цифр в выводе."),
                                        QStringLiteral("digits"),
                                        QString::number(kDefaultPrecision));
+    QCommandLineOption radiationLogOption(QStringLiteral("radiation-log"),
+                                          QStringLiteral("Включить подробные логи радиационной модели."));
 
     parser.addOptions({radiusOption, temperatureOption, distanceOption, radius2Option, temperature2Option,
-                       distance2Option, precisionOption});
+                       distance2Option, precisionOption, radiationLogOption});
     parser.process(app);
+    if (parser.isSet(radiationLogOption)) {
+        enableRadiationLog = true;
+    }
 
     const auto parsePositive = [&](const QCommandLineOption &option, double &target,
                                    const QString &name) -> bool {
@@ -3085,7 +4317,12 @@ int main(int argc, char *argv[]) {
 
     BinarySystemParameters parameters{};
     int precision = kDefaultPrecision;
-    const ArgumentsParseResult argsResult = parseParametersFromArguments(app, output, parameters, precision);
+    bool enableRadiationLog = isSolarRadiationLoggingEnabledFromEnvironment();
+    const ArgumentsParseResult argsResult =
+        parseParametersFromArguments(app, output, parameters, precision, enableRadiationLog);
+    if (enableRadiationLog) {
+        enableSolarRadiationLogging();
+    }
 
     switch (argsResult) {
     case ArgumentsParseResult::Failure:

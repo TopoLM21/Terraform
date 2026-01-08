@@ -14,6 +14,7 @@ public:
     OrbitSegmentCalculator(double semiMajorAxisAU, double eccentricity);
 
     QVector<OrbitSegment> segments(int count = 12) const;
+    OrbitSegment orbitAtMeanAnomaly(double meanAnomalyRadians) const;
 
 private:
     double semiMajorAxisAU_ = 0.0;

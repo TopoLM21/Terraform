@@ -165,10 +165,12 @@ SurfaceHeightModel::SurfaceHeightModel(HeightSourceType sourceType,
                                        const QString &heightmapPath,
                                        double heightmapScaleKm,
                                        quint32 heightSeed,
-                                       bool useContinentsHeight)
+                                       bool useContinentsHeight,
+                                       bool hasSeaLevel)
     : sourceType_(sourceType),
       heightSeed_(heightSeed),
-      useContinentsHeight_(useContinentsHeight) {
+      useContinentsHeight_(useContinentsHeight),
+      hasSeaLevel_(hasSeaLevel) {
     if (sourceType_ == HeightSourceType::HeightmapEquirectangular) {
         if (!heightmap_.loadFromFile(heightmapPath, heightmapScaleKm)) {
             sourceType_ = HeightSourceType::Procedural;
@@ -232,7 +234,13 @@ void SurfaceHeightModel::rebuildContinentCentersCache() const {
 
 double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) const {
     if (sourceType_ == HeightSourceType::HeightmapEquirectangular && heightmap_.isValid()) {
-        return heightmap_.heightKmAt(latitudeDeg, longitudeDeg);
+        const double heightKm = heightmap_.heightKmAt(latitudeDeg, longitudeDeg);
+        if (!hasSeaLevel_) {
+            // Без уровня моря отрицательные отметки не имеют физического смысла,
+            // поэтому держим рельеф не ниже нуля.
+            return qMax(0.0, heightKm);
+        }
+        return heightKm;
     }
 
     const QVector3D p = unitSpherePoint(latitudeDeg, longitudeDeg);
@@ -266,19 +274,27 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
         // Низкочастотный шум разбивает сплошные пятна и равномерно распределяет материки.
         const double breakup = 0.5 + 0.5 * fbmNoise(noisePoint, 0.85, 4);
         const double continentNoise = qBound(0.0, continentSpots * 0.65 + breakup * 0.35, 1.0);
-        // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
-        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.22) / 0.6, 1.0));
-
         // Гладкие равнины: средняя частота, небольшой вклад амплитуды.
         const double plains = 0.5 + 0.5 * fbmNoise(noisePoint, 1.6, 4);
         const double hills = 0.5 + 0.5 * fbmNoise(noisePoint, 3.4, 4);
         // Ridged noise даёт хребты: инверсия модуля шумового сигнала подчёркивает пики.
         const double mountains = ridgedFbmNoise(noisePoint, 3.8, 5);
 
-        // Базовый уровень океана: отрицательный, чтобы было "морское дно".
-        const double oceanDepthKm = -6.0;
         // Высота суши складывается из равнин и гор, чтобы избежать гауссовского вида.
-        const double landHeightKm = plains * 1.5 + hills * 1.4 + mountains * 4.2;
+        const double landHeightRawKm = plains * 1.5 + hills * 1.4 + mountains * 4.2;
+        // Приводим диапазон процедурного рельефа к заданному разбросу (6 км по высоте).
+        // Сумма коэффициентов даёт максимум ~7.1 км, поэтому масштабируем до половины диапазона.
+        const double landHeightKm = landHeightRawKm / 7.1 * 3.0;
+        if (!hasSeaLevel_) {
+            // Для планет без уровня моря нельзя "смешивать" океан: вся поверхность считается сушей.
+            return qMax(0.0, landHeightKm);
+        }
+
+        // Порог отделяет сушу от океана; smoothstep делает береговую линию менее "ступенчатой".
+        const double landMask = smoothstep(qBound(0.0, (continentNoise - 0.22) / 0.6, 1.0));
+        // Базовый уровень океана: отрицательный, чтобы было "морское дно".
+        // Ограничиваем глубину половиной диапазона, чтобы суммарный разброс не превышал 6 км.
+        const double oceanDepthKm = -3.0;
         // Маска плавно смешивает океан и сушу в километрах.
         return lerp(oceanDepthKm, landHeightKm, landMask);
     }
@@ -292,6 +308,11 @@ double SurfaceHeightModel::heightKmAt(double latitudeDeg, double longitudeDeg) c
 
     // Нормируем суммарный сигнал: крупный рельеф доминирует, детализация лишь подчёркивает форму.
     const double normalized = qBound(-1.0, (continents * 2.0 - 1.0) + detail * 0.15, 1.0);
-    // Масштабируем в километры, чтобы получить реалистичный диапазон высот (-9..+9 км).
-    return normalized * 9.0;
+    // Масштабируем в километры, чтобы получить диапазон высот (-3..+3 км).
+    double heightKm = normalized * 3.0;
+    if (!hasSeaLevel_) {
+        // Без океанов отрицательные высоты превращают рельеф в несуществующие впадины.
+        heightKm = qMax(0.0, heightKm);
+    }
+    return heightKm;
 }

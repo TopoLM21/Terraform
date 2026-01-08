@@ -115,6 +115,18 @@ void SurfaceMapWidget::setTemperatureRange(double minK, double maxK) {
     rebuildImages();
 }
 
+void SurfaceMapWidget::setWindRange(double minMps, double maxMps) {
+    minWindSpeedMps_ = minMps;
+    maxWindSpeedMps_ = maxMps;
+    rebuildImages();
+}
+
+void SurfaceMapWidget::setPressureRange(double minAtm, double maxAtm) {
+    minPressureAtm_ = minAtm;
+    maxPressureAtm_ = maxAtm;
+    rebuildImages();
+}
+
 void SurfaceMapWidget::setInterpolationEnabled(bool enabled) {
     if (interpolationEnabled_ == enabled) {
         return;
@@ -205,11 +217,19 @@ void SurfaceMapWidget::rebuildImages() {
         double maxTemp = minTemp;
         double minHeight = grid_->points().first().heightKm;
         double maxHeight = minHeight;
+        double minWind = grid_->points().first().windSpeedMps;
+        double maxWind = minWind;
+        double minPressure = grid_->points().first().pressureAtm;
+        double maxPressure = minPressure;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
             minHeight = qMin(minHeight, point.heightKm);
             maxHeight = qMax(maxHeight, point.heightKm);
+            minWind = qMin(minWind, point.windSpeedMps);
+            maxWind = qMax(maxWind, point.windSpeedMps);
+            minPressure = qMin(minPressure, point.pressureAtm);
+            maxPressure = qMax(maxPressure, point.pressureAtm);
         }
         if (minTemp != maxTemp) {
             minTemperatureK_ = minTemp;
@@ -217,6 +237,10 @@ void SurfaceMapWidget::rebuildImages() {
         }
         minHeightKm_ = minHeight;
         maxHeightKm_ = maxHeight;
+        minWindSpeedMps_ = minWind;
+        maxWindSpeedMps_ = maxWind;
+        minPressureAtm_ = minPressure;
+        maxPressureAtm_ = maxPressure;
     }
 
     const double baseRadius = pointRadiusPx(grid_->pointCount(), size());
@@ -262,16 +286,31 @@ void SurfaceMapWidget::rebuildImages() {
                     if (pointIndex < 0 || pointIndex >= points.size()) {
                         continue;
                     }
-                    const double sample =
-                        (mapMode_ == SurfaceMapMode::Temperature)
-                            ? points[pointIndex].temperatureK
-                            : points[pointIndex].heightKm;
+                    double sample = 0.0;
+                    if (mapMode_ == SurfaceMapMode::Temperature) {
+                        sample = points[pointIndex].temperatureK;
+                    } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                        sample = points[pointIndex].airTemperatureK;
+                    } else if (mapMode_ == SurfaceMapMode::Height) {
+                        sample = points[pointIndex].heightKm;
+                    } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                        sample = points[pointIndex].pressureAtm;
+                    } else {
+                        sample = points[pointIndex].windSpeedMps;
+                    }
                     value += pixelWeights.weights[i] * sample;
                 }
 
-                scanLine[x] = (mapMode_ == SurfaceMapMode::Temperature)
-                                  ? temperatureToColor(value)
-                                  : heightToColor(value);
+                if (mapMode_ == SurfaceMapMode::Temperature ||
+                    mapMode_ == SurfaceMapMode::AirTemperature) {
+                    scanLine[x] = temperatureToColor(value);
+                } else if (mapMode_ == SurfaceMapMode::Height) {
+                    scanLine[x] = heightToColor(value);
+                } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                    scanLine[x] = pressureToColor(value);
+                } else {
+                    scanLine[x] = windToColor(value);
+                }
             }
         }
     }
@@ -293,10 +332,18 @@ void SurfaceMapWidget::rebuildImages() {
             const auto idPaths = buildCellPaths(cell, projection_, size());
             if (!interpolationEnabled_) {
                 const auto colorPaths = buildCellPaths(cell, projection_, scaledSize);
-                const QRgb color =
-                    (mapMode_ == SurfaceMapMode::Temperature)
-                        ? temperatureToColor(point.temperatureK)
-                        : heightToColor(point.heightKm);
+                QRgb color = 0;
+                if (mapMode_ == SurfaceMapMode::Temperature) {
+                    color = temperatureToColor(point.temperatureK);
+                } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                    color = temperatureToColor(point.airTemperatureK);
+                } else if (mapMode_ == SurfaceMapMode::Height) {
+                    color = heightToColor(point.heightKm);
+                } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                    color = pressureToColor(point.pressureAtm);
+                } else {
+                    color = windToColor(point.windSpeedMps);
+                }
                 colorPainter.setBrush(QColor::fromRgb(color));
                 for (const auto &path : colorPaths) {
                     colorPainter.drawPath(path);
@@ -324,10 +371,18 @@ void SurfaceMapWidget::rebuildImages() {
                                              pixel.y() - scaledPointRadius,
                                              scaledPointRadius * 2.0,
                                              scaledPointRadius * 2.0);
-                    const QRgb color =
-                        (mapMode_ == SurfaceMapMode::Temperature)
-                            ? temperatureToColor(point.temperatureK)
-                            : heightToColor(point.heightKm);
+                    QRgb color = 0;
+                    if (mapMode_ == SurfaceMapMode::Temperature) {
+                        color = temperatureToColor(point.temperatureK);
+                    } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                        color = temperatureToColor(point.airTemperatureK);
+                    } else if (mapMode_ == SurfaceMapMode::Height) {
+                        color = heightToColor(point.heightKm);
+                    } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                        color = pressureToColor(point.pressureAtm);
+                    } else {
+                        color = windToColor(point.windSpeedMps);
+                    }
                     colorPainter.setBrush(QColor::fromRgb(color));
                     colorPainter.drawEllipse(ellipseRect);
                 }
@@ -390,6 +445,28 @@ QRgb SurfaceMapWidget::heightToColor(double heightKm) const {
     return heightColorForRatio(t).rgb();
 }
 
+QRgb SurfaceMapWidget::windToColor(double speedMps) const {
+    if (qFuzzyCompare(minWindSpeedMps_, maxWindSpeedMps_)) {
+        return temperatureColorForRatio(0.5).rgb();
+    }
+    const double t = qBound(0.0,
+                            (speedMps - minWindSpeedMps_) /
+                                (maxWindSpeedMps_ - minWindSpeedMps_),
+                            1.0);
+    return temperatureColorForRatio(t).rgb();
+}
+
+QRgb SurfaceMapWidget::pressureToColor(double pressureAtm) const {
+    if (qFuzzyCompare(minPressureAtm_, maxPressureAtm_)) {
+        return temperatureColorForRatio(0.5).rgb();
+    }
+    const double t = qBound(0.0,
+                            (pressureAtm - minPressureAtm_) /
+                                (maxPressureAtm_ - minPressureAtm_),
+                            1.0);
+    return temperatureColorForRatio(t).rgb();
+}
+
 int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
     if (!idImage_.rect().contains(pixel)) {
         return -1;
@@ -398,11 +475,16 @@ int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
 }
 
 QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point) const {
-    return QStringLiteral("Широта: %1°\nДолгота: %2°\nТемпература: %3 K\nВысота: %4 км")
+    return QStringLiteral("Широта: %1°\nДолгота: %2°\nТемпература поверхности: %3 K\n"
+                          "Температура воздуха: %4 K\nВысота: %5 км\nДавление: %6 атм\n"
+                          "Ветер: %7 м/с")
         .arg(point.latitudeDeg, 0, 'f', 2)
         .arg(point.longitudeDeg, 0, 'f', 2)
         .arg(point.temperatureK, 0, 'f', 2)
-        .arg(point.heightKm, 0, 'f', 2);
+        .arg(point.airTemperatureK, 0, 'f', 2)
+        .arg(point.heightKm, 0, 'f', 2)
+        .arg(point.pressureAtm, 0, 'f', 3)
+        .arg(point.windSpeedMps, 0, 'f', 2);
 }
 
 double SurfaceMapWidget::pointRadiusPx(int pointCount, const QSize &imageSize) const {
