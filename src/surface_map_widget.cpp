@@ -2,6 +2,7 @@
 
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPalette>
 #include <QPainterPath>
 #include <QToolTip>
 #include <QTransform>
@@ -92,6 +93,10 @@ QVector<QPainterPath> buildCellPaths(const SurfaceCell &cell,
 
 SurfaceMapWidget::SurfaceMapWidget(QWidget *parent)
     : QWidget(parent) {
+    setAutoFillBackground(true);
+    QPalette palette = this->palette();
+    palette.setColor(QPalette::Window, Qt::black);
+    setPalette(palette);
     setMouseTracking(true);
 }
 

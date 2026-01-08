@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <QPainter>
+#include <QPalette>
 #include <QMouseEvent>
 #include <QMatrix4x4>
 #include <QPainterPath>
@@ -110,7 +111,12 @@ QVector<QVector3D> buildLatitudeLine(double latitudeDeg, int segments) {
 } // namespace
 
 SurfaceGlobeWidget::SurfaceGlobeWidget(QWidget *parent)
-    : QWidget(parent) {}
+    : QWidget(parent) {
+    setAutoFillBackground(true);
+    QPalette palette = this->palette();
+    palette.setColor(QPalette::Window, Qt::black);
+    setPalette(palette);
+}
 
 void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
     grid_ = grid;
