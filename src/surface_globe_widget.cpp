@@ -320,18 +320,18 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         const double diffuse = qMax(0.0, static_cast<double>(QVector3D::dotProduct(normal, lightDir)));
         const double lightFactor = ambientFactor + (1.0 - ambientFactor) * diffuse;
         if (mapMode_ == SurfaceMapMode::Temperature) {
-            globePoint.color = applyLighting(temperatureToColor(point.temperatureK), lightFactor);
+            globePoint.color = temperatureToColor(point.temperatureK);
         } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
-            globePoint.color = applyLighting(temperatureToColor(point.airTemperatureK), lightFactor);
+            globePoint.color = temperatureToColor(point.airTemperatureK);
         } else if (mapMode_ == SurfaceMapMode::Height) {
-            globePoint.color = applyLighting(heightToColor(point.heightKm), lightFactor);
+            globePoint.color = heightToColor(point.heightKm);
         } else if (mapMode_ == SurfaceMapMode::Pressure) {
-            globePoint.color = applyLighting(pressureToColor(point.pressureAtm), lightFactor);
+            globePoint.color = pressureToColor(point.pressureAtm);
         } else if (mapMode_ == SurfaceMapMode::Realistic) {
-            globePoint.color =
-                applyLighting(realisticSurfaceColor(point, minHeightKm_, maxHeightKm_), lightFactor);
+            globePoint.color = applyLighting(
+                realisticSurfaceColor(point, minHeightKm_, maxHeightKm_), lightFactor);
         } else {
-            globePoint.color = applyLighting(windToColor(point.windSpeedMps), lightFactor);
+            globePoint.color = windToColor(point.windSpeedMps);
         }
         visiblePoints.push_back(globePoint);
         projectedPoints_.push_back(ProjectedPoint{projected, pointIndex});
@@ -386,19 +386,18 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
                 qMax(0.0, static_cast<double>(QVector3D::dotProduct(cellNormal, lightDir)));
             const double lightFactor = ambientFactor + (1.0 - ambientFactor) * diffuse;
             if (mapMode_ == SurfaceMapMode::Temperature) {
-                cellDraw.color = applyLighting(temperatureToColor(cellPoint.temperatureK), lightFactor);
+                cellDraw.color = temperatureToColor(cellPoint.temperatureK);
             } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
-                cellDraw.color = applyLighting(temperatureToColor(cellPoint.airTemperatureK), lightFactor);
+                cellDraw.color = temperatureToColor(cellPoint.airTemperatureK);
             } else if (mapMode_ == SurfaceMapMode::Height) {
-                cellDraw.color = applyLighting(heightToColor(cellPoint.heightKm), lightFactor);
+                cellDraw.color = heightToColor(cellPoint.heightKm);
             } else if (mapMode_ == SurfaceMapMode::Pressure) {
-                cellDraw.color = applyLighting(pressureToColor(cellPoint.pressureAtm), lightFactor);
+                cellDraw.color = pressureToColor(cellPoint.pressureAtm);
             } else if (mapMode_ == SurfaceMapMode::Realistic) {
-                cellDraw.color =
-                    applyLighting(realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_),
-                                  lightFactor);
+                cellDraw.color = applyLighting(
+                    realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_), lightFactor);
             } else {
-                cellDraw.color = applyLighting(windToColor(cellPoint.windSpeedMps), lightFactor);
+                cellDraw.color = windToColor(cellPoint.windSpeedMps);
             }
             visibleCells.push_back(cellDraw);
         }
