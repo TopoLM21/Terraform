@@ -23,10 +23,17 @@ SurfacePointState::SurfacePointState(double initialTemperatureKelvin,
     const SubsurfaceGrid grid(subsurfaceSettings.layerCount,
                               subsurfaceSettings.topLayerThicknessMeters,
                               subsurfaceSettings.bottomDepthMeters);
+    const int layerCount = grid.layerCount();
+    const QVector<double> thermalConductivityProfile =
+        subsurfaceSettings.thermalConductivityProfile(layerCount, material.thermalConductivity);
+    const QVector<double> densityProfile =
+        subsurfaceSettings.densityProfile(layerCount, material.density);
+    const QVector<double> specificHeatProfile =
+        subsurfaceSettings.specificHeatProfile(layerCount, material.specificHeat);
     solver_.reset(grid,
-                  material.thermalConductivity,
-                  material.density,
-                  material.specificHeat,
+                  thermalConductivityProfile,
+                  densityProfile,
+                  specificHeatProfile,
                   subsurfaceSettings.bottomBoundary,
                   initialTemperatureKelvin,
                   subsurfaceSettings.geothermalFluxWPerM2);
