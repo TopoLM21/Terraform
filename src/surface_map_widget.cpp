@@ -9,6 +9,7 @@
 #include <QtMath>
 
 #include "height_color_scale.h"
+#include "surface_realistic_color.h"
 #include "temperature_color_scale.h"
 
 namespace {
@@ -285,36 +286,59 @@ void SurfaceMapWidget::rebuildImages() {
                     continue;
                 }
 
-                double value = 0.0;
-                for (int i = 0; i < pixelWeights.indices.size(); ++i) {
-                    const int pointIndex = pixelWeights.indices[i];
-                    if (pointIndex < 0 || pointIndex >= points.size()) {
-                        continue;
+                if (mapMode_ == SurfaceMapMode::Realistic) {
+                    double red = 0.0;
+                    double green = 0.0;
+                    double blue = 0.0;
+                    for (int i = 0; i < pixelWeights.indices.size(); ++i) {
+                        const int pointIndex = pixelWeights.indices[i];
+                        if (pointIndex < 0 || pointIndex >= points.size()) {
+                            continue;
+                        }
+                        const QColor color = realisticSurfaceColor(points[pointIndex],
+                                                                   minHeightKm_,
+                                                                   maxHeightKm_);
+                        const double weight = pixelWeights.weights[i];
+                        red += weight * color.red();
+                        green += weight * color.green();
+                        blue += weight * color.blue();
                     }
-                    double sample = 0.0;
-                    if (mapMode_ == SurfaceMapMode::Temperature) {
-                        sample = points[pointIndex].temperatureK;
-                    } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
-                        sample = points[pointIndex].airTemperatureK;
-                    } else if (mapMode_ == SurfaceMapMode::Height) {
-                        sample = points[pointIndex].heightKm;
-                    } else if (mapMode_ == SurfaceMapMode::Pressure) {
-                        sample = points[pointIndex].pressureAtm;
-                    } else {
-                        sample = points[pointIndex].windSpeedMps;
-                    }
-                    value += pixelWeights.weights[i] * sample;
-                }
-
-                if (mapMode_ == SurfaceMapMode::Temperature ||
-                    mapMode_ == SurfaceMapMode::AirTemperature) {
-                    scanLine[x] = temperatureToColor(value);
-                } else if (mapMode_ == SurfaceMapMode::Height) {
-                    scanLine[x] = heightToColor(value);
-                } else if (mapMode_ == SurfaceMapMode::Pressure) {
-                    scanLine[x] = pressureToColor(value);
+                    scanLine[x] = qRgba(qBound(0, static_cast<int>(qRound(red)), 255),
+                                        qBound(0, static_cast<int>(qRound(green)), 255),
+                                        qBound(0, static_cast<int>(qRound(blue)), 255),
+                                        255);
                 } else {
-                    scanLine[x] = windToColor(value);
+                    double value = 0.0;
+                    for (int i = 0; i < pixelWeights.indices.size(); ++i) {
+                        const int pointIndex = pixelWeights.indices[i];
+                        if (pointIndex < 0 || pointIndex >= points.size()) {
+                            continue;
+                        }
+                        double sample = 0.0;
+                        if (mapMode_ == SurfaceMapMode::Temperature) {
+                            sample = points[pointIndex].temperatureK;
+                        } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
+                            sample = points[pointIndex].airTemperatureK;
+                        } else if (mapMode_ == SurfaceMapMode::Height) {
+                            sample = points[pointIndex].heightKm;
+                        } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                            sample = points[pointIndex].pressureAtm;
+                        } else {
+                            sample = points[pointIndex].windSpeedMps;
+                        }
+                        value += pixelWeights.weights[i] * sample;
+                    }
+
+                    if (mapMode_ == SurfaceMapMode::Temperature ||
+                        mapMode_ == SurfaceMapMode::AirTemperature) {
+                        scanLine[x] = temperatureToColor(value);
+                    } else if (mapMode_ == SurfaceMapMode::Height) {
+                        scanLine[x] = heightToColor(value);
+                    } else if (mapMode_ == SurfaceMapMode::Pressure) {
+                        scanLine[x] = pressureToColor(value);
+                    } else {
+                        scanLine[x] = windToColor(value);
+                    }
                 }
             }
         }
@@ -346,6 +370,8 @@ void SurfaceMapWidget::rebuildImages() {
                     color = heightToColor(point.heightKm);
                 } else if (mapMode_ == SurfaceMapMode::Pressure) {
                     color = pressureToColor(point.pressureAtm);
+                } else if (mapMode_ == SurfaceMapMode::Realistic) {
+                    color = realisticSurfaceColor(point, minHeightKm_, maxHeightKm_).rgb();
                 } else {
                     color = windToColor(point.windSpeedMps);
                 }
@@ -385,6 +411,8 @@ void SurfaceMapWidget::rebuildImages() {
                         color = heightToColor(point.heightKm);
                     } else if (mapMode_ == SurfaceMapMode::Pressure) {
                         color = pressureToColor(point.pressureAtm);
+                    } else if (mapMode_ == SurfaceMapMode::Realistic) {
+                        color = realisticSurfaceColor(point, minHeightKm_, maxHeightKm_).rgb();
                     } else {
                         color = windToColor(point.windSpeedMps);
                     }

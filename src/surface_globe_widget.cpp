@@ -11,6 +11,7 @@
 #include <QtMath>
 
 #include "height_color_scale.h"
+#include "surface_realistic_color.h"
 #include "temperature_color_scale.h"
 
 namespace {
@@ -239,6 +240,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             globePoint.color = heightToColor(point.heightKm);
         } else if (mapMode_ == SurfaceMapMode::Pressure) {
             globePoint.color = pressureToColor(point.pressureAtm);
+        } else if (mapMode_ == SurfaceMapMode::Realistic) {
+            globePoint.color = realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
         } else {
             globePoint.color = windToColor(point.windSpeedMps);
         }
@@ -297,6 +300,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
                 cellDraw.color = heightToColor(cellPoint.heightKm);
             } else if (mapMode_ == SurfaceMapMode::Pressure) {
                 cellDraw.color = pressureToColor(cellPoint.pressureAtm);
+            } else if (mapMode_ == SurfaceMapMode::Realistic) {
+                cellDraw.color = realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_);
             } else {
                 cellDraw.color = windToColor(cellPoint.windSpeedMps);
             }
