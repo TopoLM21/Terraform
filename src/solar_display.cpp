@@ -91,6 +91,10 @@ constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
+enum class TemperaturePlotSource {
+    LatitudeModel,
+    SurfaceGrid
+};
 
 struct TemperatureCacheKey {
     double solarConstant = 0.0;
@@ -552,6 +556,24 @@ public:
         segmentLayout->addWidget(new QLabel(QStringLiteral("Сегмент орбиты:"), plotGroupBox));
         segmentLayout->addWidget(segmentSelectorWidget_, 1);
         plotLayout->addLayout(segmentLayout);
+        temperaturePlotSourceComboBox_ = new QComboBox(plotGroupBox);
+        temperaturePlotSourceComboBox_->addItem(QStringLiteral("1D модель по широте"),
+                                                static_cast<int>(TemperaturePlotSource::LatitudeModel));
+        temperaturePlotSourceComboBox_->addItem(QStringLiteral("Натуральная поверхность"),
+                                                static_cast<int>(TemperaturePlotSource::SurfaceGrid));
+        surfaceLongitudeSpinBox_ = new QDoubleSpinBox(plotGroupBox);
+        surfaceLongitudeSpinBox_->setRange(-180.0, 180.0);
+        surfaceLongitudeSpinBox_->setDecimals(1);
+        surfaceLongitudeSpinBox_->setSingleStep(5.0);
+        surfaceLongitudeSpinBox_->setValue(0.0);
+        surfaceLongitudeSpinBox_->setSuffix(QStringLiteral("°"));
+        auto *plotControlsLayout = new QHBoxLayout();
+        plotControlsLayout->addWidget(new QLabel(QStringLiteral("Источник:"), plotGroupBox));
+        plotControlsLayout->addWidget(temperaturePlotSourceComboBox_);
+        plotControlsLayout->addWidget(new QLabel(QStringLiteral("Долгота профиля:"), plotGroupBox));
+        plotControlsLayout->addWidget(surfaceLongitudeSpinBox_);
+        plotControlsLayout->addStretch();
+        plotLayout->addLayout(plotControlsLayout);
         // auto *smoothingCheckBox = new QCheckBox(QStringLiteral("Сглаживать график"), plotGroupBox);
         // plotLayout->addWidget(smoothingCheckBox);
         plotLayout->addWidget(temperaturePlot_);
@@ -741,6 +763,23 @@ public:
         connect(segmentSelectorWidget_, &SegmentSelectorWidget::currentIndexChanged, this,
                 [this](int) { updateTemperaturePlotForSelectedSegment(); });
 
+        connect(temperaturePlotSourceComboBox_,
+                QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this,
+                [this](int) {
+                    temperaturePlotSource_ = static_cast<TemperaturePlotSource>(
+                        temperaturePlotSourceComboBox_->currentData().toInt());
+                    updateTemperaturePlotSourceUi();
+                    updateTemperaturePlot();
+                });
+
+        connect(surfaceLongitudeSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, [this](double) {
+                    if (temperaturePlotSource_ == TemperaturePlotSource::SurfaceGrid) {
+                        updateTemperaturePlot();
+                    }
+                });
+
         // Сглаживание влияет только на отображение кривых, а не на физический расчет.
         // connect(smoothingCheckBox, &QCheckBox::toggled, temperaturePlot_,
         //         &SurfaceTemperaturePlot::setSmoothingEnabled);
@@ -753,6 +792,7 @@ public:
         applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
         applySecondary(std::nullopt);
         setPlanetPresets(solarSystemPresets(), QStringLiteral("Земля"));
+        updateTemperaturePlotSourceUi();
     }
 
 private:
@@ -887,6 +927,8 @@ private:
 
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
+    QComboBox *temperaturePlotSourceComboBox_ = nullptr;
+    QDoubleSpinBox *surfaceLongitudeSpinBox_ = nullptr;
     SurfaceMapWidget *surfaceMapWidget_ = nullptr;
     SurfaceGlobeWidget *surfaceGlobeWidget_ = nullptr;
     QPointer<SurfacePointStatusDialog> surfacePointStatusDialog_;
@@ -934,6 +976,7 @@ private:
     double surfaceMaxHeightKm_ = 0.0;
     bool hasSurfaceHeightRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
+    TemperaturePlotSource temperaturePlotSource_ = TemperaturePlotSource::LatitudeModel;
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
@@ -947,6 +990,12 @@ private:
         double declinationDegrees = 0.0;
     } surfaceSimState_;
     QVector<OrbitSegment> surfaceSimSegments_;
+    struct SurfaceProfileSeed {
+        double plotLatitudeDegrees = 0.0;
+        double latitudeDegrees = 0.0;
+        double longitudeDegrees = 0.0;
+        SurfacePointState state;
+    };
 
     void updateTemperaturePauseUi(bool paused) {
         if (temperaturePauseButton_) {
@@ -961,6 +1010,24 @@ private:
                                             : QStringLiteral("Пауза"));
             }
         }
+    }
+
+    void updateTemperaturePlotSourceUi() {
+        if (!surfaceLongitudeSpinBox_) {
+            return;
+        }
+        const bool isSurfaceSource =
+            temperaturePlotSource_ == TemperaturePlotSource::SurfaceGrid;
+        surfaceLongitudeSpinBox_->setEnabled(isSurfaceSource);
+    }
+
+    double longitudeDifferenceDegrees(double left, double right) const {
+        const double rawDiff = std::fmod(std::abs(left - right), 360.0);
+        return rawDiff > 180.0 ? 360.0 - rawDiff : rawDiff;
+    }
+
+    double selectedLongitudeDegrees() const {
+        return surfaceLongitudeSpinBox_ ? surfaceLongitudeSpinBox_->value() : 0.0;
     }
 
     void updateSurfaceSimulationUi() {
@@ -1755,6 +1822,189 @@ private:
         rebuildTemperatureSummaryFromSegments(lastTemperatureSegments_, &temperatureSummary_);
     }
 
+    QVector<SurfaceProfileSeed> buildSurfaceProfileSeeds(int latitudePointCount,
+                                                         double targetLongitudeDegrees,
+                                                         const std::optional<SurfacePointStateDefaults> &stateDefaults) const {
+        QVector<SurfaceProfileSeed> seeds;
+        if (surfaceGrid_.points().isEmpty() || latitudePointCount <= 0) {
+            return seeds;
+        }
+
+        const double stepDegrees =
+            latitudePointCount > 1 ? 180.0 / static_cast<double>(latitudePointCount - 1) : 0.0;
+        seeds.reserve(latitudePointCount);
+
+        for (int i = 0; i < latitudePointCount; ++i) {
+            const double targetLatitude = -90.0 + stepDegrees * i;
+            const SurfacePoint *bestPoint = nullptr;
+            double bestLongitudeDelta = std::numeric_limits<double>::max();
+            double bestLatitudeDelta = std::numeric_limits<double>::max();
+
+            for (const auto &point : surfaceGrid_.points()) {
+                const double longitudeDelta =
+                    longitudeDifferenceDegrees(point.longitudeDeg, targetLongitudeDegrees);
+                const double latitudeDelta = std::abs(point.latitudeDeg - targetLatitude);
+                if (longitudeDelta < bestLongitudeDelta - 1e-6 ||
+                    (qFuzzyCompare(longitudeDelta, bestLongitudeDelta) &&
+                     latitudeDelta < bestLatitudeDelta)) {
+                    bestPoint = &point;
+                    bestLongitudeDelta = longitudeDelta;
+                    bestLatitudeDelta = latitudeDelta;
+                }
+            }
+
+            if (!bestPoint) {
+                continue;
+            }
+
+            SurfaceProfileSeed seed;
+            seed.plotLatitudeDegrees = targetLatitude;
+            seed.latitudeDegrees = bestPoint->latitudeDeg;
+            seed.longitudeDegrees = bestPoint->longitudeDeg;
+            seed.state = bestPoint->state;
+            if (seed.state.temperatureKelvin() <= 0.0 && stateDefaults) {
+                const double initialTemperature =
+                    (bestPoint->temperatureK > 0.0)
+                        ? bestPoint->temperatureK
+                        : stateDefaults->minTemperatureKelvin;
+                seed.state = SurfacePointState(initialTemperature,
+                                               stateDefaults->albedo,
+                                               stateDefaults->greenhouseOpacity,
+                                               stateDefaults->minTemperatureKelvin,
+                                               stateDefaults->material,
+                                               stateDefaults->subsurfaceSettings);
+            }
+            seeds.push_back(seed);
+        }
+
+        return seeds;
+    }
+
+    QVector<TemperatureRangePoint> surfaceTemperatureRangesForSegment(
+        const OrbitSegment &segment,
+        const QVector<SurfaceProfileSeed> &seeds,
+        double referenceDistanceAU,
+        double obliquityDegrees,
+        double perihelionArgumentDegrees,
+        double dayLengthDays,
+        RotationMode rotationMode,
+        double atmospherePressureAtm) const {
+        QVector<TemperatureRangePoint> points;
+        if (seeds.isEmpty()) {
+            return points;
+        }
+
+        points.reserve(seeds.size());
+
+        const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
+        const double dayLengthSeconds = qMax(0.01, dayLengthDays) * 86400.0;
+        // Шаг должен совпадать с фазой суточного цикла, как в advanceSurfaceSimulation().
+        const double timeStepSeconds = dayLengthSeconds / static_cast<double>(stepsPerDay);
+        const double obliquityRadians = qDegreesToRadians(obliquityDegrees);
+        const double perihelionArgumentRadians = qDegreesToRadians(perihelionArgumentDegrees);
+        // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
+        const double solarLongitude = segment.trueAnomalyRadians + perihelionArgumentRadians;
+        const double declinationRadians = std::asin(std::sin(obliquityRadians) * std::sin(solarLongitude));
+
+        const double segmentSolarConstant =
+            lastSolarConstant_ *
+            std::pow(referenceDistanceAU / segment.distanceAU, 2.0);
+        const double transport =
+            (atmospherePressureAtm > 50.0)
+                ? 0.99
+                : (atmospherePressureAtm > 0.001
+                       ? qMin(1.0, 0.15 * std::log(atmospherePressureAtm * 100.0 + 1.0))
+                       : 0.0);
+        const double rotBlock =
+            (dayLengthDays < 2.0 && atmospherePressureAtm < 10.0) ? 0.65 : 1.0;
+        const double meridionalTransport = transport * rotBlock;
+        // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
+        const double globalAverageInsolation = segmentSolarConstant / 4.0;
+
+        for (const auto &seed : seeds) {
+            SurfacePointState state = seed.state;
+            double minimumKelvin = std::numeric_limits<double>::max();
+            double maximumKelvin = std::numeric_limits<double>::lowest();
+            double meanDailySum = 0.0;
+            double meanDaySum = 0.0;
+            double meanNightSum = 0.0;
+            int dailySamples = 0;
+            int daySamples = 0;
+            int nightSamples = 0;
+            bool hasInsolation = false;
+
+            const double latitudeRadians = qDegreesToRadians(seed.latitudeDegrees);
+            const double longitudeRadians = qDegreesToRadians(seed.longitudeDegrees);
+
+            for (int hourIndex = 0; hourIndex < stepsPerDay; ++hourIndex) {
+                const double phase =
+                    2.0 * M_PI *
+                    (static_cast<double>(hourIndex) + 0.5) /
+                    static_cast<double>(stepsPerDay);
+                const double hourAngle =
+                    (rotationMode == RotationMode::TidalLocked) ? 0.0 : (phase - M_PI);
+                const double substellarLongitudeRadians =
+                    (rotationMode == RotationMode::TidalLocked) ? 0.0 : -hourAngle;
+                const double localHourAngle = longitudeRadians - substellarLongitudeRadians;
+                const double cosZenith =
+                    std::sin(latitudeRadians) * std::sin(declinationRadians) +
+                    std::cos(latitudeRadians) * std::cos(declinationRadians) *
+                        std::cos(localHourAngle);
+                const double localInsolation =
+                    segmentSolarConstant * qMax(0.0, cosZenith);
+                const double blendedInsolation =
+                    localInsolation * (1.0 - meridionalTransport) +
+                    globalAverageInsolation * meridionalTransport;
+                const double absorbedFlux = state.absorbedFlux(blendedInsolation);
+                const double emittedFlux = state.emittedFlux();
+                state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
+
+                const double temperatureKelvin = state.temperatureKelvin();
+                minimumKelvin = qMin(minimumKelvin, temperatureKelvin);
+                maximumKelvin = qMax(maximumKelvin, temperatureKelvin);
+                meanDailySum += temperatureKelvin;
+                ++dailySamples;
+                if (cosZenith > 0.0) {
+                    hasInsolation = true;
+                    meanDaySum += temperatureKelvin;
+                    ++daySamples;
+                } else {
+                    meanNightSum += temperatureKelvin;
+                    ++nightSamples;
+                }
+            }
+
+            if (dailySamples <= 0) {
+                continue;
+            }
+
+            const double meanDailyKelvin = meanDailySum / static_cast<double>(dailySamples);
+            const double meanDayKelvin = daySamples > 0
+                                             ? meanDaySum / static_cast<double>(daySamples)
+                                             : meanDailyKelvin;
+            const double meanNightKelvin = nightSamples > 0
+                                               ? meanNightSum / static_cast<double>(nightSamples)
+                                               : meanDailyKelvin;
+
+            TemperatureRangePoint point;
+            point.latitudeDegrees = seed.plotLatitudeDegrees;
+            point.hasInsolation = hasInsolation;
+            point.minimumKelvin = minimumKelvin;
+            point.maximumKelvin = maximumKelvin;
+            point.meanDailyKelvin = meanDailyKelvin;
+            point.meanDayKelvin = meanDayKelvin;
+            point.meanNightKelvin = meanNightKelvin;
+            point.minimumCelsius = minimumKelvin - kKelvinOffset;
+            point.maximumCelsius = maximumKelvin - kKelvinOffset;
+            point.meanDailyCelsius = meanDailyKelvin - kKelvinOffset;
+            point.meanDayCelsius = meanDayKelvin - kKelvinOffset;
+            point.meanNightCelsius = meanNightKelvin - kKelvinOffset;
+            points.push_back(point);
+        }
+
+        return points;
+    }
+
     void updateTemperaturePlotForSelectedSegment() {
         if (segmentSelectorWidget_->currentIndex() < 0 ||
             segmentSelectorWidget_->currentIndex() >= lastTemperatureSegments_.size()) {
@@ -1763,7 +2013,12 @@ private:
         }
 
         const int index = segmentSelectorWidget_->currentIndex();
-        const QString label = formatSegmentLabel(lastOrbitSegments_.at(index));
+        QString label = formatSegmentLabel(lastOrbitSegments_.at(index));
+        if (temperaturePlotSource_ == TemperaturePlotSource::SurfaceGrid) {
+            label = QStringLiteral("%1, λ=%2°")
+                        .arg(label)
+                        .arg(QLocale().toString(selectedLongitudeDegrees(), 'f', 1));
+        }
         const RotationMode rotationMode =
             static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
         temperaturePlot_->setTemperatureSeries(lastTemperatureSegments_.at(index),
@@ -2390,8 +2645,111 @@ private:
         temperatureUiTimer_->start();
     }
 
+    void updateTemperaturePlotFromSurfaceGrid() {
+        if (!hasSolarConstant_) {
+            clearTemperatureSegments();
+            return;
+        }
+
+        if (planetComboBox_->currentIndex() < 0) {
+            clearTemperatureSegments();
+            return;
+        }
+
+        const double semiMajorAxis = planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble();
+        if (semiMajorAxis <= 0.0) {
+            clearTemperatureSegments();
+            return;
+        }
+
+        const double referenceDistanceAU = lastSolarConstantDistanceAU_;
+        if (referenceDistanceAU <= 0.0) {
+            clearTemperatureSegments();
+            return;
+        }
+
+        const double dayLength = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        if (dayLength <= 0.0) {
+            clearTemperatureSegments();
+            return;
+        }
+
+        if (surfaceGrid_.points().isEmpty()) {
+            updateSurfaceGridTemperatures();
+        }
+        if (surfaceGrid_.points().isEmpty()) {
+            clearTemperatureSegments();
+            return;
+        }
+
+        const auto stateDefaults = buildSurfacePointStateDefaults();
+        if (!stateDefaults) {
+            clearTemperatureSegments();
+            return;
+        }
+
+        const double eccentricity = planetComboBox_->currentData(kRoleEccentricity).toDouble();
+        const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
+        const double perihelionArgument =
+            planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
+        const RotationMode rotationMode =
+            static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
+        AtmosphereComposition atmosphere;
+        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
+        if (atmosphereValue.isValid()) {
+            atmosphere = atmosphereValue.value<AtmosphereComposition>();
+        }
+        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
+        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        double atmospherePressureAtm = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+        }
+        const bool hasAtmosphere =
+            atmosphere.totalMassGigatons() > 0.0 || atmospherePressureAtm > 0.0;
+
+        const int latitudePointCount = latitudePoints();
+        const double targetLongitude = selectedLongitudeDegrees();
+        const QVector<SurfaceProfileSeed> seeds =
+            buildSurfaceProfileSeeds(latitudePointCount, targetLongitude, stateDefaults);
+        if (seeds.isEmpty()) {
+            clearTemperatureSegments();
+            return;
+        }
+
+        // Натуральная поверхность строится по поверхностной сетке и отличается от 1D-широтной модели.
+        const int segmentCount = 12;
+        const OrbitSegmentCalculator orbitCalculator(semiMajorAxis, eccentricity);
+        lastOrbitSegments_ = orbitCalculator.segments(segmentCount);
+        updateSegmentComboBox();
+
+        lastTemperatureSegments_.clear();
+        lastTemperatureSegments_.reserve(lastOrbitSegments_.size());
+        for (const auto &segment : lastOrbitSegments_) {
+            lastTemperatureSegments_.push_back(surfaceTemperatureRangesForSegment(
+                segment,
+                seeds,
+                referenceDistanceAU,
+                obliquity,
+                perihelionArgument,
+                dayLength,
+                rotationMode,
+                atmospherePressureAtm));
+        }
+
+        lastTemperatureUsesAtmosphere_ = hasAtmosphere;
+        rebuildTemperatureSummary();
+        updateSegmentComboBox();
+        updateTemperaturePlotForSelectedSegment();
+    }
+
     void updateTemperaturePlot() {
         cancelTemperatureCalculation();
+
+        if (temperaturePlotSource_ == TemperaturePlotSource::SurfaceGrid) {
+            updateTemperaturePlotFromSurfaceGrid();
+            return;
+        }
 
         if (!hasSolarConstant_) {
             clearTemperatureSegments();
