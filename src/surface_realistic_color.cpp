@@ -1,7 +1,9 @@
 #include "surface_realistic_color.h"
 
 #include "height_color_scale.h"
+#include "planet_presets.h"
 
+#include <QHash>
 #include <QtCore/QString>
 #include <QtMath>
 
@@ -17,32 +19,30 @@ bool isOceanMaterial(const QString &materialId) {
     return materialId == QLatin1String("ocean");
 }
 
-QColor baseLandColorForMaterial(const QString &materialId) {
-    if (materialId == QLatin1String("forest")) {
-        return QColor(52, 112, 66);
+const QHash<QString, QColor> &materialBaseColors() {
+    static QHash<QString, QColor> cached;
+    if (cached.isEmpty()) {
+        const auto materials = surfaceMaterials();
+        cached.reserve(materials.size());
+        for (const auto &material : materials) {
+            if (material.baseColor.isValid()) {
+                cached.insert(material.id, material.baseColor);
+            }
+        }
     }
-    if (materialId == QLatin1String("desert")) {
-        return QColor(210, 182, 120);
-    }
-    if (materialId == QLatin1String("ice")) {
-        return QColor(220, 235, 245);
-    }
-    if (materialId == QLatin1String("rocky")) {
-        return QColor(150, 120, 90);
-    }
-    if (materialId == QLatin1String("metal")) {
-        return QColor(140, 140, 150);
-    }
-    if (materialId.startsWith(QLatin1String("regolith"))) {
-        return QColor(135, 125, 115);
-    }
-    return QColor();
+    return cached;
 }
 
-QColor oceanColorForDepth(double heightKm, double minHeightKm) {
+QColor baseColorForMaterialId(const QString &materialId) {
+    const auto &colors = materialBaseColors();
+    const auto it = colors.constFind(materialId);
+    return it != colors.cend() ? it.value() : QColor();
+}
+
+QColor oceanColorForDepth(double heightKm, double minHeightKm, const QColor &baseColor) {
     const double maxDepthKm = qMax(1.0, -minHeightKm);
     const double depthRatio = qBound(0.0, -heightKm / maxDepthKm, 1.0);
-    const QColor shallow(40, 140, 200);
+    const QColor shallow = baseColor.isValid() ? baseColor : QColor(40, 140, 200);
     const QColor deep(8, 28, 70);
     return blendColors(shallow, deep, depthRatio);
 }
@@ -57,9 +57,11 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
 
     QColor baseColor;
     if (treatAsOcean) {
-        baseColor = oceanColorForDepth(heightKm, minHeightKm);
+        baseColor = oceanColorForDepth(heightKm,
+                                       minHeightKm,
+                                       baseColorForMaterialId(QStringLiteral("ocean")));
     } else {
-        baseColor = baseLandColorForMaterial(point.materialId);
+        baseColor = baseColorForMaterialId(point.materialId);
         if (!baseColor.isValid()) {
             const double heightRatio =
                 (maxHeightKm > 0.0) ? qBound(0.0, heightKm / maxHeightKm, 1.0) : 0.5;

@@ -6,10 +6,12 @@
 
 #include <QtCore/QString>
 #include <QtCore/QVector>
+#include <QtGui/QColor>
 
 struct SurfaceMaterial {
     QString id;
     QString name;
+    QColor baseColor;
     double albedo;
     double emissivity;
     // Базовая теплопроводность (Вт/м·К) при referenceTemperatureKelvin.
