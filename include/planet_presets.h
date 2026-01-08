@@ -2,8 +2,10 @@
 
 #include "atmosphere_model.h"
 #include "rotation_mode.h"
+#include "solar_calculator.h"
 #include "thermal_conductivity_model.h"
 
+#include <optional>
 #include <QtCore/QString>
 #include <QtCore/QVector>
 #include <QtGui/QColor>
@@ -40,6 +42,9 @@ struct PlanetPreset {
     double radiusKm;
     QString surfaceMaterialId;
     AtmosphereComposition atmosphere;
+    // Параметры звезды, соответствующие пресету.
+    StellarParameters primaryStar{1.0, 5772.0, 1.0};
+    std::optional<StellarParameters> secondaryStar = std::nullopt;
     // Ручная непрозрачность парникового слоя (0..1): не является физической моделью и
     // при включённой атмосфере может привести к двойному учёту парникового эффекта.
     double greenhouseOpacity = 0.0;

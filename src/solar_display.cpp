@@ -124,6 +124,11 @@ constexpr int kRoleFlatHeight = Qt::UserRole + 20;
 constexpr int kRoleManualGreenhouseOnTopOfAtmosphere = Qt::UserRole + 21;
 constexpr int kRoleAdvancedRadiationModel = Qt::UserRole + 22;
 constexpr int kRoleGeothermalFlux = Qt::UserRole + 23;
+constexpr int kRolePrimaryStarRadius = Qt::UserRole + 24;
+constexpr int kRolePrimaryStarTemperature = Qt::UserRole + 25;
+constexpr int kRoleSecondaryStarRadius = Qt::UserRole + 26;
+constexpr int kRoleSecondaryStarTemperature = Qt::UserRole + 27;
+constexpr int kRoleHasSecondaryStar = Qt::UserRole + 28;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -338,9 +343,7 @@ public:
             presetsLayout->addWidget(button);
         };
 
-        addPresetButton(QStringLiteral("Солнце"), [this, applyPrimary, applySecondary]() {
-            applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
-            applySecondary(std::nullopt);
+        addPresetButton(QStringLiteral("Солнце"), [this]() {
             resetSolarConstant();
             const auto presets = solarSystemPresets();
             QString selectedPlanet = QStringLiteral("Земля");
@@ -356,9 +359,7 @@ public:
             onCalculateRequested();
         });
 
-        addPresetButton(QStringLiteral("Сладкое Небо"), [this, applyPrimary, applySecondary]() {
-            applyPrimary(StellarParameters{0.3761, 2576.0, 1.0});
-            applySecondary(StellarParameters{0.3741, 2349.0, 1.0});
+        addPresetButton(QStringLiteral("Сладкое Небо"), [this]() {
             resetSolarConstant();
             const auto presets = sweetSkyPresets();
             const QString selectedPlanet =
@@ -765,6 +766,7 @@ public:
             syncGeothermalFluxWithPlanet();
             syncManualGreenhouseOnTopWithPlanet();
             syncAdvancedRadiationWithPlanet();
+            applyStellarPresetForCurrentPlanet();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
                 (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -1484,6 +1486,7 @@ private:
         syncCloudAlbedoWithPlanet();
         syncManualGreenhouseOnTopWithPlanet();
         syncAdvancedRadiationWithPlanet();
+        applyStellarPresetForCurrentPlanet();
         updatePlanetActions();
     }
 
@@ -1714,6 +1717,49 @@ private:
                !secondaryTemperatureInput_->text().trimmed().isEmpty();
     }
 
+    void applyStellarPresetForCurrentPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || isCustomPlanetIndex(index)) {
+            return;
+        }
+
+        const QVariant primaryRadiusValue =
+            planetComboBox_->itemData(index, kRolePrimaryStarRadius);
+        const QVariant primaryTemperatureValue =
+            planetComboBox_->itemData(index, kRolePrimaryStarTemperature);
+        if (!primaryRadiusValue.isValid() || !primaryTemperatureValue.isValid()) {
+            return;
+        }
+
+        setInputValue(radiusInput_, primaryRadiusValue.toDouble());
+        setInputValue(temperatureInput_, primaryTemperatureValue.toDouble());
+
+        const bool hasSecondary =
+            planetComboBox_->itemData(index, kRoleHasSecondaryStar).toBool();
+        if (!hasSecondary) {
+            secondStarCheckBox_->setChecked(false);
+            secondaryRadiusInput_->clear();
+            secondaryTemperatureInput_->clear();
+            return;
+        }
+
+        const QVariant secondaryRadiusValue =
+            planetComboBox_->itemData(index, kRoleSecondaryStarRadius);
+        const QVariant secondaryTemperatureValue =
+            planetComboBox_->itemData(index, kRoleSecondaryStarTemperature);
+        secondStarCheckBox_->setChecked(true);
+        if (secondaryRadiusValue.isValid()) {
+            setInputValue(secondaryRadiusInput_, secondaryRadiusValue.toDouble());
+        } else {
+            secondaryRadiusInput_->clear();
+        }
+        if (secondaryTemperatureValue.isValid()) {
+            setInputValue(secondaryTemperatureInput_, secondaryTemperatureValue.toDouble());
+        } else {
+            secondaryTemperatureInput_->clear();
+        }
+    }
+
     void addPlanetItem(const PlanetPreset &planet, bool isCustom) {
         planetComboBox_->addItem(formatPlanetName(planet), planet.semiMajorAxis);
         const int index = planetComboBox_->count() - 1;
@@ -1742,6 +1788,23 @@ private:
         planetComboBox_->setItemData(index, planet.geothermalFluxWPerM2, kRoleGeothermalFlux);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
                                      kRoleHeightSourceType);
+        planetComboBox_->setItemData(index, planet.primaryStar.radiusInSolarRadii,
+                                     kRolePrimaryStarRadius);
+        planetComboBox_->setItemData(index, planet.primaryStar.temperatureKelvin,
+                                     kRolePrimaryStarTemperature);
+        planetComboBox_->setItemData(index, static_cast<bool>(planet.secondaryStar),
+                                     kRoleHasSecondaryStar);
+        if (planet.secondaryStar) {
+            planetComboBox_->setItemData(index,
+                                         planet.secondaryStar->radiusInSolarRadii,
+                                         kRoleSecondaryStarRadius);
+            planetComboBox_->setItemData(index,
+                                         planet.secondaryStar->temperatureKelvin,
+                                         kRoleSecondaryStarTemperature);
+        } else {
+            planetComboBox_->setItemData(index, QVariant(), kRoleSecondaryStarRadius);
+            planetComboBox_->setItemData(index, QVariant(), kRoleSecondaryStarTemperature);
+        }
         planetComboBox_->setItemData(index, planet.heightmapPath, kRoleHeightmapPath);
         planetComboBox_->setItemData(index, planet.heightmapScaleKm, kRoleHeightmapScaleKm);
         planetComboBox_->setItemData(index, planet.heightSeed, kRoleHeightSeed);
@@ -1978,14 +2041,25 @@ private:
             const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
             const quint32 heightSeed = static_cast<quint32>(heightSeedInput->value());
             const AtmosphereComposition composition = atmosphereInput->composition(false);
+            StellarParameters primaryStar{1.0, 5772.0, 1.0};
+            readStellarParametersForRender(radiusInput_, temperatureInput_, primaryStar);
+            std::optional<StellarParameters> secondaryStar = std::nullopt;
+            if (secondStarCheckBox_->isChecked()) {
+                StellarParameters secondaryCandidate{1.0, 5772.0, 1.0};
+                if (readStellarParametersForRender(secondaryRadiusInput_,
+                                                   secondaryTemperatureInput_,
+                                                   secondaryCandidate)) {
+                    secondaryStar = secondaryCandidate;
+                }
+            }
             const bool existingHasSeaLevel =
                 existingIndex >= 0
                     ? planetComboBox_->itemData(existingIndex, kRoleHasSeaLevel).toBool()
                     : false;
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
-                                composition, greenhouseOpacity, manualGreenhouseOnTop,
-                                cloudAlbedo, geothermalFlux, tidallyLocked};
+                                composition, primaryStar, secondaryStar, greenhouseOpacity,
+                                manualGreenhouseOnTop, cloudAlbedo, geothermalFlux, tidallyLocked};
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
             if (existingIndex >= 0) {
@@ -2029,6 +2103,30 @@ private:
                 planetComboBox_->setItemData(existingIndex,
                                              static_cast<int>(preset.heightSourceType),
                                              kRoleHeightSourceType);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.primaryStar.radiusInSolarRadii,
+                                             kRolePrimaryStarRadius);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.primaryStar.temperatureKelvin,
+                                             kRolePrimaryStarTemperature);
+                planetComboBox_->setItemData(existingIndex,
+                                             static_cast<bool>(preset.secondaryStar),
+                                             kRoleHasSecondaryStar);
+                if (preset.secondaryStar) {
+                    planetComboBox_->setItemData(existingIndex,
+                                                 preset.secondaryStar->radiusInSolarRadii,
+                                                 kRoleSecondaryStarRadius);
+                    planetComboBox_->setItemData(existingIndex,
+                                                 preset.secondaryStar->temperatureKelvin,
+                                                 kRoleSecondaryStarTemperature);
+                } else {
+                    planetComboBox_->setItemData(existingIndex,
+                                                 QVariant(),
+                                                 kRoleSecondaryStarRadius);
+                    planetComboBox_->setItemData(existingIndex,
+                                                 QVariant(),
+                                                 kRoleSecondaryStarTemperature);
+                }
                 planetComboBox_->setItemData(existingIndex, preset.heightmapPath, kRoleHeightmapPath);
                 planetComboBox_->setItemData(existingIndex, preset.heightmapScaleKm,
                                              kRoleHeightmapScaleKm);
