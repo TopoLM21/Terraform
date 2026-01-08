@@ -535,7 +535,7 @@ public:
         surfaceViewStack_ = new QStackedWidget(this);
         surfaceViewStack_->addWidget(surfaceMapWidget_);
         surfaceViewStack_->addWidget(surfaceGlobeWidget_);
-        surfaceViewStack_->setCurrentWidget(surfaceMapWidget_);
+        surfaceViewStack_->setCurrentWidget(surfaceGlobeWidget_);
         surfaceMinTemperatureLabel_ = new QLabel(QStringLiteral("Мин: —"), this);
         surfaceMaxTemperatureLabel_ = new QLabel(QStringLiteral("Макс: —"), this);
         temperaturePauseButton_ = new QPushButton(QStringLiteral("Пауза"), this);
@@ -882,6 +882,7 @@ public:
             surfaceViewToggleButton_->setText(checked ? QStringLiteral("2D вид")
                                                       : QStringLiteral("3D вид"));
         });
+        surfaceViewToggleButton_->setChecked(true);
 
         // Сглаживание влияет только на отображение кривых, а не на физический расчет.
         // connect(smoothingCheckBox, &QCheckBox::toggled, temperaturePlot_,
