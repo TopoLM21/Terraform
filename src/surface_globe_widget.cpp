@@ -194,6 +194,28 @@ void SurfaceGlobeWidget::setAxisTiltDegrees(double tiltDegrees) {
     update();
 }
 
+void SurfaceGlobeWidget::setStarLightDirection(const QVector3D &direction) {
+    if (direction.lengthSquared() < 1e-6f) {
+        starLightDirection_ = QVector3D(0.0f, 0.0f, 1.0f);
+    } else {
+        starLightDirection_ = direction.normalized();
+    }
+    update();
+}
+
+void SurfaceGlobeWidget::setStarColor(const QColor &color) {
+    starColor_ = color;
+    update();
+}
+
+void SurfaceGlobeWidget::setStarAngularDiameterDegrees(double angularDiameterDeg) {
+    if (qFuzzyCompare(starAngularDiameterDeg_, angularDiameterDeg)) {
+        return;
+    }
+    starAngularDiameterDeg_ = qMax(0.0, angularDiameterDeg);
+    update();
+}
+
 void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event)
     QPainter painter(this);
@@ -210,6 +232,22 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     const double sphereRadius = 0.45 * qMin(width(), height());
     if (sphereRadius <= 1.0) {
         return;
+    }
+
+    const QVector3D lightDir = starLightDirection_.lengthSquared() < 1e-6f
+        ? QVector3D(0.0f, 0.0f, 1.0f)
+        : starLightDirection_.normalized();
+    const double ambientFactor = 0.18;
+
+    if (starAngularDiameterDeg_ > 0.0) {
+        // Угловой радиус = половина диаметра; линейный размер на экране r ≈ R * tan(angularRadius).
+        const double angularRadiusRad = qDegreesToRadians(starAngularDiameterDeg_ * 0.5);
+        const double starRadius = sphereRadius * qTan(angularRadiusRad);
+        const QPointF starCenter(center.x() + lightDir.x() * sphereRadius,
+                                 center.y() - lightDir.y() * sphereRadius);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(starColor_);
+        painter.drawEllipse(starCenter, starRadius, starRadius);
     }
 
     QVector<GlobePoint> visiblePoints;
@@ -231,19 +269,22 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         globePoint.position = projected;
         globePoint.z = normal.z();
         globePoint.pointIndex = pointIndex;
-        // Освещение отключено по требованию отображения без теней и подсветок.
+        // Освещённость lambert: max(0, dot(normal, lightDir)), с мягкой ambient-добавкой.
+        const double diffuse = qMax(0.0, static_cast<double>(QVector3D::dotProduct(normal, lightDir)));
+        const double lightFactor = ambientFactor + (1.0 - ambientFactor) * diffuse;
         if (mapMode_ == SurfaceMapMode::Temperature) {
-            globePoint.color = temperatureToColor(point.temperatureK);
+            globePoint.color = applyLighting(temperatureToColor(point.temperatureK), lightFactor);
         } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
-            globePoint.color = temperatureToColor(point.airTemperatureK);
+            globePoint.color = applyLighting(temperatureToColor(point.airTemperatureK), lightFactor);
         } else if (mapMode_ == SurfaceMapMode::Height) {
-            globePoint.color = heightToColor(point.heightKm);
+            globePoint.color = applyLighting(heightToColor(point.heightKm), lightFactor);
         } else if (mapMode_ == SurfaceMapMode::Pressure) {
-            globePoint.color = pressureToColor(point.pressureAtm);
+            globePoint.color = applyLighting(pressureToColor(point.pressureAtm), lightFactor);
         } else if (mapMode_ == SurfaceMapMode::Realistic) {
-            globePoint.color = realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
+            globePoint.color =
+                applyLighting(realisticSurfaceColor(point, minHeightKm_, maxHeightKm_), lightFactor);
         } else {
-            globePoint.color = windToColor(point.windSpeedMps);
+            globePoint.color = applyLighting(windToColor(point.windSpeedMps), lightFactor);
         }
         visiblePoints.push_back(globePoint);
         projectedPoints_.push_back(ProjectedPoint{projected, pointIndex});
@@ -292,18 +333,25 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             cellDraw.path = path;
             cellDraw.depth = depthSum / static_cast<double>(clipped.size());
             const SurfacePoint &cellPoint = grid_->points().at(cell.pointIndex);
+            const QVector3D cellNormal =
+                applyRotation(latLonToCartesian(cellPoint.latitudeDeg, cellPoint.longitudeDeg));
+            const double diffuse =
+                qMax(0.0, static_cast<double>(QVector3D::dotProduct(cellNormal, lightDir)));
+            const double lightFactor = ambientFactor + (1.0 - ambientFactor) * diffuse;
             if (mapMode_ == SurfaceMapMode::Temperature) {
-                cellDraw.color = temperatureToColor(cellPoint.temperatureK);
+                cellDraw.color = applyLighting(temperatureToColor(cellPoint.temperatureK), lightFactor);
             } else if (mapMode_ == SurfaceMapMode::AirTemperature) {
-                cellDraw.color = temperatureToColor(cellPoint.airTemperatureK);
+                cellDraw.color = applyLighting(temperatureToColor(cellPoint.airTemperatureK), lightFactor);
             } else if (mapMode_ == SurfaceMapMode::Height) {
-                cellDraw.color = heightToColor(cellPoint.heightKm);
+                cellDraw.color = applyLighting(heightToColor(cellPoint.heightKm), lightFactor);
             } else if (mapMode_ == SurfaceMapMode::Pressure) {
-                cellDraw.color = pressureToColor(cellPoint.pressureAtm);
+                cellDraw.color = applyLighting(pressureToColor(cellPoint.pressureAtm), lightFactor);
             } else if (mapMode_ == SurfaceMapMode::Realistic) {
-                cellDraw.color = realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_);
+                cellDraw.color =
+                    applyLighting(realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_),
+                                  lightFactor);
             } else {
-                cellDraw.color = windToColor(cellPoint.windSpeedMps);
+                cellDraw.color = applyLighting(windToColor(cellPoint.windSpeedMps), lightFactor);
             }
             visibleCells.push_back(cellDraw);
         }
@@ -430,6 +478,14 @@ QColor SurfaceGlobeWidget::pressureToColor(double pressureAtm) const {
                                 (maxPressureAtm_ - minPressureAtm_),
                             1.0);
     return temperatureColorForRatio(t);
+}
+
+QColor SurfaceGlobeWidget::applyLighting(const QColor &baseColor, double lightFactor) const {
+    const double factor = qBound(0.0, lightFactor, 1.0);
+    return QColor(static_cast<int>(baseColor.red() * factor),
+                  static_cast<int>(baseColor.green() * factor),
+                  static_cast<int>(baseColor.blue() * factor),
+                  baseColor.alpha());
 }
 
 void SurfaceGlobeWidget::mousePressEvent(QMouseEvent *event) {

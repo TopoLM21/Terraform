@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.6 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.7 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -46,6 +46,7 @@ add_executable(solar_constant
     include/surface_map_widget.h
     include/surface_map_interpolator.h
     include/surface_map_cache.h
+    include/star_color.h
     include/surface_cell.h
     include/surface_advection_model.h
     include/surface_pressure_transport_model.h
@@ -88,6 +89,7 @@ add_executable(solar_constant
     src/surface_map_interpolator.cpp
     src/surface_map_cache.cpp
     src/surface_globe_widget.cpp
+    src/star_color.cpp
     src/surface_advection_model.cpp
     src/surface_pressure_transport_model.cpp
     src/surface_height_model.cpp

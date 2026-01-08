@@ -3,9 +3,11 @@
 #include "planet_surface_grid.h"
 #include "surface_map_mode.h"
 
-#include <QWidget>
+#include <QColor>
 #include <QPointF>
 #include <QVector>
+#include <QVector3D>
+#include <QWidget>
 
 class SurfaceGlobeWidget : public QWidget {
     Q_OBJECT
@@ -20,6 +22,9 @@ public:
     void setPressureRange(double minAtm, double maxAtm);
     void setMarkupVisible(bool visible);
     void setAxisTiltDegrees(double tiltDegrees);
+    void setStarLightDirection(const QVector3D &direction);
+    void setStarColor(const QColor &color);
+    void setStarAngularDiameterDegrees(double angularDiameterDeg);
 
 signals:
     void pointClicked(int pointIndex);
@@ -39,6 +44,7 @@ private:
     QColor heightToColor(double heightKm) const;
     QColor windToColor(double speedMps) const;
     QColor pressureToColor(double pressureAtm) const;
+    QColor applyLighting(const QColor &baseColor, double lightFactor) const;
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
     QVector3D applyRotation(const QVector3D &v) const;
 
@@ -60,4 +66,7 @@ private:
     double lastPointRadiusPx_ = 0.0;
     bool markupVisible_ = false;
     double axisTiltDegrees_ = 0.0;
+    QVector3D starLightDirection_ = QVector3D(0.0f, 0.0f, 1.0f);
+    QColor starColor_ = QColor(255, 244, 234);
+    double starAngularDiameterDeg_ = 0.5;
 };
