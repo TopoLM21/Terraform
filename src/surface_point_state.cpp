@@ -25,6 +25,7 @@ SurfacePointState::SurfacePointState(double initialTemperatureKelvin,
                               subsurfaceSettings.bottomDepthMeters);
     solver_.reset(grid,
                   material.thermalConductivity,
+                  material.thermalConductivityModel,
                   material.density,
                   material.specificHeat,
                   subsurfaceSettings.bottomBoundary,

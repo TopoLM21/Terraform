@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.0 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,6 +34,7 @@ add_executable(solar_constant
     include/spectral_band_model.h
     include/subsurface_grid.h
     include/subsurface_temperature_solver.h
+    include/thermal_conductivity_model.h
     include/surface_temperature_scale_widget.h
     include/surface_height_scale_widget.h
     include/surface_wind_scale_widget.h
@@ -101,6 +102,7 @@ add_executable(solar_constant
     src/surface_temperature_state.cpp
     src/subsurface_grid.cpp
     src/subsurface_temperature_solver.cpp
+    src/thermal_conductivity_model.cpp
     src/surface_temperature_plot.cpp
     src/temperature_plot_tracker.cpp
     src/temperature_color_scale.cpp

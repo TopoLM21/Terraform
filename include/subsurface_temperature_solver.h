@@ -1,6 +1,7 @@
 #pragma once
 
 #include "subsurface_grid.h"
+#include "thermal_conductivity_model.h"
 
 #include <QtCore/QVector>
 
@@ -24,6 +25,7 @@ public:
     SubsurfaceTemperatureSolver() = default;
     SubsurfaceTemperatureSolver(const SubsurfaceGrid &grid,
                                 double thermalConductivity,
+                                const ThermalConductivityModel &thermalConductivityModel,
                                 double density,
                                 double specificHeat,
                                 SubsurfaceBottomBoundaryCondition bottomBoundary,
@@ -32,6 +34,7 @@ public:
 
     void reset(const SubsurfaceGrid &grid,
                double thermalConductivity,
+               const ThermalConductivityModel &thermalConductivityModel,
                double density,
                double specificHeat,
                SubsurfaceBottomBoundaryCondition bottomBoundary,
@@ -51,6 +54,7 @@ public:
                            double bottomTemperatureKelvin);
 
 private:
+    double conductivityAtTemperature(double temperatureKelvin) const;
     void solveTridiagonal(QVector<double> &a,
                           QVector<double> &b,
                           QVector<double> &c,
@@ -59,6 +63,7 @@ private:
     SubsurfaceGrid grid_;
     QVector<double> temperatures_;
     double thermalConductivity_ = 1.0;
+    ThermalConductivityModel thermalConductivityModel_{};
     double density_ = 1.0;
     double specificHeat_ = 1.0;
     double alpha_ = 1.0;

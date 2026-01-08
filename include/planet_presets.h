@@ -2,6 +2,7 @@
 
 #include "atmosphere_model.h"
 #include "rotation_mode.h"
+#include "thermal_conductivity_model.h"
 
 #include <QtCore/QString>
 #include <QtCore/QVector>
@@ -11,10 +12,12 @@ struct SurfaceMaterial {
     QString name;
     double albedo;
     double emissivity;
+    // Базовая теплопроводность (Вт/м·К) при referenceTemperatureKelvin.
     double thermalConductivity;
     double density;
     double specificHeat;
     double heatCapacity;
+    ThermalConductivityModel thermalConductivityModel;
 };
 
 enum class HeightSourceType {
