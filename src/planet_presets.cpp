@@ -42,9 +42,11 @@ QVector<SurfaceMaterial> surfaceMaterials() {
         {QStringLiteral("metal"), QStringLiteral("Металлическая поверхность"), 0.2, 0.85, 45.0, 7800.0,
          500.0, 3900000.0},
         {QStringLiteral("regolith_mercury"), QStringLiteral("Реголит Меркурия"), 0.12, 0.95, 0.4,
-         1700.0, 750.0, 1275000.0},
+         1700.0, 750.0, 1275000.0,
+         {ThermalConductivityModelType::Linear, 250.0, 2.0e-4}},
         {QStringLiteral("regolith_moon"), QStringLiteral("Лунный реголит"), 0.12, 0.95, 0.02, 1500.0,
-         700.0, 1050000.0},
+         700.0, 1050000.0,
+         {ThermalConductivityModelType::Linear, 250.0, 1.2e-4}},
     };
 }
 
