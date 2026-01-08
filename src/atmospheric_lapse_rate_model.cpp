@@ -29,8 +29,8 @@ TemperatureRangePoint AtmosphericLapseRateModel::applyLapseRate(
     const double meanTemperature = qMax(1.0, point.meanDailyKelvin);
     const double lapseRate = moistAdiabaticLapseRate(meanTemperature);
     const double adjustmentHeight = surfaceAdjustmentHeightMeters(meanTemperature);
-    // Температуры из SurfaceTemperatureCalculator::radiativeBalanceByLatitudeForSegment
-    // относятся к поверхности (слой layers[0]), поэтому вертикальную поправку не применяем.
+    // Температуры из радиационного баланса относятся к поверхности (слой layers[0]),
+    // поэтому вертикальную поправку не применяем.
     // Если бы это была эффективная температура излучения на высоте, к поверхности надо
     // прибавлять delta = Γ * Δz (положительный знак, потому что температура растет вниз).
     const double delta = lapseRate * adjustmentHeight;

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "atmosphere_model.h"
-#include "orbit_segment_calculator.h"
 #include "planet_presets.h"
 #include "radiation_model.h"
 #include "rotation_mode.h"
@@ -9,8 +8,6 @@
 
 #include <QtCore/QVector>
 
-#include <atomic>
-#include <functional>
 
 struct TemperatureRangePoint {
     double latitudeDegrees;
@@ -69,51 +66,7 @@ public:
 
     void setMeridionalTransportSteps(int steps);
 
-    using ProgressCallback = std::function<void(int processed, int total)>;
-
-    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int latitudePoints = 181) const;
-    QVector<TemperatureRangePoint> temperatureRangesByLatitude(int latitudePoints,
-                                                               const ProgressCallback &progressCallback,
-                                                               const std::atomic_bool *cancelFlag) const;
-    QVector<TemperatureRangePoint> temperatureRangesForOrbitSegment(
-        const OrbitSegment &segment,
-        double referenceDistanceAU,
-        double obliquityDegrees,
-        double perihelionArgumentDegrees,
-        int latitudePoints,
-        const ProgressCallback &progressCallback,
-        const std::atomic_bool *cancelFlag,
-        const std::atomic_bool *pauseFlag = nullptr) const;
-    QVector<QVector<TemperatureRangePoint>> temperatureRangesByOrbitSegments(
-        const QVector<OrbitSegment> &segments,
-        double referenceDistanceAU,
-        double obliquityDegrees,
-        double perihelionArgumentDegrees,
-        int latitudePoints,
-        const ProgressCallback &progressCallback,
-        const std::atomic_bool *cancelFlag) const;
-
 private:
-    QVector<TemperatureRangePoint> temperatureRangesByLatitudeForSegment(
-        int latitudePoints,
-        double segmentSolarConstant,
-        double declinationDegrees,
-        const ProgressCallback &progressCallback,
-        const std::atomic_bool *cancelFlag,
-        const std::atomic_bool *pauseFlag,
-        int progressOffset,
-        int totalProgress) const;
-
-    QVector<TemperatureRangePoint> radiativeBalanceByLatitudeForSegment(
-        int latitudePoints,
-        double segmentSolarConstant,
-        double declinationDegrees,
-        const ProgressCallback &progressCallback,
-        const std::atomic_bool *cancelFlag,
-        const std::atomic_bool *pauseFlag,
-        int progressOffset,
-        int totalProgress) const;
-
     double solarConstant_;
     SurfaceMaterial material_;
     double dayLengthDays_;

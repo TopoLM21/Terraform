@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,7 @@ add_executable(solar_constant
     include/surface_height_scale_widget.h
     include/surface_wind_scale_widget.h
     include/surface_pressure_scale_widget.h
+    include/surface_tile_temperature_calculator.h
     include/surface_map_mode.h
     include/surface_map_widget.h
     include/surface_map_interpolator.h
@@ -95,6 +96,7 @@ add_executable(solar_constant
     src/surface_pressure_scale_widget.cpp
     src/surface_atmosphere_coupler.cpp
     src/surface_temperature_calculator.cpp
+    src/surface_tile_temperature_calculator.cpp
     src/surface_temperature_scale_widget.cpp
     src/surface_temperature_state.cpp
     src/subsurface_grid.cpp
