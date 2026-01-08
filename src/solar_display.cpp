@@ -15,6 +15,7 @@
 #include "surface_height_scale_widget.h"
 #include "surface_wind_scale_widget.h"
 #include "surface_pressure_scale_widget.h"
+#include "surface_realistic_scale_widget.h"
 #include "surface_map_mode.h"
 #include "surface_advection_model.h"
 #include "surface_pressure_transport_model.h"
@@ -557,6 +558,8 @@ public:
                                          static_cast<int>(SurfaceMapMode::Wind));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Давление"),
                                          static_cast<int>(SurfaceMapMode::Pressure));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Реалистичный"),
+                                         static_cast<int>(SurfaceMapMode::Realistic));
         subsurfaceLayersSpinBox_ = new QSpinBox(this);
         subsurfaceLayersSpinBox_->setRange(1, 200);
         subsurfaceLayersSpinBox_->setValue(24);
@@ -608,11 +611,15 @@ public:
         pressureScaleWidget_ = new SurfacePressureScaleWidget(this);
         pressureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         pressureScaleWidget_->setMinimumHeight(18);
+        realisticScaleWidget_ = new SurfaceRealisticScaleWidget(this);
+        realisticScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        realisticScaleWidget_->setMinimumHeight(18);
         surfaceLegendScaleStack_ = new QStackedWidget(this);
         surfaceLegendScaleStack_->addWidget(temperatureScaleWidget_);
         surfaceLegendScaleStack_->addWidget(heightScaleWidget_);
         surfaceLegendScaleStack_->addWidget(windScaleWidget_);
         surfaceLegendScaleStack_->addWidget(pressureScaleWidget_);
+        surfaceLegendScaleStack_->addWidget(realisticScaleWidget_);
         surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
         auto *surfaceLegendTopLayout = new QHBoxLayout();
         surfaceLegendTopLayout->addWidget(surfaceMinTemperatureLabel_);
@@ -1067,6 +1074,7 @@ private:
     SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
     SurfaceWindScaleWidget *windScaleWidget_ = nullptr;
     SurfacePressureScaleWidget *pressureScaleWidget_ = nullptr;
+    SurfaceRealisticScaleWidget *realisticScaleWidget_ = nullptr;
     QStackedWidget *surfaceLegendScaleStack_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
@@ -3307,6 +3315,15 @@ private:
             if (windScaleWidget_) {
                 windScaleWidget_->setWindRange(surfaceMinWindSpeedMps_, surfaceMaxWindSpeedMps_);
             }
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::Realistic) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(realisticScaleWidget_);
+            }
+            surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+            surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
             return;
         }
 

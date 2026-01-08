@@ -5,5 +5,6 @@ enum class SurfaceMapMode {
     AirTemperature,
     Height,
     Wind,
-    Pressure
+    Pressure,
+    Realistic
 };
