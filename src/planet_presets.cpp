@@ -28,24 +28,26 @@ AtmosphereComposition atmosphereByPressureAtm(double pressureAtm,
 } // namespace
 
 QVector<SurfaceMaterial> surfaceMaterials() {
+    // Базовые цвета взяты как характерные видимые оттенки материала, чтобы визуально
+    // различать типы поверхности без строгой фотометрии.
     return {
-        {QStringLiteral("rocky"), QStringLiteral("Каменная поверхность"), 0.15, 0.95, 2.5, 2600.0,
-         800.0, 2080000.0},
-        {QStringLiteral("ice"), QStringLiteral("Ледяная поверхность"), 0.6, 0.98, 2.2, 920.0, 2100.0,
-         1932000.0},
-        {QStringLiteral("desert"), QStringLiteral("Песчаная поверхность"), 0.35, 0.93, 0.25, 1600.0,
-         800.0, 1280000.0},
-        {QStringLiteral("ocean"), QStringLiteral("Океан"), 0.06, 0.98, 0.6, 1000.0, 4180.0,
-         4180000.0},
-        {QStringLiteral("forest"), QStringLiteral("Лес"), 0.12, 0.96, 0.3, 1200.0, 1500.0,
-         1800000.0},
-        {QStringLiteral("metal"), QStringLiteral("Металлическая поверхность"), 0.2, 0.85, 45.0, 7800.0,
-         500.0, 3900000.0},
-        {QStringLiteral("regolith_mercury"), QStringLiteral("Реголит Меркурия"), 0.12, 0.95, 0.4,
-         1700.0, 750.0, 1275000.0,
+        {QStringLiteral("rocky"), QStringLiteral("Каменная поверхность"), QColor(150, 120, 90), 0.15,
+         0.95, 2.5, 2600.0, 800.0, 2080000.0},
+        {QStringLiteral("ice"), QStringLiteral("Ледяная поверхность"), QColor(220, 235, 245), 0.6, 0.98,
+         2.2, 920.0, 2100.0, 1932000.0},
+        {QStringLiteral("desert"), QStringLiteral("Песчаная поверхность"), QColor(210, 182, 120), 0.35,
+         0.93, 0.25, 1600.0, 800.0, 1280000.0},
+        {QStringLiteral("ocean"), QStringLiteral("Океан"), QColor(40, 140, 200), 0.06, 0.98, 0.6,
+         1000.0, 4180.0, 4180000.0},
+        {QStringLiteral("forest"), QStringLiteral("Лес"), QColor(52, 112, 66), 0.12, 0.96, 0.3, 1200.0,
+         1500.0, 1800000.0},
+        {QStringLiteral("metal"), QStringLiteral("Металлическая поверхность"), QColor(140, 140, 150), 0.2,
+         0.85, 45.0, 7800.0, 500.0, 3900000.0},
+        {QStringLiteral("regolith_mercury"), QStringLiteral("Реголит Меркурия"), QColor(135, 125, 115),
+         0.12, 0.95, 0.4, 1700.0, 750.0, 1275000.0,
          {ThermalConductivityModelType::Linear, 250.0, 2.0e-4}},
-        {QStringLiteral("regolith_moon"), QStringLiteral("Лунный реголит"), 0.12, 0.95, 0.02, 1500.0,
-         700.0, 1050000.0,
+        {QStringLiteral("regolith_moon"), QStringLiteral("Лунный реголит"), QColor(135, 125, 115), 0.12,
+         0.95, 0.02, 1500.0, 700.0, 1050000.0,
          {ThermalConductivityModelType::Linear, 250.0, 1.2e-4}},
     };
 }
