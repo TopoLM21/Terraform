@@ -135,6 +135,19 @@ constexpr double kEarthAreaKm2 = 510072000.0;
 constexpr double kDefaultSurfaceRoughness = 20.0;
 constexpr double kDefaultBasinShape = 3.5;
 constexpr double kEarthWaterGigatons = 1.4e9;
+constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
+
+double normalizeLongitudeRadians(double radians) {
+    double wrapped = std::fmod(radians + M_PI, 2.0 * M_PI);
+    if (wrapped < 0.0) {
+        wrapped += 2.0 * M_PI;
+    }
+    return wrapped - M_PI;
+}
+
+double longitudeDistanceRadians(double a, double b) {
+    return std::abs(normalizeLongitudeRadians(a - b));
+}
 
 double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
     // В текущем UI нет явного управления гидросферой, поэтому применяем мягкую эвристику:
@@ -1092,6 +1105,16 @@ private:
         int dayIndex = 0;
         int hourIndex = 0;
     } surfaceSimState_;
+    struct SurfaceTemperatureAggregationState {
+        double targetLongitudeRadians = 0.0;
+        bool hasTargetLongitude = false;
+        QVector<int> pointIndicesByLatitude;
+        QVector<double> dailyMinimums;
+        QVector<double> dailyMaximums;
+        QVector<QVector<double>> minimumHistory;
+        QVector<QVector<double>> maximumHistory;
+        int historyDays = kSurfaceTemperatureHistoryDays;
+    } surfaceTemperatureAggregation_;
     OrbitAnimationModel surfaceOrbitAnimation_;
     bool surfaceOrbitAnimationInitialized_ = false;
 
@@ -1151,6 +1174,7 @@ private:
     void resetSurfaceSimulation() {
         surfaceSimRunning_ = false;
         surfaceSimState_ = {};
+        resetSurfaceTemperatureAggregation();
         resetSurfaceOrbitAnimation();
         if (surfaceSimTimer_) {
             surfaceSimTimer_->stop();
@@ -1182,6 +1206,194 @@ private:
             return;
         }
         resetSurfaceOrbitAnimation();
+    }
+
+    void resetSurfaceTemperatureAggregation() {
+        surfaceTemperatureAggregation_ = {};
+        surfaceTemperatureAggregation_.historyDays = kSurfaceTemperatureHistoryDays;
+        if (temperaturePlot_) {
+            temperaturePlot_->clearSeries();
+        }
+    }
+
+    double selectSurfaceAggregationLongitude(double substellarLongitudeRadians) const {
+        if (selectedSurfacePointIndex_ >= 0 &&
+            selectedSurfacePointIndex_ < surfaceGrid_.points().size()) {
+            // Если пользователь выбрал конкретную точку, фиксируем меридиан по ней,
+            // чтобы график отражал знакомое положение на карте.
+            return surfaceGrid_.points().at(selectedSurfacePointIndex_).longitudeRadians;
+        }
+        // Иначе берём подсолнечный меридиан: он физически осмысленный и не зависит от шумов сетки.
+        return substellarLongitudeRadians;
+    }
+
+    void ensureSurfaceTemperatureAggregationTargets(double targetLongitudeRadians) {
+        const int binCount = latitudePoints();
+        if (!surfaceTemperatureAggregation_.hasTargetLongitude ||
+            surfaceTemperatureAggregation_.pointIndicesByLatitude.size() != binCount ||
+            !qFuzzyCompare(surfaceTemperatureAggregation_.targetLongitudeRadians + 1.0,
+                           targetLongitudeRadians + 1.0)) {
+            surfaceTemperatureAggregation_.targetLongitudeRadians = targetLongitudeRadians;
+            surfaceTemperatureAggregation_.hasTargetLongitude = true;
+            surfaceTemperatureAggregation_.pointIndicesByLatitude.resize(binCount);
+            surfaceTemperatureAggregation_.dailyMinimums.resize(binCount);
+            surfaceTemperatureAggregation_.dailyMaximums.resize(binCount);
+            surfaceTemperatureAggregation_.minimumHistory.resize(binCount);
+            surfaceTemperatureAggregation_.maximumHistory.resize(binCount);
+            surfaceTemperatureAggregation_.dailyMinimums.fill(0.0);
+            surfaceTemperatureAggregation_.dailyMaximums.fill(0.0);
+            for (int binIndex = 0; binIndex < binCount; ++binIndex) {
+                surfaceTemperatureAggregation_.minimumHistory[binIndex].clear();
+                surfaceTemperatureAggregation_.maximumHistory[binIndex].clear();
+            }
+
+            const double step = latitudeStepDegrees();
+            for (int binIndex = 0; binIndex < binCount; ++binIndex) {
+                const double binLatitude = -90.0 + step * static_cast<double>(binIndex);
+                double bestLatDiff = std::numeric_limits<double>::max();
+                double bestLonDiff = std::numeric_limits<double>::max();
+                int bestIndex = -1;
+                for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+                    const auto &point = surfaceGrid_.points().at(i);
+                    const double latDiff = std::abs(point.latitudeDeg - binLatitude);
+                    const double lonDiff =
+                        longitudeDistanceRadians(point.longitudeRadians, targetLongitudeRadians);
+                    // Фиксируем меридиан: сначала выбираем ближайшую широту,
+                    // а при равенстве берём точку, лежащую ближе к нужной долготе.
+                    if (latDiff < bestLatDiff - 1e-6 ||
+                        (std::abs(latDiff - bestLatDiff) <= 1e-6 && lonDiff < bestLonDiff)) {
+                        bestLatDiff = latDiff;
+                        bestLonDiff = lonDiff;
+                        bestIndex = i;
+                    }
+                }
+                surfaceTemperatureAggregation_.pointIndicesByLatitude[binIndex] = bestIndex;
+            }
+        }
+    }
+
+    void updateSurfaceTemperatureAggregation(bool publishDaily,
+                                             RotationMode rotationMode,
+                                             bool hasAtmosphere) {
+        if (!temperaturePlot_ || surfaceGrid_.points().isEmpty() ||
+            surfaceTemperatureAggregation_.pointIndicesByLatitude.isEmpty()) {
+            return;
+        }
+
+        const int binCount = surfaceTemperatureAggregation_.pointIndicesByLatitude.size();
+        for (int binIndex = 0; binIndex < binCount; ++binIndex) {
+            const int pointIndex =
+                surfaceTemperatureAggregation_.pointIndicesByLatitude.at(binIndex);
+            if (pointIndex < 0 || pointIndex >= surfaceGrid_.points().size()) {
+                continue;
+            }
+            const double temperatureK = surfaceGrid_.points().at(pointIndex).temperatureK;
+            double &minValue = surfaceTemperatureAggregation_.dailyMinimums[binIndex];
+            double &maxValue = surfaceTemperatureAggregation_.dailyMaximums[binIndex];
+            if (minValue == 0.0 && maxValue == 0.0) {
+                minValue = temperatureK;
+                maxValue = temperatureK;
+            } else {
+                minValue = qMin(minValue, temperatureK);
+                maxValue = qMax(maxValue, temperatureK);
+            }
+        }
+
+        if (!publishDaily) {
+            return;
+        }
+
+        QVector<TemperatureRangePoint> dailyPoints;
+        QVector<TemperatureSummaryPoint> summaryPoints;
+        dailyPoints.reserve(binCount);
+        summaryPoints.reserve(binCount);
+
+        const double step = latitudeStepDegrees();
+        const int historyLimit = qMax(1, surfaceTemperatureAggregation_.historyDays);
+        for (int binIndex = 0; binIndex < binCount; ++binIndex) {
+            const double latitude = -90.0 + step * static_cast<double>(binIndex);
+            double dailyMin = surfaceTemperatureAggregation_.dailyMinimums.at(binIndex);
+            double dailyMax = surfaceTemperatureAggregation_.dailyMaximums.at(binIndex);
+            if (dailyMin == 0.0 && dailyMax == 0.0) {
+                dailyMin = 0.0;
+                dailyMax = 0.0;
+            }
+
+            auto &minHistory = surfaceTemperatureAggregation_.minimumHistory[binIndex];
+            auto &maxHistory = surfaceTemperatureAggregation_.maximumHistory[binIndex];
+            minHistory.push_back(dailyMin);
+            maxHistory.push_back(dailyMax);
+            if (minHistory.size() > historyLimit) {
+                minHistory.remove(0, minHistory.size() - historyLimit);
+            }
+            if (maxHistory.size() > historyLimit) {
+                maxHistory.remove(0, maxHistory.size() - historyLimit);
+            }
+
+            const double dailyMean = 0.5 * (dailyMin + dailyMax);
+            TemperatureRangePoint dailyPoint;
+            dailyPoint.latitudeDegrees = latitude;
+            dailyPoint.hasInsolation = true;
+            dailyPoint.minimumKelvin = dailyMin;
+            dailyPoint.maximumKelvin = dailyMax;
+            dailyPoint.meanDailyKelvin = dailyMean;
+            dailyPoint.meanDayKelvin = dailyMax;
+            dailyPoint.meanNightKelvin = dailyMin;
+            dailyPoint.minimumCelsius = dailyMin - kKelvinOffset;
+            dailyPoint.maximumCelsius = dailyMax - kKelvinOffset;
+            dailyPoint.meanDailyCelsius = dailyMean - kKelvinOffset;
+            dailyPoint.meanDayCelsius = dailyMax - kKelvinOffset;
+            dailyPoint.meanNightCelsius = dailyMin - kKelvinOffset;
+            dailyPoints.push_back(dailyPoint);
+
+            double minAnnual = std::numeric_limits<double>::max();
+            double maxAnnual = std::numeric_limits<double>::lowest();
+            double meanAnnualSum = 0.0;
+            double meanAnnualDaySum = 0.0;
+            double meanAnnualNightSum = 0.0;
+            const int historyCount = qMin(minHistory.size(), maxHistory.size());
+            for (int i = 0; i < historyCount; ++i) {
+                const double historyMin = minHistory.at(i);
+                const double historyMax = maxHistory.at(i);
+                minAnnual = qMin(minAnnual, historyMin);
+                maxAnnual = qMax(maxAnnual, historyMax);
+                meanAnnualSum += 0.5 * (historyMin + historyMax);
+                meanAnnualDaySum += historyMax;
+                meanAnnualNightSum += historyMin;
+            }
+            if (historyCount == 0) {
+                minAnnual = dailyMin;
+                maxAnnual = dailyMax;
+            }
+            const double meanAnnual = (historyCount > 0) ? meanAnnualSum / historyCount : dailyMean;
+            const double meanAnnualDay =
+                (historyCount > 0) ? meanAnnualDaySum / historyCount : dailyMax;
+            const double meanAnnualNight =
+                (historyCount > 0) ? meanAnnualNightSum / historyCount : dailyMin;
+
+            TemperatureSummaryPoint summaryPoint;
+            summaryPoint.latitudeDegrees = latitude;
+            summaryPoint.minimumKelvin = minAnnual;
+            summaryPoint.maximumKelvin = maxAnnual;
+            summaryPoint.meanAnnualKelvin = meanAnnual;
+            summaryPoint.meanAnnualDayKelvin = meanAnnualDay;
+            summaryPoint.meanAnnualNightKelvin = meanAnnualNight;
+            summaryPoint.minimumCelsius = minAnnual - kKelvinOffset;
+            summaryPoint.maximumCelsius = maxAnnual - kKelvinOffset;
+            summaryPoint.meanAnnualCelsius = meanAnnual - kKelvinOffset;
+            summaryPoint.meanAnnualDayCelsius = meanAnnualDay - kKelvinOffset;
+            summaryPoint.meanAnnualNightCelsius = meanAnnualNight - kKelvinOffset;
+            summaryPoints.push_back(summaryPoint);
+        }
+
+        temperaturePlot_->setTemperatureSeries(dailyPoints,
+                                               summaryPoints,
+                                               QString(),
+                                               rotationMode,
+                                               hasAtmosphere);
+
+        surfaceTemperatureAggregation_.dailyMinimums.fill(0.0);
+        surfaceTemperatureAggregation_.dailyMaximums.fill(0.0);
     }
 
     void updateSurfacePointStatusDialog() {
@@ -2717,6 +2929,13 @@ private:
         const double declinationRadians = qDegreesToRadians(declinationDegrees);
         const double sinDeclination = std::sin(declinationRadians);
         const double cosDeclination = std::cos(declinationRadians);
+        // Фиксируем меридиан для агрегации: либо пользовательскую точку,
+        // либо ближайший к подсолнечному меридиану, чтобы брать единый срез по широтам.
+        const double targetLongitudeRadians =
+            surfaceTemperatureAggregation_.hasTargetLongitude
+                ? surfaceTemperatureAggregation_.targetLongitudeRadians
+                : selectSurfaceAggregationLongitude(substellarLongitudeRadians);
+        ensureSurfaceTemperatureAggregationTargets(targetLongitudeRadians);
 
         QVector<double> blendedInsolations;
         blendedInsolations.reserve(surfaceGrid_.points().size());
@@ -2905,6 +3124,9 @@ private:
         } else {
             updateSurfacePressureLegend(false, 0.0, 0.0);
         }
+
+        const bool publishDaily = surfaceSimState_.hourIndex + 1 >= stepsPerDay;
+        updateSurfaceTemperatureAggregation(publishDaily, rotationMode, useAtmosphericModel);
 
         ++surfaceSimState_.hourIndex;
         if (surfaceSimState_.hourIndex >= stepsPerDay) {
