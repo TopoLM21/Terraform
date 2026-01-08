@@ -32,6 +32,10 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const int spinUpDays = qMax(0, settings.spinUpDays);
     const bool allowInsolation =
         settings.hasSolarConstant && settings.segmentSolarConstant > 0.0 && timeStepSeconds > 0.0;
+    // Пока инсоляция не задана, используем более тёплый старт только для визуализации карты.
+    const double visualizationStartTemperature =
+        settings.hasSolarConstant ? defaults.minTemperatureKelvin
+                                  : qMax(defaults.minTemperatureKelvin, 260.0);
 
     const double declinationRadians = qDegreesToRadians(settings.declinationDegrees);
     const double sinDeclination = std::sin(declinationRadians);
@@ -72,10 +76,10 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         // Облака перекрывают поверхность, поэтому берём максимум отражения.
         const double albedo = qMax(materialAlbedo, clampedCloudAlbedo);
 
-        SurfacePointState state(defaults.minTemperatureKelvin,
+        SurfacePointState state(visualizationStartTemperature,
                                 albedo,
                                 defaults.greenhouseOpacity,
-                                defaults.minTemperatureKelvin,
+                                visualizationStartTemperature,
                                 material,
                                 defaults.subsurfaceSettings);
 
