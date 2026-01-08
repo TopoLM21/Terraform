@@ -52,8 +52,10 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
                              double minHeightKm,
                              double maxHeightKm) {
     const double heightKm = point.heightKm;
+    const QColor materialColor = baseColorForMaterialId(point.materialId);
+    const bool hasMaterial = materialColor.isValid();
     const bool treatAsOcean = isOceanMaterial(point.materialId) ||
-        (heightKm <= 0.0 && maxHeightKm > 0.0);
+        (!hasMaterial && heightKm <= 0.0 && maxHeightKm > 0.0);
 
     QColor baseColor;
     if (treatAsOcean) {
@@ -61,8 +63,8 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
                                        minHeightKm,
                                        baseColorForMaterialId(QStringLiteral("ocean")));
     } else {
-        baseColor = baseColorForMaterialId(point.materialId);
-        if (!baseColor.isValid()) {
+        baseColor = materialColor;
+        if (!hasMaterial) {
             const double heightRatio =
                 (maxHeightKm > 0.0) ? qBound(0.0, heightKm / maxHeightKm, 1.0) : 0.5;
             baseColor = heightColorForRatio(heightRatio);
