@@ -2674,7 +2674,23 @@ private:
         surfaceGlobeWidget_->setStarDirection(starDirection);
 
         StellarParameters primary{};
-        if (readStellarParametersForRender(radiusInput_, temperatureInput_, primary)) {
+        bool hasPrimary = readStellarParametersForRender(radiusInput_, temperatureInput_, primary);
+        if (!hasPrimary && planetComboBox_ && planetComboBox_->currentIndex() >= 0) {
+            // Запасной путь: когда поля ввода пусты/некорректны, используем параметры звезды
+            // из выбранного пресета планеты.
+            bool radiusOk = false;
+            bool temperatureOk = false;
+            const double radius =
+                planetComboBox_->currentData(kRolePrimaryStarRadius).toDouble(&radiusOk);
+            const double temperature =
+                planetComboBox_->currentData(kRolePrimaryStarTemperature).toDouble(&temperatureOk);
+            if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                primary.radiusInSolarRadii = radius;
+                primary.temperatureKelvin = temperature;
+                hasPrimary = true;
+            }
+        }
+        if (hasPrimary) {
             // Для рендера используем основную звезду: направление для вторичной не задано.
             surfaceGlobeWidget_->setStarTemperature(primary.temperatureKelvin);
             surfaceGlobeWidget_->setStarRadiusSolar(primary.radiusInSolarRadii);
