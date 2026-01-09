@@ -129,6 +129,7 @@ constexpr int kRolePrimaryStarTemperature = Qt::UserRole + 25;
 constexpr int kRoleSecondaryStarRadius = Qt::UserRole + 26;
 constexpr int kRoleSecondaryStarTemperature = Qt::UserRole + 27;
 constexpr int kRoleHasSecondaryStar = Qt::UserRole + 28;
+constexpr int kRoleStarPresetId = Qt::UserRole + 29;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -1811,6 +1812,7 @@ private:
         planetComboBox_->setItemData(index, planet.useContinentsHeight, kRoleUseContinentsHeight);
         planetComboBox_->setItemData(index, planet.hasSeaLevel, kRoleHasSeaLevel);
         planetComboBox_->setItemData(index, false, kRoleFlatHeight);
+        planetComboBox_->setItemData(index, planet.starPresetId, kRoleStarPresetId);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -2058,8 +2060,9 @@ private:
                     : false;
             PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
-                                composition, primaryStar, secondaryStar, greenhouseOpacity,
-                                manualGreenhouseOnTop, cloudAlbedo, geothermalFlux, tidallyLocked};
+                                composition, QStringLiteral("custom"), primaryStar, secondaryStar,
+                                greenhouseOpacity, manualGreenhouseOnTop, cloudAlbedo,
+                                geothermalFlux, tidallyLocked};
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
             if (existingIndex >= 0) {
@@ -2137,6 +2140,7 @@ private:
                 planetComboBox_->setItemData(existingIndex,
                                              planetComboBox_->itemData(existingIndex, kRoleFlatHeight),
                                              kRoleFlatHeight);
+                planetComboBox_->setItemData(existingIndex, preset.starPresetId, kRoleStarPresetId);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);

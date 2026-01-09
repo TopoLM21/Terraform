@@ -42,6 +42,8 @@ struct PlanetPreset {
     double radiusKm;
     QString surfaceMaterialId;
     AtmosphereComposition atmosphere;
+    // Идентификатор звездного пресета, вокруг которого обращается планета.
+    QString starPresetId;
     // Параметры звезды, соответствующие пресету.
     StellarParameters primaryStar{1.0, 5772.0, 1.0};
     std::optional<StellarParameters> secondaryStar = std::nullopt;
