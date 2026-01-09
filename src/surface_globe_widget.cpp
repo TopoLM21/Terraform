@@ -281,9 +281,13 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         return;
     }
 
-    const QVector3D lightDir = starLightDirection_.lengthSquared() < 1e-6f
+    const QVector3D baseLightDir = starLightDirection_.lengthSquared() < 1e-6f
         ? QVector3D(0.0f, 0.0f, 1.0f)
         : starLightDirection_.normalized();
+    // Световое направление хранится в мировых координатах, поэтому поворачиваем его
+    // тем же поворотом камеры, что и геометрию, чтобы освещение и диск звезды
+    // оставались синхронизированы при вращении.
+    const QVector3D lightDir = applyRotation(baseLightDir).normalized();
     const double ambientFactor = 0.18;
 
     if (starAngularDiameterDeg_ > 0.0) {
