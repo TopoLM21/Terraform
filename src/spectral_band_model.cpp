@@ -28,7 +28,10 @@ SpectralBandModel SpectralBandModel::defaultModel() {
 
     // Параметры полос задаём так, чтобы грубо воспроизводить ИК-поглощение CO2 и окно.
     // Значения κ0 подбирались калибровкой для Венеры (P≈90 атм, 96.5% CO2 → T≈737 K),
-    // с опорой на HITRAN/MT_CKD для ориентиров по центрам полос.
+    // с опорой на HITRAN/MT_CKD для ориентиров по центрам полос. Для расчёта kappa
+    // используем парциальное давление (p * x_gas), так что в земных условиях малые
+    // доли CO2 не получают «полное» давление и не завышают вклад по сравнению с
+    // венерианской калибровкой.
     const QVector<SpectralBandParameters> co2Bands = {
         // 4.3 мкм (асимметричный режим), сильная полоса.
         {QStringLiteral("CO2 4.3um"), 4.3, 0.7, 0.25, 101325.0, 288.0, 0.7, -0.2, false,
@@ -96,7 +99,9 @@ double SpectralBandModel::kappa(const AtmosphereComposition &composition,
                 continue;
             }
             // Суммарная непрозрачность смеси = сумма по газам доли * сумма полос.
-            kappaSum += fraction.share * bandOpacity(band, temperatureKelvin, pressurePa);
+            // Давление используем парциальное, чтобы следовые газы не получали «полное» давление.
+            const double partialPressurePa = pressurePa * fraction.share;
+            kappaSum += fraction.share * bandOpacity(band, temperatureKelvin, partialPressurePa);
         }
         totalShare += fraction.share;
     }
