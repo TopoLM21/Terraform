@@ -32,10 +32,9 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const int spinUpDays = qMax(0, settings.spinUpDays);
     const bool allowInsolation =
         settings.hasSolarConstant && settings.segmentSolarConstant > 0.0 && timeStepSeconds > 0.0;
-    // Пока инсоляция не задана, используем более тёплый старт только для визуализации карты.
-    const double visualizationStartTemperature =
-        settings.hasSolarConstant ? defaults.minTemperatureKelvin
-                                  : qMax(defaults.minTemperatureKelvin, 260.0);
+    // Если инсоляции нет, не поднимаем стартовый уровень искусственно: температура должна
+    // остывать естественно, оставаясь ограниченной только физическим минимумом модели.
+    const double visualizationStartTemperature = defaults.minTemperatureKelvin;
 
     const double declinationRadians = qDegreesToRadians(settings.declinationDegrees);
     const double sinDeclination = std::sin(declinationRadians);

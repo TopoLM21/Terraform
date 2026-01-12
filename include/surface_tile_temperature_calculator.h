@@ -9,7 +9,7 @@
 #include <QtCore/QVector>
 
 struct SurfaceTileTemperatureDefaults {
-    double minTemperatureKelvin = 230.0;
+    double minTemperatureKelvin = 3.0;
     double greenhouseOpacity = 0.0;
     SubsurfaceModelSettings subsurfaceSettings;
 };
