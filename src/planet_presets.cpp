@@ -56,8 +56,10 @@ QVector<SurfaceMaterial> surfaceMaterials() {
          0.12, 0.95, 0.4, 1700.0, 750.0, 1275000.0,
          {ThermalConductivityModelType::Linear, 250.0, 2.0e-4}},
         {QStringLiteral("regolith_moon"), QStringLiteral("Лунный реголит"), QColor(135, 125, 115), 0.12,
-         0.95, 0.02, 1500.0, 700.0, 1050000.0,
-         {ThermalConductivityModelType::Linear, 250.0, 1.2e-4}},
+         0.95, 0.05, 1700.0, 800.0, 1360000.0,
+         // Рост теплопроводности с температурой описывает радиационный теплообмен
+         // между зернами реголита и уплотнение контактов при нагреве.
+         {ThermalConductivityModelType::Linear, 250.0, 2.5e-4}},
     };
 }
 
@@ -111,8 +113,9 @@ QVector<PlanetPreset> solarSystemPresets() {
          true},
         {QStringLiteral("Луна"), 1.00, 29.5, 0.0549, 6.68, 0.0, 0.0123, 1737.4,
          QStringLiteral("regolith_moon"), AtmosphereComposition{}, kSolarStarPresetId,
-         kSolarPrimary, std::nullopt, 0.0, false, 0.0, 0.015, false, HeightSourceType::Procedural,
-         QString(), 0.0, 1004u, false, true},
+         kSolarPrimary, std::nullopt, 0.0, false, 0.0,
+         0.025, // Типичный диапазон лунного геотермального потока ~0.01–0.03 Вт/м².
+         false, HeightSourceType::Procedural, QString(), 0.0, 1004u, false, true},
         {QStringLiteral("Марс"), 1.52, 1.03, 0.0934, 25.19, 286.5, 0.107, 3389.5,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(0.006, 0.107, 3389.5, {{QStringLiteral("co2"), 1.0}}),
