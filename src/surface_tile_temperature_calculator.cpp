@@ -21,6 +21,18 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         return result;
     }
 
+    SubsurfaceModelSettings resolvedSubsurfaceSettings = defaults.subsurfaceSettings;
+    const SubsurfaceGrid resolvedGrid(resolvedSubsurfaceSettings.layerCount,
+                                      resolvedSubsurfaceSettings.topLayerThicknessMeters,
+                                      resolvedSubsurfaceSettings.bottomDepthMeters);
+    resolvedSubsurfaceSettings.layerCount = resolvedGrid.layerCount();
+    resolvedSubsurfaceSettings.bottomDepthMeters = resolvedGrid.bottomDepthMeters();
+    const auto &resolvedThicknesses = resolvedGrid.layerThicknessesMeters();
+    if (!resolvedThicknesses.isEmpty()) {
+        resolvedSubsurfaceSettings.topLayerThicknessMeters = resolvedThicknesses.front();
+    }
+    result.resolvedSubsurfaceSettings = resolvedSubsurfaceSettings;
+
     result.blendedInsolations.reserve(pointCount);
     result.baselineAirTemperatures.reserve(pointCount);
 

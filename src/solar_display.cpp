@@ -2633,6 +2633,23 @@ private:
         return settings;
     }
 
+    void updateSubsurfaceSettingsUi(const SubsurfaceModelSettings &settings) {
+        // Обновляем UI только фактическими параметрами сетки и блокируем сигналы,
+        // чтобы избежать рекурсивного пересчёта.
+        if (subsurfaceLayersSpinBox_) {
+            const QSignalBlocker blocker(subsurfaceLayersSpinBox_);
+            subsurfaceLayersSpinBox_->setValue(settings.layerCount);
+        }
+        if (subsurfaceTopThicknessSpinBox_) {
+            const QSignalBlocker blocker(subsurfaceTopThicknessSpinBox_);
+            subsurfaceTopThicknessSpinBox_->setValue(settings.topLayerThicknessMeters);
+        }
+        if (subsurfaceDepthSpinBox_) {
+            const QSignalBlocker blocker(subsurfaceDepthSpinBox_);
+            subsurfaceDepthSpinBox_->setValue(settings.bottomDepthMeters);
+        }
+    }
+
     void applySurfaceGridToViews() {
         if (surfaceMapWidget_) {
             surfaceMapWidget_->setGrid(&surfaceGrid_);
@@ -3000,6 +3017,7 @@ private:
                                              tileDefaults,
                                              materialsById,
                                              stateDefaults->material);
+        updateSubsurfaceSettingsUi(tileResult.resolvedSubsurfaceSettings);
 
         bool hasTemperatureRange = tileResult.hasTemperatureRange;
         double minTemperature = tileResult.minSurfaceTemperatureK;
