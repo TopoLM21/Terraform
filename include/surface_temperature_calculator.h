@@ -1,14 +1,6 @@
 #pragma once
 
-#include "atmosphere_model.h"
-#include "planet_presets.h"
-#include "radiation_model.h"
-#include "rotation_mode.h"
-#include "subsurface_temperature_solver.h"
-
 #include <QtCore/QVector>
-
-
 struct TemperatureRangePoint {
     double latitudeDegrees;
     bool hasInsolation = false;
@@ -36,57 +28,4 @@ struct TemperatureSummaryPoint {
     double meanAnnualCelsius;
     double meanAnnualDayCelsius;
     double meanAnnualNightCelsius;
-};
-
-class SurfaceTemperatureCalculator {
-public:
-    SurfaceTemperatureCalculator(double solarConstant,
-                                 const SurfaceMaterial &material,
-                                 double dayLengthDays,
-                                 RotationMode rotationMode,
-                                 const AtmosphereComposition &atmosphere = AtmosphereComposition{},
-                                 double greenhouseOpacity = 0.0,
-                                 bool manualGreenhouseOnTopOfAtmosphere = false,
-                                 double presetCloudAlbedo = 0.0,
-                                 double atmospherePressureAtm = 0.0,
-                                 double surfaceGravity = 0.0,
-                                 double planetRadiusKm = 6371.0,
-                                 bool useAtmosphericModel = false,
-                                 RadiationModelType radiationModelType = RadiationModelType::Fast,
-                                 int meridionalTransportSteps = 8,
-                                 HeightSourceType heightSourceType = HeightSourceType::Procedural,
-                                 const QString &heightmapPath = QString(),
-                                 double heightmapScaleKm = 0.0,
-                                 quint32 heightSeed = 0,
-                                 bool useContinentsHeight = false,
-                                 bool hasSeaLevel = false,
-                                 bool useFlatHeight = false,
-                                 const SubsurfaceModelSettings &subsurfaceSettings =
-                                     SubsurfaceModelSettings{});
-
-    void setMeridionalTransportSteps(int steps);
-
-private:
-    double solarConstant_;
-    SurfaceMaterial material_;
-    double dayLengthDays_;
-    RotationMode rotationMode_ = RotationMode::Normal;
-    AtmosphereComposition atmosphere_;
-    double greenhouseOpacity_ = 0.0;
-    bool manualGreenhouseOnTopOfAtmosphere_ = false;
-    double presetCloudAlbedo_ = 0.0;
-    double atmospherePressureAtm_ = 0.0;
-    double surfaceGravity_ = 0.0;
-    double planetRadiusKm_ = 6371.0;
-    bool useAtmosphericModel_ = false;
-    RadiationModelType radiationModelType_ = RadiationModelType::Fast;
-    int meridionalTransportSteps_ = 8;
-    HeightSourceType heightSourceType_ = HeightSourceType::Procedural;
-    QString heightmapPath_;
-    double heightmapScaleKm_ = 0.0;
-    quint32 heightSeed_ = 0;
-    bool useContinentsHeight_ = false;
-    bool hasSeaLevel_ = false;
-    bool useFlatHeight_ = false;
-    SubsurfaceModelSettings subsurfaceSettings_;
 };

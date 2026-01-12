@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.19 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.20 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,7 +16,6 @@ add_executable(solar_constant
     include/layered_radiation_model.h
     include/radiation_model.h
     include/radiation_model_utils.h
-    include/atmospheric_circulation_model.h
     include/atmospheric_lapse_rate_model.h
     include/atmospheric_thermodynamics.h
     include/radiative_convective_profile.h
@@ -67,7 +66,6 @@ add_executable(solar_constant
     src/radiation_model_utils.cpp
     src/radiative_convective_profile.cpp
     src/spectral_band_model.cpp
-    src/atmospheric_circulation_model.cpp
     src/atmospheric_lapse_rate_model.cpp
     src/atmospheric_thermodynamics.cpp
     src/atmosphere_widget.cpp
@@ -102,7 +100,6 @@ add_executable(solar_constant
     src/surface_atmosphere_coupler.cpp
     src/surface_realistic_color.cpp
     src/surface_realistic_scale_widget.cpp
-    src/surface_temperature_calculator.cpp
     src/surface_tile_temperature_calculator.cpp
     src/surface_temperature_scale_widget.cpp
     src/surface_temperature_state.cpp
