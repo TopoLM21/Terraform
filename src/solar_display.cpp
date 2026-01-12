@@ -3114,7 +3114,7 @@ private:
         const double rotBlock =
             (dayLengthDays < 2.0 && atmospherePressureAtm < 10.0) ? 0.65 : 1.0;
         const double meridionalTransport = transport * rotBlock;
-        // Глобальный средний поток перед альбедо, как в SurfaceTemperatureCalculator.
+        // Глобальный средний поток перед альбедо для учёта меридионального переноса.
         const double globalAverageInsolation = segmentSolarConstant / 4.0;
 
         // Один тик = 1 час планетарных суток, ускорение реализовано уменьшением интервала таймера.
