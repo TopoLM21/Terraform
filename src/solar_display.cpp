@@ -768,6 +768,7 @@ public:
             syncManualGreenhouseOnTopWithPlanet();
             syncAdvancedRadiationWithPlanet();
             applyStellarPresetForCurrentPlanet();
+            refreshSubsurfaceSettingsUi();
             updatePlanetActions();
             if (autoCalculateEnabled_ && hasPrimaryInputs() &&
                 (!secondStarCheckBox_->isChecked() || hasSecondaryInputs())) {
@@ -2648,6 +2649,30 @@ private:
             const QSignalBlocker blocker(subsurfaceDepthSpinBox_);
             subsurfaceDepthSpinBox_->setValue(settings.bottomDepthMeters);
         }
+    }
+
+    void refreshSubsurfaceSettingsUi() {
+        if (!planetComboBox_ || planetComboBox_->currentIndex() < 0) {
+            return;
+        }
+        if (!subsurfaceLayersSpinBox_ && !subsurfaceTopThicknessSpinBox_ &&
+            !subsurfaceDepthSpinBox_) {
+            return;
+        }
+
+        // Для автоматических настроек слоёв пересчитываем сетку без полного расчёта карты,
+        // чтобы UI отражал реальные параметры после смены планеты.
+        SubsurfaceModelSettings settings = buildSubsurfaceSettings();
+        const SubsurfaceGrid resolvedGrid(settings.layerCount,
+                                          settings.topLayerThicknessMeters,
+                                          settings.bottomDepthMeters);
+        settings.layerCount = resolvedGrid.layerCount();
+        settings.bottomDepthMeters = resolvedGrid.bottomDepthMeters();
+        const auto &resolvedThicknesses = resolvedGrid.layerThicknessesMeters();
+        if (!resolvedThicknesses.isEmpty()) {
+            settings.topLayerThicknessMeters = resolvedThicknesses.front();
+        }
+        updateSubsurfaceSettingsUi(settings);
     }
 
     void applySurfaceGridToViews() {
