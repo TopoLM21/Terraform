@@ -2486,6 +2486,7 @@ private:
 
     SubsurfaceModelSettings buildSubsurfaceSettings() const {
         SubsurfaceModelSettings settings;
+        const SubsurfaceModelSettings defaultSettings;
         if (subsurfaceLayersSpinBox_) {
             settings.layerCount = subsurfaceLayersSpinBox_->value();
         }
@@ -2504,6 +2505,16 @@ private:
         if (subsurfaceGeothermalFluxSpinBox_) {
             settings.geothermalFluxWPerM2 = subsurfaceGeothermalFluxSpinBox_->value();
         }
+
+        const bool useAutoLayerCount =
+            !subsurfaceLayersSpinBox_ || settings.layerCount == defaultSettings.layerCount;
+        const bool useAutoBottomDepth =
+            !subsurfaceDepthSpinBox_ ||
+            qFuzzyCompare(settings.bottomDepthMeters, defaultSettings.bottomDepthMeters);
+        const bool useAutoTopThickness =
+            !subsurfaceTopThicknessSpinBox_ ||
+            qFuzzyCompare(settings.topLayerThicknessMeters,
+                          defaultSettings.topLayerThicknessMeters);
 
         double maxSolarFluxWPerM2 = 0.0;
         if (hasSolarConstant_) {
@@ -2574,10 +2585,41 @@ private:
         }
 
         const auto material = currentMaterial();
+        const double thermalConductivity = material ? material->thermalConductivity : 1.0;
         const double density = material ? material->density : 1.0;
         const double specificHeat = material ? material->specificHeat : 1.0;
+        const double safeThermalConductivity = qMax(1e-6, thermalConductivity);
         const double safeDensity = qMax(1e-6, density);
         const double safeSpecificHeat = qMax(1e-6, specificHeat);
+        const double dayLengthDays =
+            planetComboBox_ ? planetComboBox_->currentData(kRoleDayLength).toDouble() : 0.0;
+        const double dayLengthSeconds = qMax(0.01, dayLengthDays) * 86400.0;
+        const double thermalDiffusivity =
+            safeThermalConductivity / (safeDensity * safeSpecificHeat);
+        constexpr double kPi = 3.14159265358979323846;
+        const double thermalSkinDepthMeters =
+            std::sqrt(thermalDiffusivity * dayLengthSeconds / kPi);
+        const double targetBottomDepthMeters =
+            qBound(1.0, 4.5 * thermalSkinDepthMeters, 10.0);
+        const int targetLayerCount = qBound(
+            20, static_cast<int>(qRound(20.0 + (targetBottomDepthMeters - 1.0) * (20.0 / 9.0))),
+            40);
+        // Глубина модели ~ несколько δ обеспечивает корректную амплитуду ночных температур.
+        if (useAutoBottomDepth) {
+            settings.bottomDepthMeters = targetBottomDepthMeters;
+        }
+        if (useAutoLayerCount) {
+            settings.layerCount = targetLayerCount;
+        }
+        if (useAutoTopThickness) {
+            const double uniformThickness =
+                settings.bottomDepthMeters / qMax(1, settings.layerCount);
+            settings.topLayerThicknessMeters =
+                qMin(settings.topLayerThicknessMeters, uniformThickness * 0.5);
+            dzFromDelta = settings.topLayerThicknessMeters;
+        }
+
+        // Тепловая глубина зависит от длины суток; шаг интегрирования влияет только на dz_min.
         const double timeStepSeconds = 3600.0;
         const double deltaTMaxKelvin = 2.0;
         // Ограничиваем нагрев верхнего слоя за шаг: C = ρ·c·dz, ΔT ≈ F_max·dt / C,
