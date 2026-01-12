@@ -1000,6 +1000,7 @@ private:
         lastSolarConstant_ = totalFlux;
         lastSolarConstantDistanceAU_ = semiMajorAxis;
         hasSolarConstant_ = true;
+        refreshSubsurfaceSettingsUi();
         updateTemperaturePlot();
     }
 
