@@ -2489,8 +2489,10 @@ private:
         if (subsurfaceLayersSpinBox_) {
             settings.layerCount = subsurfaceLayersSpinBox_->value();
         }
+        double dzFromDelta = settings.topLayerThicknessMeters;
         if (subsurfaceTopThicknessSpinBox_) {
-            settings.topLayerThicknessMeters = subsurfaceTopThicknessSpinBox_->value();
+            dzFromDelta = subsurfaceTopThicknessSpinBox_->value();
+            settings.topLayerThicknessMeters = dzFromDelta;
         }
         if (subsurfaceDepthSpinBox_) {
             settings.bottomDepthMeters = subsurfaceDepthSpinBox_->value();
@@ -2502,6 +2504,90 @@ private:
         if (subsurfaceGeothermalFluxSpinBox_) {
             settings.geothermalFluxWPerM2 = subsurfaceGeothermalFluxSpinBox_->value();
         }
+
+        double maxSolarFluxWPerM2 = 0.0;
+        if (hasSolarConstant_) {
+            maxSolarFluxWPerM2 = lastSolarConstant_;
+            if (lastSolarConstantDistanceAU_ > 0.0) {
+                const double distanceAu =
+                    surfaceOrbitAnimationInitialized_
+                        ? surfaceOrbitAnimation_.distanceAU()
+                        : (planetComboBox_
+                               ? planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble()
+                               : 0.0);
+                if (distanceAu > 0.0) {
+                    maxSolarFluxWPerM2 *=
+                        std::pow(lastSolarConstantDistanceAU_ / distanceAu, 2.0);
+                }
+            }
+        }
+        if (maxSolarFluxWPerM2 <= 0.0) {
+            const double distanceAu =
+                planetComboBox_ ? planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble() : 0.0;
+            StellarParameters primary{};
+            bool hasPrimary = readStellarParametersForRender(radiusInput_, temperatureInput_,
+                                                             primary);
+            if (!hasPrimary && planetComboBox_) {
+                bool radiusOk = false;
+                bool temperatureOk = false;
+                const double radius =
+                    planetComboBox_->currentData(kRolePrimaryStarRadius).toDouble(&radiusOk);
+                const double temperature =
+                    planetComboBox_->currentData(kRolePrimaryStarTemperature).toDouble(
+                        &temperatureOk);
+                if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                    primary.radiusInSolarRadii = radius;
+                    primary.temperatureKelvin = temperature;
+                    hasPrimary = true;
+                }
+            }
+            if (hasPrimary && distanceAu > 0.0) {
+                primary.distanceInAU = distanceAu;
+                maxSolarFluxWPerM2 += SolarCalculator::solarConstant(primary);
+            }
+
+            StellarParameters secondary{};
+            bool hasSecondary = false;
+            if (secondStarCheckBox_ && secondStarCheckBox_->isChecked()) {
+                hasSecondary = readStellarParametersForRender(secondaryRadiusInput_,
+                                                              secondaryTemperatureInput_,
+                                                              secondary);
+            } else if (planetComboBox_ &&
+                       planetComboBox_->currentData(kRoleHasSecondaryStar).toBool()) {
+                bool radiusOk = false;
+                bool temperatureOk = false;
+                const double radius =
+                    planetComboBox_->currentData(kRoleSecondaryStarRadius).toDouble(&radiusOk);
+                const double temperature =
+                    planetComboBox_->currentData(kRoleSecondaryStarTemperature).toDouble(
+                        &temperatureOk);
+                if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                    secondary.radiusInSolarRadii = radius;
+                    secondary.temperatureKelvin = temperature;
+                    hasSecondary = true;
+                }
+            }
+            if (hasSecondary && distanceAu > 0.0) {
+                secondary.distanceInAU = distanceAu;
+                maxSolarFluxWPerM2 += SolarCalculator::solarConstant(secondary);
+            }
+        }
+
+        const auto material = currentMaterial();
+        const double density = material ? material->density : 1.0;
+        const double specificHeat = material ? material->specificHeat : 1.0;
+        const double safeDensity = qMax(1e-6, density);
+        const double safeSpecificHeat = qMax(1e-6, specificHeat);
+        const double timeStepSeconds = 3600.0;
+        const double deltaTMaxKelvin = 2.0;
+        // Ограничиваем нагрев верхнего слоя за шаг: C = ρ·c·dz, ΔT ≈ F_max·dt / C,
+        // dz_min = F_max·dt / (ρ·c·ΔT_max) — физический предел на нагрев за шаг.
+        const double dzMinFromHeatCapacity =
+            (maxSolarFluxWPerM2 > 0.0)
+                ? (maxSolarFluxWPerM2 * timeStepSeconds) /
+                      (safeDensity * safeSpecificHeat * deltaTMaxKelvin)
+                : 0.0;
+        settings.topLayerThicknessMeters = qMax(dzFromDelta, dzMinFromHeatCapacity);
         return settings;
     }
 
