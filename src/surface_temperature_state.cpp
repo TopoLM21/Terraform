@@ -19,6 +19,7 @@ SurfaceTemperatureState::SurfaceTemperatureState(double initialTemperatureKelvin
                                                  const SubsurfaceModelSettings &subsurfaceSettings)
     : albedo_(qBound(0.0, albedo, 1.0)),
       greenhouseOpacity_(qBound(0.0, greenhouseOpacity, 0.999)),
+      emissivity_(qBound(0.0, material.emissivity, 1.0)),
       minTemperatureKelvin_(qMax(0.0, minTemperatureKelvin)) {
     const SubsurfaceGrid grid(subsurfaceSettings.layerCount,
                               subsurfaceSettings.topLayerThicknessMeters,
@@ -52,7 +53,8 @@ double SurfaceTemperatureState::emittedFlux() const {
     const double tauSurface = opticalDepthFromGreenhouseOpacity(greenhouseOpacity_);
     const double emissionTemperature =
         emissionLayerTemperature(temperatureKelvin(), tauSurface);
-    return kStefanBoltzmannConstant * std::pow(emissionTemperature, 4.0);
+    // Физически корректный множитель ε в законе Стефана–Больцмана.
+    return emissivity_ * kStefanBoltzmannConstant * std::pow(emissionTemperature, 4.0);
 }
 
 double SurfaceTemperatureState::topLayerHeatCapacityJPerM2K() const {
@@ -68,7 +70,7 @@ void SurfaceTemperatureState::updateTemperature(double absorbedFlux,
     const double emissionTemperature =
         emissionLayerTemperature(surfaceTemperature, tauSurface);
     const double emittedNow =
-        kStefanBoltzmannConstant * std::pow(emissionTemperature, 4.0);
+        emissivity_ * kStefanBoltzmannConstant * std::pow(emissionTemperature, 4.0);
     const double heatCapacity = solver_.topLayerHeatCapacity();
     // Линеаризованный радиационный поток:
     // F_rad(T) ≈ F_rad(T_n) + (dF/dT)|_{T_n} (T - T_n),
@@ -80,7 +82,7 @@ void SurfaceTemperatureState::updateTemperature(double absorbedFlux,
     const double emissionFactor =
         (surfaceTemperature > 0.0) ? (emissionTemperature / surfaceTemperature) : 0.0;
     const double radiativeDerivative =
-        4.0 * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 3.0) *
+        4.0 * emissivity_ * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 3.0) *
         std::pow(emissionFactor, 4.0);
     const double alpha = (heatCapacity > 0.0)
         ? (radiativeDerivative * dtSeconds / heatCapacity)

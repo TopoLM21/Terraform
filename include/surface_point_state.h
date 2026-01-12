@@ -29,6 +29,7 @@ private:
 
     double albedo_ = 0.0;
     double greenhouseOpacity_ = 0.0;
+    double emissivity_ = 1.0;
     double minTemperatureKelvin_ = 3.0;
     SubsurfaceTemperatureSolver solver_;
 };
