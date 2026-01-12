@@ -32,6 +32,7 @@ struct SurfaceTileTemperatureResult {
     double maxSurfaceTemperatureK = 0.0;
     QVector<double> blendedInsolations;
     QVector<double> baselineAirTemperatures;
+    SubsurfaceModelSettings resolvedSubsurfaceSettings;
 };
 
 class SurfaceTileTemperatureCalculator {
