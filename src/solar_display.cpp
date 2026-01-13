@@ -925,11 +925,20 @@ public:
             updateSurfaceGridTemperatures();
         };
         connect(subsurfaceLayersSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this,
-                [onSubsurfaceChanged](int) { onSubsurfaceChanged(); });
+                [this, onSubsurfaceChanged](int) {
+                    subsurfaceLayerCountAuto_ = false;
+                    onSubsurfaceChanged();
+                });
         connect(subsurfaceTopThicknessSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-                this, [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
+                this, [this, onSubsurfaceChanged](double) {
+                    subsurfaceTopThicknessAuto_ = false;
+                    onSubsurfaceChanged();
+                });
         connect(subsurfaceDepthSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-                [onSubsurfaceChanged](double) { onSubsurfaceChanged(); });
+                [this, onSubsurfaceChanged](double) {
+                    subsurfaceBottomDepthAuto_ = false;
+                    onSubsurfaceChanged();
+                });
         connect(subsurfaceGeothermalFluxSpinBox_,
                 QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                 this,
@@ -1142,6 +1151,9 @@ private:
     QDoubleSpinBox *subsurfaceDepthSpinBox_ = nullptr;
     QComboBox *subsurfaceBoundaryComboBox_ = nullptr;
     QDoubleSpinBox *subsurfaceGeothermalFluxSpinBox_ = nullptr;
+    bool subsurfaceLayerCountAuto_ = true;
+    bool subsurfaceTopThicknessAuto_ = true;
+    bool subsurfaceBottomDepthAuto_ = true;
     SurfaceTemperatureScaleWidget *temperatureScaleWidget_ = nullptr;
     SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
     SurfaceWindScaleWidget *windScaleWidget_ = nullptr;
@@ -2518,17 +2530,18 @@ private:
     }
 
     SubsurfaceModelSettings buildSubsurfaceSettings() const {
-        SubsurfaceModelSettings settings;
         const SubsurfaceModelSettings defaultSettings;
-        if (subsurfaceLayersSpinBox_) {
+        SubsurfaceModelSettings settings = defaultSettings;
+
+        if (subsurfaceLayersSpinBox_ && !subsurfaceLayerCountAuto_) {
             settings.layerCount = subsurfaceLayersSpinBox_->value();
         }
         double dzFromDelta = settings.topLayerThicknessMeters;
-        if (subsurfaceTopThicknessSpinBox_) {
+        if (subsurfaceTopThicknessSpinBox_ && !subsurfaceTopThicknessAuto_) {
             dzFromDelta = subsurfaceTopThicknessSpinBox_->value();
             settings.topLayerThicknessMeters = dzFromDelta;
         }
-        if (subsurfaceDepthSpinBox_) {
+        if (subsurfaceDepthSpinBox_ && !subsurfaceBottomDepthAuto_) {
             settings.bottomDepthMeters = subsurfaceDepthSpinBox_->value();
         }
         if (subsurfaceBoundaryComboBox_) {
@@ -2539,15 +2552,10 @@ private:
             settings.geothermalFluxWPerM2 = subsurfaceGeothermalFluxSpinBox_->value();
         }
 
-        const bool useAutoLayerCount =
-            !subsurfaceLayersSpinBox_ || settings.layerCount == defaultSettings.layerCount;
-        const bool useAutoBottomDepth =
-            !subsurfaceDepthSpinBox_ ||
-            qFuzzyCompare(settings.bottomDepthMeters, defaultSettings.bottomDepthMeters);
+        const bool useAutoLayerCount = subsurfaceLayerCountAuto_ || !subsurfaceLayersSpinBox_;
+        const bool useAutoBottomDepth = subsurfaceBottomDepthAuto_ || !subsurfaceDepthSpinBox_;
         const bool useAutoTopThickness =
-            !subsurfaceTopThicknessSpinBox_ ||
-            qFuzzyCompare(settings.topLayerThicknessMeters,
-                          defaultSettings.topLayerThicknessMeters);
+            subsurfaceTopThicknessAuto_ || !subsurfaceTopThicknessSpinBox_;
 
         double maxSolarFluxWPerM2 = 0.0;
         if (hasSolarConstant_) {
