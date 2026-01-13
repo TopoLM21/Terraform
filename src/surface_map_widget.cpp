@@ -510,13 +510,14 @@ int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
 QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point) const {
     return QStringLiteral("Широта: %1°\nДолгота: %2°\nТемпература поверхности: %3 K\n"
                           "Температура воздуха: %4 K\nВысота: %5 км\nДавление: %6 атм\n"
-                          "Ветер: %7 м/с")
+                          "Солнечный поток: %7 Вт/м²\nВетер: %8 м/с")
         .arg(point.latitudeDeg, 0, 'f', 2)
         .arg(point.longitudeDeg, 0, 'f', 2)
         .arg(point.temperatureK, 0, 'f', 2)
         .arg(point.airTemperatureK, 0, 'f', 2)
         .arg(point.heightKm, 0, 'f', 2)
         .arg(point.pressureAtm, 0, 'f', 3)
+        .arg(point.solarFluxWPerM2, 0, 'f', 2)
         .arg(point.windSpeedMps, 0, 'f', 2);
 }
 
