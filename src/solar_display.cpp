@@ -2665,6 +2665,33 @@ private:
                 qMin(desiredTopThickness, maxTopThickness);
             dzFromDelta = settings.topLayerThicknessMeters;
         }
+        const double requiredBottomDepthMeters =
+            settings.topLayerThicknessMeters * settings.layerCount;
+        if (requiredBottomDepthMeters > settings.bottomDepthMeters) {
+            // Нужна подстройка, чтобы SubsurfaceGrid не переключался
+            // на равномерную сетку и не снижал верхнюю толщину ниже 0.15 м.
+            if (useAutoBottomDepth) {
+                settings.bottomDepthMeters = requiredBottomDepthMeters;
+            } else if (useAutoLayerCount) {
+                settings.layerCount = qMax(
+                    1,
+                    static_cast<int>(std::floor(settings.bottomDepthMeters /
+                                                settings.topLayerThicknessMeters)));
+                if (useAutoTopThickness) {
+                    const double uniformThickness =
+                        settings.bottomDepthMeters / qMax(1, settings.layerCount);
+                    const double minTopThicknessFromSkin =
+                        qBound(0.15, 0.15 * thermalSkinDepthMeters, 0.2);
+                    const double maxTopThickness =
+                        qMax(uniformThickness * 0.5, minTopThicknessFromSkin);
+                    const double desiredTopThickness =
+                        qMax(settings.topLayerThicknessMeters, minTopThicknessFromSkin);
+                    settings.topLayerThicknessMeters =
+                        qMin(desiredTopThickness, maxTopThickness);
+                    dzFromDelta = settings.topLayerThicknessMeters;
+                }
+            }
+        }
 
         // Тепловая глубина зависит от длины суток; шаг интегрирования влияет только на dz_min.
         const double timeStepSeconds = 3600.0;
