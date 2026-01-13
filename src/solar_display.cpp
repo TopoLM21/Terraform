@@ -774,6 +774,7 @@ public:
             updateAtmosphereComposition();
             updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
+            syncGeothermalFluxWithPlanet();
             if (rightTabs->currentWidget() == surfaceMapContainer) {
                 updateSurfaceGridTemperatures();
             } else {
@@ -785,7 +786,6 @@ public:
             syncHeightSeedWithPlanet();
             syncFlatHeightWithPlanet();
             syncCloudAlbedoWithPlanet();
-            syncGeothermalFluxWithPlanet();
             syncManualGreenhouseOnTopWithPlanet();
             syncAdvancedRadiationWithPlanet();
             applyStellarPresetForCurrentPlanet();
@@ -2549,6 +2549,7 @@ private:
                 subsurfaceBoundaryComboBox_->currentData().toInt());
         }
         if (subsurfaceGeothermalFluxSpinBox_) {
+            // Всегда берем актуальное значение из UI при пересчёте модели.
             settings.geothermalFluxWPerM2 = subsurfaceGeothermalFluxSpinBox_->value();
         }
 
