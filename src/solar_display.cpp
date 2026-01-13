@@ -2908,10 +2908,21 @@ private:
                                 double atmospherePressureAtm,
                                 double dayLengthDays,
                                 double surfaceGravity) {
-        Q_UNUSED(atmosphere)
-        Q_UNUSED(atmospherePressureAtm)
         Q_UNUSED(surfaceGravity)
         if (surfaceGrid_.points().isEmpty()) {
+            updateSurfaceWindLegend(false, 0.0, 0.0);
+            return;
+        }
+
+        constexpr double kMinAtmospherePressureAtm = 1e-6;
+        if (atmospherePressureAtm <= kMinAtmospherePressureAtm ||
+            atmosphere.totalMassGigatons() <= 0.0) {
+            // Без атмосферы нет ветра и связанного переноса энергии по поверхности.
+            for (auto &point : surfaceGrid_.points()) {
+                point.windEastMps = 0.0;
+                point.windNorthMps = 0.0;
+                point.windSpeedMps = 0.0;
+            }
             updateSurfaceWindLegend(false, 0.0, 0.0);
             return;
         }
@@ -3447,14 +3458,22 @@ private:
         }
 
         SurfaceAdvectionModel advectionModel;
-        QVector<double> advectedTemperatures =
-            advectionModel.advectTemperature(surfaceGrid_,
-                                             temperatures,
-                                             windEast,
-                                             windNorth,
-                                             timeStepSeconds,
-                                             1,
-                                             1.0);
+        constexpr double kMinAtmospherePressureAtm = 1e-6;
+        QVector<double> advectedTemperatures;
+        if (atmospherePressureAtm <= kMinAtmospherePressureAtm ||
+            atmosphere.totalMassGigatons() <= 0.0) {
+            // На безатмосферных телах нет ветрового переноса тепла.
+            advectedTemperatures = temperatures;
+        } else {
+            advectedTemperatures =
+                advectionModel.advectTemperature(surfaceGrid_,
+                                                 temperatures,
+                                                 windEast,
+                                                 windNorth,
+                                                 timeStepSeconds,
+                                                 1,
+                                                 1.0);
+        }
         if (advectedTemperatures.size() != surfaceGrid_.points().size()) {
             advectedTemperatures = temperatures;
         }
