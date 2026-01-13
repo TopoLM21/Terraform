@@ -145,6 +145,11 @@ constexpr double kDefaultBasinShape = 3.5;
 constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
 
+enum class TemperaturePlotSource {
+    SurfaceGrid = 0,
+    LatitudeModel1D = 1,
+};
+
 double normalizeLongitudeRadians(double radians) {
     double wrapped = std::fmod(radians + M_PI, 2.0 * M_PI);
     if (wrapped < 0.0) {
@@ -702,12 +707,24 @@ public:
         segmentLayout->addWidget(new QLabel(QStringLiteral("Сегмент орбиты:"), plotGroupBox));
         segmentLayout->addWidget(segmentSelectorWidget_, 1);
         plotLayout->addLayout(segmentLayout);
+        temperaturePlotSourceComboBox_ = new QComboBox(plotGroupBox);
+        temperaturePlotSourceComboBox_->addItem(QStringLiteral("Поверхность (сетка)"),
+                                                static_cast<int>(TemperaturePlotSource::SurfaceGrid));
+        // temperaturePlotSourceComboBox_->addItem(QStringLiteral("1D модель по широте"),
+        //                                         static_cast<int>(TemperaturePlotSource::LatitudeModel1D));
+        // Широтная модель устарела и не отражает ночную сторону при приливном захвате.
+        auto *plotSourceLayout = new QHBoxLayout();
+        plotSourceLayout->addWidget(new QLabel(QStringLiteral("Источник:"), plotGroupBox));
+        plotSourceLayout->addWidget(temperaturePlotSourceComboBox_);
+        plotLayout->addLayout(plotSourceLayout);
         // auto *smoothingCheckBox = new QCheckBox(QStringLiteral("Сглаживать график"), plotGroupBox);
         // plotLayout->addWidget(smoothingCheckBox);
         plotLayout->addWidget(temperaturePlot_);
         plotLayout->addWidget(modeIllustrationWidget_, 0, Qt::AlignHCenter);
         plotGroupBox->setLayout(plotLayout);
         plotGroupBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        connect(temperaturePlotSourceComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this](int) { ensureTemperaturePlotSourceSurfaceGrid(); });
 
         auto *leftLayout = new QVBoxLayout();
         leftLayout->addLayout(presetsLayout);
@@ -1054,6 +1071,19 @@ private:
         return pointIndex == targetIndex;
     }
 
+    void ensureTemperaturePlotSourceSurfaceGrid() {
+        if (!temperaturePlotSourceComboBox_) {
+            return;
+        }
+        const int surfaceIndex = temperaturePlotSourceComboBox_->findData(
+            static_cast<int>(TemperaturePlotSource::SurfaceGrid));
+        if (surfaceIndex < 0 || temperaturePlotSourceComboBox_->currentIndex() == surfaceIndex) {
+            return;
+        }
+        const QSignalBlocker blocker(temperaturePlotSourceComboBox_);
+        temperaturePlotSourceComboBox_->setCurrentIndex(surfaceIndex);
+    }
+
     QLineEdit *radiusInput_ = nullptr;
     QLineEdit *temperatureInput_ = nullptr;
 
@@ -1115,6 +1145,7 @@ private:
     SurfaceRealisticScaleWidget *realisticScaleWidget_ = nullptr;
     QStackedWidget *surfaceLegendScaleStack_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
+    QComboBox *temperaturePlotSourceComboBox_ = nullptr;
     QProgressDialog *temperatureProgressDialog_ = nullptr;
     QElapsedTimer temperatureElapsed_;
     QTimer *temperatureUiTimer_ = nullptr;
@@ -3817,6 +3848,7 @@ private:
 
     void updateTemperaturePlot() {
         cancelTemperatureCalculation();
+        ensureTemperaturePlotSourceSurfaceGrid();
 
         // График температуры временно отключён: основная модель теперь "Поверхность" с ячейками.
         // Оставляем только очистку сегментов, чтобы UI не отображал устаревшие кривые.
