@@ -111,7 +111,8 @@ QVector<PlanetPreset> solarSystemPresets() {
          31003u,
          true,
          true},
-        {QStringLiteral("Луна"), 1.00, 29.5, 0.0549, 6.68, 0.0, 0.0123, 1737.4,
+        {QStringLiteral("Луна"), 1.00, 29.5, 0.0167, // Эксцентриситет солнечной орбиты, не лунной.
+         6.68, 0.0, 0.0123, 1737.4,
          QStringLiteral("regolith_moon"), AtmosphereComposition{}, kSolarStarPresetId,
          kSolarPrimary, std::nullopt, 0.0, false, 0.0,
          0.025, // Типичный диапазон лунного геотермального потока ~0.01–0.03 Вт/м².
