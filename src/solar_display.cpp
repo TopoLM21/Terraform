@@ -2630,12 +2630,16 @@ private:
         const double thermalDiffusivity =
             safeThermalConductivity / (safeDensity * safeSpecificHeat);
         constexpr double kPi = 3.14159265358979323846;
+        // Тепловая глубина (skin depth) для суточного периода:
+        // δ = sqrt(α * P / π), где α = λ / (ρ·c), P — длительность суток.
         const double thermalSkinDepthMeters =
             std::sqrt(thermalDiffusivity * dayLengthSeconds / kPi);
+        // Берём запас по глубине ~ 6δ, чтобы ночные минимумы не занижались
+        // из-за слишком близкой нижней границы.
         const double targetBottomDepthMeters =
-            qBound(1.0, 4.5 * thermalSkinDepthMeters, 10.0);
+            qBound(2.5, 6.0 * thermalSkinDepthMeters, 12.0);
         const int targetLayerCount = qBound(
-            20, static_cast<int>(qRound(20.0 + (targetBottomDepthMeters - 1.0) * (20.0 / 9.0))),
+            24, static_cast<int>(qRound(24.0 + (targetBottomDepthMeters - 2.5) * (16.0 / 9.5))),
             40);
         // Глубина модели ~ несколько δ обеспечивает корректную амплитуду ночных температур.
         if (useAutoBottomDepth) {
@@ -2647,6 +2651,10 @@ private:
         if (useAutoTopThickness) {
             const double uniformThickness =
                 settings.bottomDepthMeters / qMax(1, settings.layerCount);
+            const double minTopThicknessFromSkin =
+                qBound(0.05, 0.15 * thermalSkinDepthMeters, 0.2);
+            settings.topLayerThicknessMeters =
+                qMax(settings.topLayerThicknessMeters, minTopThicknessFromSkin);
             settings.topLayerThicknessMeters =
                 qMin(settings.topLayerThicknessMeters, uniformThickness * 0.5);
             dzFromDelta = settings.topLayerThicknessMeters;
