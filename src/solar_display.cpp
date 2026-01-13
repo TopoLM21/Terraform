@@ -2665,9 +2665,10 @@ private:
                 qMin(desiredTopThickness, maxTopThickness);
             dzFromDelta = settings.topLayerThicknessMeters;
         }
-        const double requiredBottomDepthMeters =
-            settings.topLayerThicknessMeters * settings.layerCount;
-        if (requiredBottomDepthMeters > settings.bottomDepthMeters) {
+        const auto adjustBottomDepthForTopThickness = [&](double requiredBottomDepthMeters) {
+            if (requiredBottomDepthMeters <= settings.bottomDepthMeters) {
+                return;
+            }
             // Нужна подстройка, чтобы SubsurfaceGrid не переключался
             // на равномерную сетку и не снижал верхнюю толщину ниже 0.15 м.
             if (useAutoBottomDepth) {
@@ -2691,7 +2692,10 @@ private:
                     dzFromDelta = settings.topLayerThicknessMeters;
                 }
             }
-        }
+        };
+
+        adjustBottomDepthForTopThickness(
+            settings.topLayerThicknessMeters * settings.layerCount);
 
         // Тепловая глубина зависит от длины суток; шаг интегрирования влияет только на dz_min.
         const double timeStepSeconds = 3600.0;
@@ -2704,6 +2708,8 @@ private:
                       (safeDensity * safeSpecificHeat * deltaTMaxKelvin)
                 : 0.0;
         settings.topLayerThicknessMeters = qMax(dzFromDelta, dzMinFromHeatCapacity);
+        adjustBottomDepthForTopThickness(
+            settings.topLayerThicknessMeters * settings.layerCount);
         return settings;
     }
 
