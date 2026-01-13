@@ -52,18 +52,6 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const double sinDeclination = std::sin(declinationRadians);
     const double cosDeclination = std::cos(declinationRadians);
 
-    const double transport =
-        (settings.atmospherePressureAtm > 50.0)
-            ? 0.99
-            : (settings.atmospherePressureAtm > 0.001
-                   ? qMin(1.0, 0.15 * std::log(settings.atmospherePressureAtm * 100.0 + 1.0))
-                   : 0.0);
-    const double rotBlock =
-        (settings.dayLengthDays < 2.0 && settings.atmospherePressureAtm < 10.0) ? 0.65 : 1.0;
-    const double meridionalTransport = transport * rotBlock;
-    // Глобальный средний поток перед альбедо нужен для имитации переноса тепла.
-    const double globalAverageInsolation = settings.segmentSolarConstant / 4.0;
-
     const bool isTidallyLocked = settings.rotationMode == RotationMode::TidalLocked;
     const auto resolveSubstellarLongitude = [isTidallyLocked, stepsPerDay](int hourIndex) {
         if (isTidallyLocked) {
@@ -103,10 +91,9 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
             // S_inst = S0 * cos(zenith) при освещении, иначе 0.
             const double localInsolation =
                 settings.segmentSolarConstant * qMax(0.0, cosZenith);
-            // Смешиваем локальную и глобальную инсоляцию для переноса тепла.
-            const double blendedInsolation =
-                localInsolation * (1.0 - meridionalTransport) +
-                globalAverageInsolation * meridionalTransport;
+            // Перенос тепла через глобальную инсоляцию отключён как нефизичный костыль;
+            // допускается только атмосферный механизм переноса.
+            const double blendedInsolation = localInsolation;
             const double absorbedFlux = state.absorbedFlux(blendedInsolation);
             const double emittedFlux = state.emittedFlux();
             state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
