@@ -744,7 +744,7 @@ public:
                         return;
                     }
                     // Пересчитываем поверхность только при первом открытии вкладки.
-                    if (surfaceGrid_.points().isEmpty()) {
+                    if (surfaceGrid_.points().isEmpty() || surfaceGridDirty_) {
                         updateSurfaceGridTemperatures();
                     }
                 });
@@ -776,6 +776,10 @@ public:
             syncMaterialWithPlanet();
             if (rightTabs->currentWidget() == surfaceMapContainer) {
                 updateSurfaceGridTemperatures();
+            } else {
+                // Помечаем сетку, чтобы при открытии вкладки пересчитать
+                // температурный профиль с учётом новой подповерхностной модели.
+                surfaceGridDirty_ = true;
             }
             syncRotationModeWithPlanet();
             syncHeightSeedWithPlanet();
@@ -1179,6 +1183,7 @@ private:
     double surfaceSimSpeedMultiplier_ = 1.0;
     std::optional<StellarCacheKey> lastStellarKey_;
     bool surfaceSimRunning_ = false;
+    bool surfaceGridDirty_ = false;
     struct SurfaceSimulationState {
         int dayIndex = 0;
         int hourIndex = 0;
@@ -3031,6 +3036,7 @@ private:
     void updateSurfaceGridTemperatures() {
         resetSurfaceSimulation();
         rebuildSurfaceGrid();
+        surfaceGridDirty_ = false;
         updateSurfaceHeightLegendFromGrid();
         AtmosphereComposition atmosphere;
         const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
