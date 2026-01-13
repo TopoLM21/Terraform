@@ -2707,7 +2707,14 @@ private:
                 ? (maxSolarFluxWPerM2 * timeStepSeconds) /
                       (safeDensity * safeSpecificHeat * deltaTMaxKelvin)
                 : 0.0;
-        settings.topLayerThicknessMeters = qMax(dzFromDelta, dzMinFromHeatCapacity);
+        const double dzFromHeatCapacity = qMax(dzFromDelta, dzMinFromHeatCapacity);
+        // Ограничиваем рост верхнего слоя в авто-режиме, чтобы dz_min не раздувал
+        // толщину выше физически желаемого диапазона 0.15–0.2 м.
+        const double maxAutoTopThicknessMeters = 0.2;
+        settings.topLayerThicknessMeters = useAutoTopThickness
+                                               ? qMin(maxAutoTopThicknessMeters,
+                                                      dzFromHeatCapacity)
+                                               : dzFromHeatCapacity;
         adjustBottomDepthForTopThickness(
             settings.topLayerThicknessMeters * settings.layerCount);
         return settings;
