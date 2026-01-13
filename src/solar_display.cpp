@@ -3120,6 +3120,8 @@ private:
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            // Храним текущий солнечный поток в точке, чтобы показывать его в подсказке тайла.
+            point.solarFluxWPerM2 = blendedInsolation;
             const SurfaceMaterial material = materialForPoint(point.materialId);
             const bool logDetails = shouldLogRadiationForPoint(i);
             const double localGreenhouseOpacity =
@@ -3363,6 +3365,8 @@ private:
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
             blendedInsolations.push_back(blendedInsolation);
+            // Запоминаем солнечный поток для UI, чтобы клик по тайлу показывал актуальные данные.
+            point.solarFluxWPerM2 = blendedInsolation;
 
             const double absorbedFlux = point.state.absorbedFlux(blendedInsolation);
             const double emittedFlux = point.state.emittedFlux();
