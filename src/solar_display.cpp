@@ -2655,10 +2655,14 @@ private:
             // чтобы избежать слишком агрессивной дискретизации возле поверхности.
             const double minTopThicknessFromSkin =
                 qBound(0.15, 0.15 * thermalSkinDepthMeters, 0.2);
-            settings.topLayerThicknessMeters =
+            // Верхний слой должен сохранять минимальную толщину, даже если
+            // равномерный шаг сетки получается меньше половины верхнего слоя.
+            const double maxTopThickness =
+                qMax(uniformThickness * 0.5, minTopThicknessFromSkin);
+            const double desiredTopThickness =
                 qMax(settings.topLayerThicknessMeters, minTopThicknessFromSkin);
             settings.topLayerThicknessMeters =
-                qMin(settings.topLayerThicknessMeters, uniformThickness * 0.5);
+                qMin(desiredTopThickness, maxTopThickness);
             dzFromDelta = settings.topLayerThicknessMeters;
         }
 
