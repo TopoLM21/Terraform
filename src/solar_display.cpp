@@ -2651,8 +2651,10 @@ private:
         if (useAutoTopThickness) {
             const double uniformThickness =
                 settings.bottomDepthMeters / qMax(1, settings.layerCount);
+            // При авто-режиме не делаем верхний слой тоньше 0.15 м,
+            // чтобы избежать слишком агрессивной дискретизации возле поверхности.
             const double minTopThicknessFromSkin =
-                qBound(0.05, 0.15 * thermalSkinDepthMeters, 0.2);
+                qBound(0.15, 0.15 * thermalSkinDepthMeters, 0.2);
             settings.topLayerThicknessMeters =
                 qMax(settings.topLayerThicknessMeters, minTopThicknessFromSkin);
             settings.topLayerThicknessMeters =
