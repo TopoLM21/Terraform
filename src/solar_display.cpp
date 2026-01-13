@@ -2298,11 +2298,6 @@ private:
             return;
         }
 
-        const QString planetName = planetComboBox_->itemData(index, kRolePlanetName).toString();
-        if (planetName != QStringLiteral("Луна")) {
-            return;
-        }
-
         const double geothermalFlux =
             planetComboBox_->itemData(index, kRoleGeothermalFlux).toDouble();
         const QSignalBlocker blocker(subsurfaceGeothermalFluxSpinBox_);
@@ -2741,6 +2736,18 @@ private:
         if (subsurfaceDepthSpinBox_) {
             const QSignalBlocker blocker(subsurfaceDepthSpinBox_);
             subsurfaceDepthSpinBox_->setValue(settings.bottomDepthMeters);
+        }
+        if (subsurfaceBoundaryComboBox_) {
+            const QSignalBlocker blocker(subsurfaceBoundaryComboBox_);
+            const int boundaryIndex =
+                subsurfaceBoundaryComboBox_->findData(static_cast<int>(settings.bottomBoundary));
+            if (boundaryIndex >= 0) {
+                subsurfaceBoundaryComboBox_->setCurrentIndex(boundaryIndex);
+            }
+        }
+        if (subsurfaceGeothermalFluxSpinBox_) {
+            const QSignalBlocker blocker(subsurfaceGeothermalFluxSpinBox_);
+            subsurfaceGeothermalFluxSpinBox_->setValue(settings.geothermalFluxWPerM2);
         }
     }
 
