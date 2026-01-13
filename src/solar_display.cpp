@@ -557,10 +557,12 @@ public:
         segmentLayout->addWidget(segmentSelectorWidget_, 1);
         plotLayout->addLayout(segmentLayout);
         temperaturePlotSourceComboBox_ = new QComboBox(plotGroupBox);
-        temperaturePlotSourceComboBox_->addItem(QStringLiteral("1D модель по широте"),
-                                                static_cast<int>(TemperaturePlotSource::LatitudeModel));
+        // Устаревшая широтная модель не отражает ночную сторону при приливном захвате.
+        // temperaturePlotSourceComboBox_->addItem(QStringLiteral("1D модель по широте"),
+        //                                         static_cast<int>(TemperaturePlotSource::LatitudeModel));
         temperaturePlotSourceComboBox_->addItem(QStringLiteral("Натуральная поверхность"),
                                                 static_cast<int>(TemperaturePlotSource::SurfaceGrid));
+        temperaturePlotSource_ = TemperaturePlotSource::SurfaceGrid;
         surfaceLongitudeSpinBox_ = new QDoubleSpinBox(plotGroupBox);
         surfaceLongitudeSpinBox_->setRange(-180.0, 180.0);
         surfaceLongitudeSpinBox_->setDecimals(1);
@@ -767,8 +769,18 @@ public:
                 QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this,
                 [this](int) {
-                    temperaturePlotSource_ = static_cast<TemperaturePlotSource>(
+                    const auto requestedSource = static_cast<TemperaturePlotSource>(
                         temperaturePlotSourceComboBox_->currentData().toInt());
+                    if (requestedSource != TemperaturePlotSource::SurfaceGrid) {
+                        const int surfaceIndex = temperaturePlotSourceComboBox_->findData(
+                            static_cast<int>(TemperaturePlotSource::SurfaceGrid));
+                        if (surfaceIndex >= 0) {
+                            temperaturePlotSourceComboBox_->setCurrentIndex(surfaceIndex);
+                        }
+                        temperaturePlotSource_ = TemperaturePlotSource::SurfaceGrid;
+                    } else {
+                        temperaturePlotSource_ = requestedSource;
+                    }
                     updateTemperaturePlotSourceUi();
                     updateTemperaturePlot();
                 });
@@ -976,7 +988,7 @@ private:
     double surfaceMaxHeightKm_ = 0.0;
     bool hasSurfaceHeightRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
-    TemperaturePlotSource temperaturePlotSource_ = TemperaturePlotSource::LatitudeModel;
+    TemperaturePlotSource temperaturePlotSource_ = TemperaturePlotSource::SurfaceGrid;
     bool latitudePointsManuallySet_ = false;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
