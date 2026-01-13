@@ -2711,10 +2711,12 @@ private:
         // Ограничиваем рост верхнего слоя в авто-режиме, чтобы dz_min не раздувал
         // толщину выше физически желаемого диапазона 0.15–0.2 м.
         const double maxAutoTopThicknessMeters = 0.2;
+        // Если пользователь задал толщину вручную, сохраняем её — иначе верхний слой
+        // может «раздуваться» из-за грубого шага по времени (1 час).
         settings.topLayerThicknessMeters = useAutoTopThickness
                                                ? qMin(maxAutoTopThicknessMeters,
                                                       dzFromHeatCapacity)
-                                               : dzFromHeatCapacity;
+                                               : dzFromDelta;
         adjustBottomDepthForTopThickness(
             settings.topLayerThicknessMeters * settings.layerCount);
         return settings;
