@@ -22,6 +22,7 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     heightValueLabel_ = new QLabel(QStringLiteral("—"), this);
     pressureValueLabel_ = new QLabel(QStringLiteral("—"), this);
     windValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    insolationValueLabel_ = new QLabel(QStringLiteral("—"), this);
     materialValueLabel_ = new QLabel(QStringLiteral("—"), this);
 
     layout->addRow(QStringLiteral("Широта (°):"), latitudeValueLabel_);
@@ -31,6 +32,7 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Высота (км):"), heightValueLabel_);
     layout->addRow(QStringLiteral("Поверхностное давление (атм):"), pressureValueLabel_);
     layout->addRow(QStringLiteral("Скорость ветра (м/с):"), windValueLabel_);
+    layout->addRow(QStringLiteral("Солнечная инсоляция (Вт/м²):"), insolationValueLabel_);
     layout->addRow(QStringLiteral("Материал:"), materialValueLabel_);
 }
 
@@ -42,6 +44,7 @@ void SurfacePointStatusDialog::setPoint(const SurfacePoint &point) {
     heightValueLabel_->setText(formatNumber(point.heightKm));
     pressureValueLabel_->setText(formatNumber(point.pressureAtm, 3));
     windValueLabel_->setText(formatNumber(point.windSpeedMps));
+    insolationValueLabel_->setText(formatNumber(point.solarFluxWPerM2));
     materialValueLabel_->setText(point.materialId.isEmpty() ? QStringLiteral("—") : point.materialId);
 }
 
@@ -53,5 +56,6 @@ void SurfacePointStatusDialog::clearPoint() {
     heightValueLabel_->setText(QStringLiteral("—"));
     pressureValueLabel_->setText(QStringLiteral("—"));
     windValueLabel_->setText(QStringLiteral("—"));
+    insolationValueLabel_->setText(QStringLiteral("—"));
     materialValueLabel_->setText(QStringLiteral("—"));
 }
