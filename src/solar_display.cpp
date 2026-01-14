@@ -107,31 +107,32 @@ constexpr int kRoleIsCustom = Qt::UserRole + 1;
 constexpr int kRolePlanetName = Qt::UserRole + 2;
 constexpr int kRoleMaterialId = Qt::UserRole + 3;
 constexpr int kRoleDayLength = Qt::UserRole + 4;
-constexpr int kRoleEccentricity = Qt::UserRole + 5;
-constexpr int kRoleObliquity = Qt::UserRole + 6;
-constexpr int kRolePerihelionArgument = Qt::UserRole + 7;
-constexpr int kRoleMassEarths = Qt::UserRole + 8;
-constexpr int kRoleRadiusKm = Qt::UserRole + 9;
-constexpr int kRoleRotationMode = Qt::UserRole + 10;
-constexpr int kRoleAtmosphere = Qt::UserRole + 11;
-constexpr int kRoleGreenhouseOpacity = Qt::UserRole + 12;
-constexpr int kRoleCloudAlbedo = Qt::UserRole + 13;
-constexpr int kRoleHeightSourceType = Qt::UserRole + 14;
-constexpr int kRoleHeightmapPath = Qt::UserRole + 15;
-constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 16;
-constexpr int kRoleHeightSeed = Qt::UserRole + 17;
-constexpr int kRoleUseContinentsHeight = Qt::UserRole + 18;
-constexpr int kRoleHasSeaLevel = Qt::UserRole + 19;
-constexpr int kRoleFlatHeight = Qt::UserRole + 20;
-constexpr int kRoleManualGreenhouseOnTopOfAtmosphere = Qt::UserRole + 21;
-constexpr int kRoleAdvancedRadiationModel = Qt::UserRole + 22;
-constexpr int kRoleGeothermalFlux = Qt::UserRole + 23;
-constexpr int kRolePrimaryStarRadius = Qt::UserRole + 24;
-constexpr int kRolePrimaryStarTemperature = Qt::UserRole + 25;
-constexpr int kRoleSecondaryStarRadius = Qt::UserRole + 26;
-constexpr int kRoleSecondaryStarTemperature = Qt::UserRole + 27;
-constexpr int kRoleHasSecondaryStar = Qt::UserRole + 28;
-constexpr int kRoleStarPresetId = Qt::UserRole + 29;
+constexpr int kRoleYearLengthDays = Qt::UserRole + 5;
+constexpr int kRoleEccentricity = Qt::UserRole + 6;
+constexpr int kRoleObliquity = Qt::UserRole + 7;
+constexpr int kRolePerihelionArgument = Qt::UserRole + 8;
+constexpr int kRoleMassEarths = Qt::UserRole + 9;
+constexpr int kRoleRadiusKm = Qt::UserRole + 10;
+constexpr int kRoleRotationMode = Qt::UserRole + 11;
+constexpr int kRoleAtmosphere = Qt::UserRole + 12;
+constexpr int kRoleGreenhouseOpacity = Qt::UserRole + 13;
+constexpr int kRoleCloudAlbedo = Qt::UserRole + 14;
+constexpr int kRoleHeightSourceType = Qt::UserRole + 15;
+constexpr int kRoleHeightmapPath = Qt::UserRole + 16;
+constexpr int kRoleHeightmapScaleKm = Qt::UserRole + 17;
+constexpr int kRoleHeightSeed = Qt::UserRole + 18;
+constexpr int kRoleUseContinentsHeight = Qt::UserRole + 19;
+constexpr int kRoleHasSeaLevel = Qt::UserRole + 20;
+constexpr int kRoleFlatHeight = Qt::UserRole + 21;
+constexpr int kRoleManualGreenhouseOnTopOfAtmosphere = Qt::UserRole + 22;
+constexpr int kRoleAdvancedRadiationModel = Qt::UserRole + 23;
+constexpr int kRoleGeothermalFlux = Qt::UserRole + 24;
+constexpr int kRolePrimaryStarRadius = Qt::UserRole + 25;
+constexpr int kRolePrimaryStarTemperature = Qt::UserRole + 26;
+constexpr int kRoleSecondaryStarRadius = Qt::UserRole + 27;
+constexpr int kRoleSecondaryStarTemperature = Qt::UserRole + 28;
+constexpr int kRoleHasSecondaryStar = Qt::UserRole + 29;
+constexpr int kRoleStarPresetId = Qt::UserRole + 30;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -556,6 +557,7 @@ public:
         planetComboBox_ = new QComboBox(this);
         planetSemiMajorAxisLabel_ = new QLabel(QStringLiteral("—"), this);
         planetDayLengthLabel_ = new QLabel(QStringLiteral("—"), this);
+        planetYearLengthLabel_ = new QLabel(QStringLiteral("—"), this);
         planetMassLabel_ = new QLabel(QStringLiteral("—"), this);
         planetRadiusLabel_ = new QLabel(QStringLiteral("—"), this);
         planetSurfaceGravityLabel_ = new QLabel(QStringLiteral("—"), this);
@@ -612,6 +614,7 @@ public:
         auto *planetLeftFormLayout = new QFormLayout();
         planetLeftFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
         planetLeftFormLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), planetDayLengthLabel_);
+        planetLeftFormLayout->addRow(QStringLiteral("Длина года (земн. дни):"), planetYearLengthLabel_);
         planetLeftFormLayout->addRow(QStringLiteral("Масса (M⊕):"), planetMassLabel_);
         planetLeftFormLayout->addRow(QStringLiteral("Радиус (км):"), planetRadiusLabel_);
         planetLeftFormLayout->addRow(QStringLiteral("G на поверхности (g⊕):"),
@@ -914,12 +917,14 @@ public:
             cancelTemperatureCalculation();
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
+            updatePlanetYearLengthLabel();
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
             updatePlanetDerivedLabels();
             updateAtmospherePlanetParameters();
             updateAtmosphereComposition();
             updatePlanetOrbitLabels();
+            updateSurfaceTemperatureAggregationHistoryDays();
             syncMaterialWithPlanet();
             syncGeothermalFluxWithPlanet();
             // При смене планеты показываем «холодный старт» без спин-апа.
@@ -966,11 +971,13 @@ public:
             planetComboBox_->removeItem(index);
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
+            updatePlanetYearLengthLabel();
             updatePlanetMassLabel();
             updatePlanetRadiusLabel();
             updatePlanetDerivedLabels();
             updateAtmospherePlanetParameters();
             updateAtmosphereComposition();
+            updateSurfaceTemperatureAggregationHistoryDays();
             updatePlanetActions();
             updateTemperaturePlot();
         });
@@ -1265,6 +1272,7 @@ private:
     QComboBox *planetComboBox_ = nullptr;
     QLabel *planetSemiMajorAxisLabel_ = nullptr;
     QLabel *planetDayLengthLabel_ = nullptr;
+    QLabel *planetYearLengthLabel_ = nullptr;
     QLabel *planetMassLabel_ = nullptr;
     QLabel *planetRadiusLabel_ = nullptr;
     QLabel *planetSurfaceGravityLabel_ = nullptr;
@@ -1366,6 +1374,7 @@ private:
     struct SurfaceSimulationState {
         int dayIndex = 0;
         int hourIndex = 0;
+        double orbitSegmentAccumulator = 0.0;
     } surfaceSimState_;
     struct SurfaceTemperatureAggregationState {
         double targetLongitudeRadians = 0.0;
@@ -1472,9 +1481,40 @@ private:
 
     void resetSurfaceTemperatureAggregation() {
         surfaceTemperatureAggregation_ = {};
-        surfaceTemperatureAggregation_.historyDays = kSurfaceTemperatureHistoryDays;
+        updateSurfaceTemperatureAggregationHistoryDays();
         if (temperaturePlot_) {
             temperaturePlot_->clearSeries();
+        }
+    }
+
+    int resolveSurfaceTemperatureHistoryDays() const {
+        if (!planetComboBox_) {
+            return kSurfaceTemperatureHistoryDays;
+        }
+        const QVariant value = planetComboBox_->currentData(kRoleYearLengthDays);
+        if (!value.isValid()) {
+            return kSurfaceTemperatureHistoryDays;
+        }
+        const double yearLengthDays = value.toDouble();
+        if (yearLengthDays <= 0.0) {
+            return kSurfaceTemperatureHistoryDays;
+        }
+        return qMax(1, static_cast<int>(qCeil(yearLengthDays)));
+    }
+
+    void updateSurfaceTemperatureAggregationHistoryDays() {
+        const int historyDays = resolveSurfaceTemperatureHistoryDays();
+        surfaceTemperatureAggregation_.historyDays = historyDays;
+        const int historySize = surfaceTemperatureAggregation_.minimumHistory.size();
+        for (int i = 0; i < historySize; ++i) {
+            auto &minHistory = surfaceTemperatureAggregation_.minimumHistory[i];
+            auto &maxHistory = surfaceTemperatureAggregation_.maximumHistory[i];
+            if (minHistory.size() > historyDays) {
+                minHistory.remove(0, minHistory.size() - historyDays);
+            }
+            if (maxHistory.size() > historyDays) {
+                maxHistory.remove(0, maxHistory.size() - historyDays);
+            }
         }
     }
 
@@ -1691,6 +1731,7 @@ private:
         }
         updatePlanetSemiMajorAxisLabel();
         updatePlanetDayLengthLabel();
+        updatePlanetYearLengthLabel();
         updatePlanetMassLabel();
         updatePlanetRadiusLabel();
         updatePlanetDerivedLabels();
@@ -1714,6 +1755,7 @@ private:
         presetPlanetNames_.clear();
         planetSemiMajorAxisLabel_->setText(QStringLiteral("—"));
         planetDayLengthLabel_->setText(QStringLiteral("—"));
+        planetYearLengthLabel_->setText(QStringLiteral("—"));
         planetMassLabel_->setText(QStringLiteral("—"));
         planetRadiusLabel_->setText(QStringLiteral("—"));
         planetSurfaceGravityLabel_->setText(QStringLiteral("—"));
@@ -1811,6 +1853,15 @@ private:
             return;
         }
         planetDayLengthLabel_->setText(formatDayLength(value.toDouble()));
+    }
+
+    void updatePlanetYearLengthLabel() {
+        const QVariant value = planetComboBox_->currentData(kRoleYearLengthDays);
+        if (!value.isValid()) {
+            planetYearLengthLabel_->setText(QStringLiteral("—"));
+            return;
+        }
+        planetYearLengthLabel_->setText(formatDayLength(value.toDouble()));
     }
 
     void updatePlanetMassLabel() {
@@ -1983,6 +2034,7 @@ private:
         const int index = planetComboBox_->count() - 1;
         planetComboBox_->setItemData(index, planet.semiMajorAxis, kRoleSemiMajorAxis);
         planetComboBox_->setItemData(index, planet.dayLengthDays, kRoleDayLength);
+        planetComboBox_->setItemData(index, planet.yearLengthDays, kRoleYearLengthDays);
         planetComboBox_->setItemData(index, planet.eccentricity, kRoleEccentricity);
         planetComboBox_->setItemData(index, planet.obliquityDegrees, kRoleObliquity);
         planetComboBox_->setItemData(index, planet.perihelionArgumentDegrees, kRolePerihelionArgument);
@@ -2068,6 +2120,10 @@ private:
         dayLengthInput->setPlaceholderText(QStringLiteral("Например, 1.0"));
         dayLengthInput->setValidator(validator);
 
+        auto *yearLengthInput = new QLineEdit(&dialog);
+        yearLengthInput->setPlaceholderText(QStringLiteral("Например, 365.25"));
+        yearLengthInput->setValidator(validator);
+
         auto *massInput = new QLineEdit(&dialog);
         massInput->setPlaceholderText(QStringLiteral("Например, 1.0"));
         massInput->setValidator(validator);
@@ -2123,6 +2179,7 @@ private:
         formLayout->addRow(QStringLiteral("Имя:"), nameInput);
         formLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), axisInput);
         formLayout->addRow(QStringLiteral("Длина суток (земн. дни):"), dayLengthInput);
+        formLayout->addRow(QStringLiteral("Длина года (земн. дни):"), yearLengthInput);
         formLayout->addRow(QStringLiteral("Масса (в массах Земли):"), massInput);
         formLayout->addRow(QStringLiteral("Радиус (км):"), radiusInput);
         formLayout->addRow(QStringLiteral("Эксцентриситет:"), eccentricityInput);
@@ -2180,7 +2237,7 @@ private:
 
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, &dialog,
-                [&dialog, nameInput, axisInput, dayLengthInput, massInput, radiusInput,
+                [&dialog, nameInput, axisInput, dayLengthInput, yearLengthInput, massInput, radiusInput,
                  eccentricityInput, obliquityInput, perihelionArgumentInput,
                  greenhouseOpacityInput, manualGreenhouseOnTopInput, cloudAlbedoInput,
                  heightSeedInput, materialInput,
@@ -2206,6 +2263,12 @@ private:
             const double dayLength = dayLengthInput->text().toDouble(&ok);
             if (!ok || dayLength <= 0.0) {
                 showInputError(QStringLiteral("Укажите положительную длину суток планеты."));
+                return;
+            }
+
+            const double yearLength = yearLengthInput->text().toDouble(&ok);
+            if (!ok || yearLength <= 0.0) {
+                showInputError(QStringLiteral("Укажите положительную длину года планеты."));
                 return;
             }
 
@@ -2275,7 +2338,7 @@ private:
                 existingIndex >= 0
                     ? planetComboBox_->itemData(existingIndex, kRoleHasSeaLevel).toBool()
                     : false;
-            PlanetPreset preset{name, axis, dayLength, eccentricity, obliquity,
+            PlanetPreset preset{name, axis, dayLength, yearLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
                                 composition, QStringLiteral("custom"), primaryStar, secondaryStar,
                                 greenhouseOpacity, manualGreenhouseOnTop, cloudAlbedo,
@@ -2291,6 +2354,7 @@ private:
                 planetComboBox_->setItemText(existingIndex, formatPlanetName(preset));
                 planetComboBox_->setItemData(existingIndex, axis, kRoleSemiMajorAxis);
                 planetComboBox_->setItemData(existingIndex, dayLength, kRoleDayLength);
+                planetComboBox_->setItemData(existingIndex, yearLength, kRoleYearLengthDays);
                 planetComboBox_->setItemData(existingIndex, eccentricity, kRoleEccentricity);
                 planetComboBox_->setItemData(existingIndex, obliquity, kRoleObliquity);
                 planetComboBox_->setItemData(existingIndex, perihelionArgument,
@@ -2364,9 +2428,10 @@ private:
                 planetComboBox_->setCurrentIndex(planetComboBox_->count() - 1);
             }
 
-            updatePlanetSemiMajorAxisLabel();
-            updatePlanetDayLengthLabel();
-            updatePlanetMassLabel();
+        updatePlanetSemiMajorAxisLabel();
+        updatePlanetDayLengthLabel();
+        updatePlanetYearLengthLabel();
+        updatePlanetMassLabel();
             updatePlanetRadiusLabel();
             updatePlanetDerivedLabels();
             updateAtmosphereComposition();
@@ -3686,6 +3751,7 @@ private:
         }
 
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        const double yearLengthDays = planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
         const RotationMode rotationMode =
             static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
         AtmosphereComposition atmosphere;
@@ -3730,6 +3796,12 @@ private:
         };
 
         const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
+        const double resolvedYearLengthDays =
+            (yearLengthDays > 0.0) ? yearLengthDays : static_cast<double>(kSurfaceOrbitSegmentsPerYear);
+        const double yearLengthHours = qMax(1.0, resolvedYearLengthDays * 24.0);
+        // Переводим час в долю орбиты: segmentStep = totalSegments / yearLengthHours.
+        const double segmentStep =
+            static_cast<double>(kSurfaceOrbitSegmentsPerYear) / yearLengthHours;
 
         ensureSurfaceOrbitAnimationReady();
         // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
@@ -3987,8 +4059,14 @@ private:
         if (surfaceSimState_.hourIndex >= stepsPerDay) {
             surfaceSimState_.hourIndex = 0;
             ++surfaceSimState_.dayIndex;
+        }
+        surfaceSimState_.orbitSegmentAccumulator += segmentStep;
+        const int segmentsToAdvance =
+            static_cast<int>(std::floor(surfaceSimState_.orbitSegmentAccumulator));
+        for (int i = 0; i < segmentsToAdvance; ++i) {
             surfaceOrbitAnimation_.advanceSegment();
         }
+        surfaceSimState_.orbitSegmentAccumulator -= segmentsToAdvance;
         updateSurfaceSimulationUi();
     }
 

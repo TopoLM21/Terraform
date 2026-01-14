@@ -33,6 +33,8 @@ struct PlanetPreset {
     QString name;
     double semiMajorAxis;
     double dayLengthDays;
+    // Длина года в земных сутках.
+    double yearLengthDays;
     double eccentricity;
     double obliquityDegrees;
     double perihelionArgumentDegrees;

@@ -127,12 +127,12 @@ QVector<PlanetPreset> solarSystemPresets() {
     return {
         // dayLengthDays: солнечные сутки (длительность солнечного дня), не сидерический период.
         // Например, у Венеры солнечные сутки ~116.75, а 243 дня — сидерическое вращение.
-        {QStringLiteral("Меркурий"), 0.39, 176.0, 0.2056, 0.03, 29.12, 0.0553, 2439.7,
+        {QStringLiteral("Меркурий"), 0.39, 176.0, 87.97, 0.2056, 0.03, 29.12, 0.0553, 2439.7,
          QStringLiteral("regolith_mercury"), AtmosphereComposition{}, kSolarStarPresetId,
          kSolarPrimary, std::nullopt, 0.0, false, 0.0, mercuryGeothermalFlux, false,
          HeightSourceType::Procedural,
          QString(), 0.0, 1001u, false, true},
-        {QStringLiteral("Венера"), 0.72, 116.75, 0.0068, 177.36, 54.88, 0.815, 6051.8,
+        {QStringLiteral("Венера"), 0.72, 116.75, 224.70, 0.0068, 177.36, 54.88, 0.815, 6051.8,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(92.0, 0.815, 6051.8, {{QStringLiteral("co2"), 1.0}}),
          kSolarStarPresetId,
@@ -144,7 +144,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          venusGeothermalFlux,
          false,
          HeightSourceType::Procedural, QString(), 0.0, 1002u, true, true},
-        {QStringLiteral("Земля"), 1.00, 1.0, 0.0167, 23.44, 102.94, 1.0, 6371.0,
+        {QStringLiteral("Земля"), 1.00, 1.0, 365.25, 0.0167, 23.44, 102.94, 1.0, 6371.0,
          QStringLiteral("ocean"),
          atmosphereByPressureAtm(
              1.0,
@@ -170,12 +170,16 @@ QVector<PlanetPreset> solarSystemPresets() {
          31003u,
          true,
          true},
-        {QStringLiteral("Луна"), 1.00, 29.5, 0.0167, // Эксцентриситет солнечной орбиты, не лунной.
+        {QStringLiteral("Луна"),
+         1.00,
+         29.5,
+         365.25,
+         0.0167, // Эксцентриситет солнечной орбиты, не лунной.
          6.68, 0.0, 0.0123, 1737.4,
          QStringLiteral("regolith_moon"), AtmosphereComposition{}, kSolarStarPresetId,
          kSolarPrimary, std::nullopt, 0.0, false, 0.0, moonGeothermalFlux,
          false, HeightSourceType::Procedural, QString(), 0.0, 1004u, false, true},
-        {QStringLiteral("Марс"), 1.52, 1.03, 0.0934, 25.19, 286.5, 0.107, 3389.5,
+        {QStringLiteral("Марс"), 1.52, 1.03, 686.98, 0.0934, 25.19, 286.5, 0.107, 3389.5,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(0.006, 0.107, 3389.5, {{QStringLiteral("co2"), 1.0}}),
          kSolarStarPresetId,
@@ -192,7 +196,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          31005u,
          true,
          true},
-        {QStringLiteral("Церрера"), 2.77, 0.38, 0.0758, 4.0, 73.6, 0.00015, 473.0,
+        {QStringLiteral("Церрера"), 2.77, 0.38, 1681.63, 0.0758, 4.0, 73.6, 0.00015, 473.0,
          QStringLiteral("ice"), AtmosphereComposition{}, kSolarStarPresetId, kSolarPrimary,
          std::nullopt, 0.0, false, 0.0, ceresGeothermalFlux, false, HeightSourceType::Procedural,
          QString(), 0.0, 1006u, false, true},
@@ -203,7 +207,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
     // "Сладкое Небо" — бинарная система красных карликов: используем одинаковые
     // звездные параметры для всех трёх планет, чтобы акцент оставался на орбитах.
     return {
-        {QStringLiteral("Планета 1"), 0.30, 84.9, 0.0003, -10.5, 190.51, 0.578, 5151.0,
+        {QStringLiteral("Планета 1"), 0.30, 84.9, 60.02, 0.0003, -10.5, 190.51, 0.578, 5151.0,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(
              1.03,
@@ -228,7 +232,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          2001u,
          true,
          true},
-        {QStringLiteral("Планета 2"), 0.40, 2.4, 0.003, 11.94, 21.12, 0.4317, 4710.0,
+        {QStringLiteral("Планета 2"), 0.40, 2.4, 92.40, 0.003, 11.94, 21.12, 0.4317, 4710.0,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(
              0.77,
@@ -253,7 +257,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          2002u,
          true,
          true},
-        {QStringLiteral("Планета 3"), 0.51, 1.4, 0.0001, -8.84, 343.60, 0.5173, 4979.0,
+        {QStringLiteral("Планета 3"), 0.51, 1.4, 133.03, 0.0001, -8.84, 343.60, 0.5173, 4979.0,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(
              0.74,
