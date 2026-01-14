@@ -19,6 +19,7 @@ struct SurfaceTileTemperatureSettings {
     double dayLengthDays = 0.0;
     RotationMode rotationMode = RotationMode::Normal;
     double declinationDegrees = 0.0;
+    double orbitalPhaseRadians = 0.0;
     double atmospherePressureAtm = 0.0;
     double cloudAlbedo = 0.0;
     int spinUpDays = 6;

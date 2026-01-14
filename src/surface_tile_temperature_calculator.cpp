@@ -54,7 +54,9 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const double cosDeclination = std::cos(declinationRadians);
 
     const bool isTidallyLocked = settings.rotationMode == RotationMode::TidalLocked;
-    const auto resolveSubstellarLongitude = [isTidallyLocked, stepsPerDay](int hourIndex) {
+    const double orbitalPhaseRadians = settings.orbitalPhaseRadians;
+    const auto resolveSubstellarLongitude = [isTidallyLocked, stepsPerDay, orbitalPhaseRadians](
+                                                int hourIndex) {
         if (isTidallyLocked) {
             return 0.0;
         }
@@ -62,7 +64,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
                              static_cast<double>(stepsPerDay);
         const double hourAngle = phase - kPi;
         // Субзвёздная долгота — меридиан с нулевым часовым углом.
-        return -hourAngle;
+        return orbitalPhaseRadians - hourAngle;
     };
 
     double minTemperature = std::numeric_limits<double>::max();

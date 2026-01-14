@@ -14,6 +14,7 @@ public:
     void advanceSegment();
 
     double declinationDegrees() const;
+    double orbitalPhaseRadians() const;
     double distanceAU() const;
 
 private:

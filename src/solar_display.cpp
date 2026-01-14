@@ -165,7 +165,10 @@ double longitudeDistanceRadians(double a, double b) {
     return std::abs(normalizeLongitudeRadians(a - b));
 }
 
-double resolveSubstellarLongitudeRadians(int hourIndex, int stepsPerDay, RotationMode rotationMode) {
+double resolveSubstellarLongitudeRadians(int hourIndex,
+                                         int stepsPerDay,
+                                         RotationMode rotationMode,
+                                         double orbitalPhaseRadians) {
     if (rotationMode == RotationMode::TidalLocked) {
         return 0.0;
     }
@@ -175,8 +178,11 @@ double resolveSubstellarLongitudeRadians(int hourIndex, int stepsPerDay, Rotatio
     const double phase =
         2.0 * M_PI * (static_cast<double>(hourIndex) + 0.5) / static_cast<double>(stepsPerDay);
     const double hourAngle = phase - M_PI;
-    // Субзвёздная долгота — меридиан с нулевым часовым углом.
-    return -hourAngle;
+    // Субзвёздная долгота λ* задаётся разностью орбитальной и спиновой фаз:
+    // λ* = λ_orbit - λ_spin, где λ_orbit — истинная долгота звезды (фаза орбиты),
+    // а λ_spin = hourAngle — часовой угол на нулевом меридиане. Знак выбран так,
+    // чтобы положительная спиновая фаза сдвигала подсолнечную точку к западу.
+    return normalizeLongitudeRadians(orbitalPhaseRadians - hourAngle);
 }
 
 QVector3D directionFromLatLonRadians(double latitudeRad, double longitudeRad) {
@@ -189,10 +195,14 @@ QVector3D directionFromLatLonRadians(double latitudeRad, double longitudeRad) {
 QVector3D resolveStarDirection(double declinationDegrees,
                                int hourIndex,
                                int stepsPerDay,
-                               RotationMode rotationMode) {
+                               RotationMode rotationMode,
+                               double orbitalPhaseRadians) {
     const double declinationRadians = qDegreesToRadians(declinationDegrees);
     const double substellarLongitude =
-        resolveSubstellarLongitudeRadians(hourIndex, stepsPerDay, rotationMode);
+        resolveSubstellarLongitudeRadians(hourIndex,
+                                          stepsPerDay,
+                                          rotationMode,
+                                          orbitalPhaseRadians);
     // Направление на звезду совпадает с нормалью подсолнечной точки.
     return directionFromLatLonRadians(declinationRadians, substellarLongitude);
 }
@@ -414,6 +424,7 @@ struct SurfaceGridComputationInput {
     RadiationModelType radiationModelType = RadiationModelType::Fast;
     RotationMode rotationMode = RotationMode::Normal;
     double declinationDegrees = 0.0;
+    double orbitalPhaseRadians = 0.0;
     double segmentSolarConstant = 0.0;
     bool hasSolarConstant = false;
     int currentHourIndex = 0;
@@ -438,6 +449,7 @@ struct SurfaceGridComputationResult {
     double minWindSpeedMps = 0.0;
     double maxWindSpeedMps = 0.0;
     double declinationDegrees = 0.0;
+    double orbitalPhaseRadians = 0.0;
     int stepsPerDay = 1;
     RotationMode rotationMode = RotationMode::Normal;
 };
@@ -3084,7 +3096,8 @@ private:
 
     void updateSurfaceStarRendering(double declinationDegrees,
                                     int stepsPerDay,
-                                    RotationMode rotationMode) {
+                                    RotationMode rotationMode,
+                                    double orbitalPhaseRadians) {
         if (!surfaceGlobeWidget_) {
             return;
         }
@@ -3093,7 +3106,8 @@ private:
             resolveStarDirection(declinationDegrees,
                                  surfaceSimState_.hourIndex,
                                  stepsPerDay,
-                                 rotationMode);
+                                 rotationMode,
+                                 orbitalPhaseRadians);
         surfaceGlobeWidget_->setStarDirection(starDirection);
 
         StellarParameters primary{};
@@ -3251,6 +3265,7 @@ private:
         SurfaceGridComputationResult result;
         result.grid = input.grid;
         result.declinationDegrees = input.declinationDegrees;
+        result.orbitalPhaseRadians = input.orbitalPhaseRadians;
         result.stepsPerDay = input.stepsPerDay;
         result.rotationMode = input.rotationMode;
 
@@ -3315,6 +3330,7 @@ private:
         tileSettings.dayLengthDays = dayLengthDays;
         tileSettings.rotationMode = input.rotationMode;
         tileSettings.declinationDegrees = input.declinationDegrees;
+        tileSettings.orbitalPhaseRadians = input.orbitalPhaseRadians;
         tileSettings.atmospherePressureAtm = atmospherePressureAtm;
         tileSettings.cloudAlbedo = input.cloudAlbedo;
         tileSettings.currentHourIndex = input.currentHourIndex;
@@ -3549,7 +3565,8 @@ private:
         updateSurfaceHeightLegendFromGrid();
         updateSurfaceStarRendering(result.declinationDegrees,
                                    result.stepsPerDay,
-                                   result.rotationMode);
+                                   result.rotationMode,
+                                   result.orbitalPhaseRadians);
         if (result.hasTemperatureRange && result.minTemperatureK <= result.maxTemperatureK) {
             applySurfaceTemperatureRangeToViews(result.minTemperatureK, result.maxTemperatureK);
             updateSurfaceTemperatureLegend(true, result.minTemperatureK, result.maxTemperatureK);
@@ -3641,6 +3658,7 @@ private:
             static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
         ensureSurfaceOrbitAnimationReady();
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
+        const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
         double segmentSolarConstant = hasSolarConstant_ ? lastSolarConstant_ : 0.0;
         if (hasSolarConstant_ && lastSolarConstantDistanceAU_ > 0.0) {
             const double distanceAU = surfaceOrbitAnimation_.distanceAU();
@@ -3667,6 +3685,7 @@ private:
         input.radiationModelType = radiationModelType;
         input.rotationMode = rotationMode;
         input.declinationDegrees = declinationDegrees;
+        input.orbitalPhaseRadians = orbitalPhaseRadians;
         input.segmentSolarConstant = segmentSolarConstant;
         input.hasSolarConstant = hasSolarConstant_;
         input.currentHourIndex = surfaceSimState_.hourIndex;
@@ -3806,6 +3825,7 @@ private:
         ensureSurfaceOrbitAnimationReady();
         // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
+        const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
 
         // Инсоляция меняется с расстоянием как 1 / r^2 относительно опорной дистанции.
         const double distanceAU = surfaceOrbitAnimation_.distanceAU();
@@ -3833,15 +3853,11 @@ private:
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
-        const double phase =
-            2.0 * M_PI *
-            (static_cast<double>(surfaceSimState_.hourIndex) + 0.5) /
-            static_cast<double>(stepsPerDay);
-        const double hourAngle =
-            (rotationMode == RotationMode::TidalLocked) ? 0.0 : (phase - M_PI);
-        // Субзвёздная долгота задает меридиан с нулевым часовым углом.
         const double substellarLongitudeRadians =
-            (rotationMode == RotationMode::TidalLocked) ? 0.0 : -hourAngle;
+            resolveSubstellarLongitudeRadians(surfaceSimState_.hourIndex,
+                                              stepsPerDay,
+                                              rotationMode,
+                                              orbitalPhaseRadians);
         const double declinationRadians = qDegreesToRadians(declinationDegrees);
         const double sinDeclination = std::sin(declinationRadians);
         const double cosDeclination = std::cos(declinationRadians);
@@ -4030,7 +4046,10 @@ private:
         // Также обновляем виджеты, чтобы в них попали обновлённые поверхностные
         // температура и давление после шага переноса.
         applySurfaceGridToViews();
-        updateSurfaceStarRendering(declinationDegrees, stepsPerDay, rotationMode);
+        updateSurfaceStarRendering(declinationDegrees,
+                                   stepsPerDay,
+                                   rotationMode,
+                                   orbitalPhaseRadians);
         if (minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
