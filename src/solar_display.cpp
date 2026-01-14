@@ -76,6 +76,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <memory>
 
 namespace {
 Q_LOGGING_CATEGORY(solarRadiationLog, "solar.radiation")
@@ -202,6 +203,86 @@ double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
         return kEarthWaterGigatons;
     }
     return 0.0;
+}
+
+double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
+                                    double pressureAtm,
+                                    double gravity,
+                                    double initialAirTemperature,
+                                    double blendedInsolation,
+                                    double cloudShortwaveTransmission,
+                                    const RadiationModel &radiationModel,
+                                    double timeStepSeconds) {
+    if (pressureAtm <= 0.0 || gravity <= 0.0) {
+        return surfaceState.temperatureKelvin();
+    }
+    const double columnMassKgPerM2 =
+        (pressureAtm * kStandardPressurePa) / gravity;
+    const double airHeatCapacity = columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
+    if (airHeatCapacity <= 0.0) {
+        return surfaceState.temperatureKelvin();
+    }
+
+    AtmosphericCellState airState(qMax(0.0, initialAirTemperature), airHeatCapacity);
+    const double couplingScale = qBound(0.0, pressureAtm, 1.0);
+    const double heatTransfer = kDefaultHeatTransferWPerM2K * couplingScale;
+    if (timeStepSeconds <= 0.0) {
+        return airState.airTemperatureKelvin();
+    }
+
+    // Радиационный нагрев воздуха:
+    // Q_sw_air = S_blend * T_cloud * (1 - T_atm), где T_atm = incomingTransmission().
+    // Q_lw_air = F_surf * (1 - T_lw), где T_lw = outgoingTransmission().
+    const double emittedFlux = surfaceState.emittedFlux();
+    const double shortwaveAbsorbedByAir =
+        blendedInsolation * cloudShortwaveTransmission *
+        (1.0 - radiationModel.incomingTransmission());
+    const double longwaveAbsorbedByAir =
+        emittedFlux * (1.0 - radiationModel.outgoingTransmission());
+    const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveAbsorbedByAir;
+    const double airRadiativeDelta =
+        airRadiativeHeatingFlux * timeStepSeconds / airHeatCapacity;
+    airState.setAirTemperatureKelvin(airState.airTemperatureKelvin() + airRadiativeDelta);
+
+    if (heatTransfer <= 0.0) {
+        return airState.airTemperatureKelvin();
+    }
+
+    // Оцениваем изменение температуры воздуха без изменения поверхности,
+    // чтобы не модифицировать вычисленное состояние карты.
+    const double surfaceTemperature = surfaceState.temperatureKelvin();
+    const double airTemperature = airState.airTemperatureKelvin();
+    const double fluxWPerM2 = heatTransfer * (surfaceTemperature - airTemperature);
+    const double maxStableDt = 0.5 * airHeatCapacity / heatTransfer;
+    const double stableDt = qMin(timeStepSeconds, maxStableDt);
+    const double airDelta = fluxWPerM2 * stableDt / airHeatCapacity;
+    airState.setAirTemperatureKelvin(airTemperature + airDelta);
+    return airState.airTemperatureKelvin();
+}
+
+double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
+                                   double pressureAtm,
+                                   double gravity,
+                                   double initialAirTemperature,
+                                   double blendedInsolation,
+                                   double cloudShortwaveTransmission,
+                                   RadiationModelType radiationModelType,
+                                   const RadiationModel &radiationModel,
+                                   double timeStepSeconds) {
+    if (radiationModelType == RadiationModelType::Layered) {
+        const auto *layeredModel = dynamic_cast<const LayeredRadiationModel *>(&radiationModel);
+        if (layeredModel) {
+            return layeredModel->bottomLayerTemperatureKelvin();
+        }
+    }
+    return estimateAirTemperatureKelvin(surfaceState,
+                                        pressureAtm,
+                                        gravity,
+                                        initialAirTemperature,
+                                        blendedInsolation,
+                                        cloudShortwaveTransmission,
+                                        radiationModel,
+                                        timeStepSeconds);
 }
 
 double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
@@ -986,6 +1067,13 @@ public:
         setPlanetPresets(solarSystemPresets(), QStringLiteral("Венера"));
     }
 
+    ~SolarCalculatorWidget() override {
+        cancelSurfaceGridTemperatureUpdate();
+        if (surfaceGridWatcher_) {
+            surfaceGridWatcher_->waitForFinished();
+        }
+    }
+
 private:
     void onCalculateRequested() {
         BinarySystemParameters parameters{};
@@ -1192,7 +1280,8 @@ private:
     std::atomic_bool temperaturePauseFlag_{false};
     int temperatureRequestId_ = 0;
     int precision_ = kDefaultPrecision;
-    std::atomic<int> surfaceGridRequestId_{0};
+    std::shared_ptr<std::atomic<int>> surfaceGridRequestId_ =
+        std::make_shared<std::atomic<int>>(0);
     bool surfaceGridCalculationRunning_ = false;
     QSet<QString> presetPlanetNames_;
     double lastSolarConstant_ = 0.0;
@@ -2860,86 +2949,6 @@ private:
         updateSurfacePointStatusDialog();
     }
 
-    double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
-                                       double pressureAtm,
-                                       double gravity,
-                                       double initialAirTemperature,
-                                       double blendedInsolation,
-                                       double cloudShortwaveTransmission,
-                                       RadiationModelType radiationModelType,
-                                       const RadiationModel &radiationModel,
-                                       double timeStepSeconds) const {
-        if (radiationModelType == RadiationModelType::Layered) {
-            const auto *layeredModel = dynamic_cast<const LayeredRadiationModel *>(&radiationModel);
-            if (layeredModel) {
-                return layeredModel->bottomLayerTemperatureKelvin();
-            }
-        }
-        return estimateAirTemperatureKelvin(surfaceState,
-                                            pressureAtm,
-                                            gravity,
-                                            initialAirTemperature,
-                                            blendedInsolation,
-                                            cloudShortwaveTransmission,
-                                            radiationModel,
-                                            timeStepSeconds);
-    }
-
-    double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
-                                        double pressureAtm,
-                                        double gravity,
-                                        double initialAirTemperature,
-                                        double blendedInsolation,
-                                        double cloudShortwaveTransmission,
-                                        const RadiationModel &radiationModel,
-                                        double timeStepSeconds) const {
-        if (pressureAtm <= 0.0 || gravity <= 0.0) {
-            return surfaceState.temperatureKelvin();
-        }
-        const double columnMassKgPerM2 =
-            (pressureAtm * kStandardPressurePa) / gravity;
-        const double airHeatCapacity = columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
-        if (airHeatCapacity <= 0.0) {
-            return surfaceState.temperatureKelvin();
-        }
-
-        AtmosphericCellState airState(qMax(0.0, initialAirTemperature), airHeatCapacity);
-        const double couplingScale = qBound(0.0, pressureAtm, 1.0);
-        const double heatTransfer = kDefaultHeatTransferWPerM2K * couplingScale;
-        if (timeStepSeconds <= 0.0) {
-            return airState.airTemperatureKelvin();
-        }
-
-        // Радиационный нагрев воздуха:
-        // Q_sw_air = S_blend * T_cloud * (1 - T_atm), где T_atm = incomingTransmission().
-        // Q_lw_air = F_surf * (1 - T_lw), где T_lw = outgoingTransmission().
-        const double emittedFlux = surfaceState.emittedFlux();
-        const double shortwaveAbsorbedByAir =
-            blendedInsolation * cloudShortwaveTransmission *
-            (1.0 - radiationModel.incomingTransmission());
-        const double longwaveAbsorbedByAir =
-            emittedFlux * (1.0 - radiationModel.outgoingTransmission());
-        const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveAbsorbedByAir;
-        const double airRadiativeDelta =
-            airRadiativeHeatingFlux * timeStepSeconds / airHeatCapacity;
-        airState.setAirTemperatureKelvin(airState.airTemperatureKelvin() + airRadiativeDelta);
-
-        if (heatTransfer <= 0.0) {
-            return airState.airTemperatureKelvin();
-        }
-
-        // Оцениваем изменение температуры воздуха без изменения поверхности,
-        // чтобы не модифицировать вычисленное состояние карты.
-        const double surfaceTemperature = surfaceState.temperatureKelvin();
-        const double airTemperature = airState.airTemperatureKelvin();
-        const double fluxWPerM2 = heatTransfer * (surfaceTemperature - airTemperature);
-        const double maxStableDt = 0.5 * airHeatCapacity / heatTransfer;
-        const double stableDt = qMin(timeStepSeconds, maxStableDt);
-        const double airDelta = fluxWPerM2 * stableDt / airHeatCapacity;
-        airState.setAirTemperatureKelvin(airTemperature + airDelta);
-        return airState.airTemperatureKelvin();
-    }
-
     void applySurfaceTemperatureRangeToViews(double minTemperature, double maxTemperature) {
         if (surfaceMapWidget_) {
             surfaceMapWidget_->setTemperatureRange(minTemperature, maxTemperature);
@@ -3162,11 +3171,11 @@ private:
         }
     }
 
-    SurfaceGridComputationResult computeSurfaceGridTemperatures(
+    static SurfaceGridComputationResult computeSurfaceGridTemperatures(
         const SurfaceGridComputationInput &input,
         const std::shared_ptr<std::atomic_bool> &cancelFlag,
-        const std::atomic<int> *requestIdCounter,
-        int requestId) const {
+        const std::shared_ptr<std::atomic<int>> &requestIdCounter,
+        int requestId) {
         SurfaceGridComputationResult result;
         result.grid = input.grid;
         result.declinationDegrees = input.declinationDegrees;
@@ -3452,7 +3461,7 @@ private:
         if (!surfaceGridWatcher_) {
             return;
         }
-        if (requestId != surfaceGridRequestId_.load()) {
+        if (!surfaceGridRequestId_ || requestId != surfaceGridRequestId_->load()) {
             return;
         }
 
@@ -3590,7 +3599,12 @@ private:
         input.logPointIndex = selectedSurfacePointIndex_;
 
         surfaceGridCancelFlag_ = std::make_shared<std::atomic_bool>(false);
-        const int requestId = surfaceGridRequestId_.fetch_add(1) + 1;
+        if (!surfaceGridRequestId_) {
+            surfaceGridRequestId_ = std::make_shared<std::atomic<int>>(0);
+        }
+        // Храним счётчик запросов в shared_ptr, чтобы фоновые задачи не
+        // держали указатель на уже уничтоженный виджет.
+        const int requestId = surfaceGridRequestId_->fetch_add(1) + 1;
 
         if (!surfaceGridWatcher_) {
             surfaceGridWatcher_ = new QFutureWatcher<SurfaceGridComputationResult>(this);
@@ -3603,11 +3617,14 @@ private:
 
         // Запуск в фоне позволяет отменять устаревшие расчёты при быстрой смене параметров.
         QFuture<SurfaceGridComputationResult> future = QtConcurrent::run(
-            [this, input, cancelFlag = surfaceGridCancelFlag_, requestId]() {
-                return computeSurfaceGridTemperatures(input,
-                                                      cancelFlag,
-                                                      &surfaceGridRequestId_,
-                                                      requestId);
+            [input,
+             cancelFlag = surfaceGridCancelFlag_,
+             requestIdCounter = surfaceGridRequestId_,
+             requestId]() {
+                return SolarCalculatorWidget::computeSurfaceGridTemperatures(input,
+                                                                             cancelFlag,
+                                                                             requestIdCounter,
+                                                                             requestId);
             });
         surfaceGridWatcher_->setFuture(future);
     }
