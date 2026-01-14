@@ -762,7 +762,9 @@ public:
                         surfacePointStatusDialog_ = new SurfacePointStatusDialog(this);
                     }
                     selectedSurfacePointIndex_ = pointIndex;
-                    surfacePointStatusDialog_->setPoint(*point);
+                    const double tileAreaKm2 = surfaceGrid_.tileAreaKm2(pointIndex);
+                    const double tileEdgeLengthKm = surfaceGrid_.tileEdgeLengthKm(pointIndex);
+                    surfacePointStatusDialog_->setPoint(*point, tileAreaKm2, tileEdgeLengthKm);
                     surfacePointStatusDialog_->show();
                     surfacePointStatusDialog_->raise();
                     surfacePointStatusDialog_->activateWindow();
@@ -1789,7 +1791,9 @@ private:
             surfacePointStatusDialog_->clearPoint();
             return;
         }
-        surfacePointStatusDialog_->setPoint(*point);
+        const double tileAreaKm2 = surfaceGrid_.tileAreaKm2(selectedSurfacePointIndex_);
+        const double tileEdgeLengthKm = surfaceGrid_.tileEdgeLengthKm(selectedSurfacePointIndex_);
+        surfacePointStatusDialog_->setPoint(*point, tileAreaKm2, tileEdgeLengthKm);
     }
 
     void setInputValue(QLineEdit *input, double value) {

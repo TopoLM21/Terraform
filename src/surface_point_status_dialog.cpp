@@ -24,6 +24,8 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     windValueLabel_ = new QLabel(QStringLiteral("—"), this);
     insolationValueLabel_ = new QLabel(QStringLiteral("—"), this);
     materialValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    tileAreaValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    tileEdgeLengthValueLabel_ = new QLabel(QStringLiteral("—"), this);
 
     layout->addRow(QStringLiteral("Широта (°):"), latitudeValueLabel_);
     layout->addRow(QStringLiteral("Долгота (°):"), longitudeValueLabel_);
@@ -34,9 +36,13 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Скорость ветра (м/с):"), windValueLabel_);
     layout->addRow(QStringLiteral("Солнечная инсоляция (Вт/м²):"), insolationValueLabel_);
     layout->addRow(QStringLiteral("Материал:"), materialValueLabel_);
+    layout->addRow(QStringLiteral("Площадь тайла (км²):"), tileAreaValueLabel_);
+    layout->addRow(QStringLiteral("Средняя длина ребра (км):"), tileEdgeLengthValueLabel_);
 }
 
-void SurfacePointStatusDialog::setPoint(const SurfacePoint &point) {
+void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
+                                        double tileAreaKm2,
+                                        double tileEdgeLengthKm) {
     latitudeValueLabel_->setText(formatNumber(point.latitudeDeg));
     longitudeValueLabel_->setText(formatNumber(point.longitudeDeg));
     temperatureValueLabel_->setText(formatNumber(point.temperatureK));
@@ -46,6 +52,8 @@ void SurfacePointStatusDialog::setPoint(const SurfacePoint &point) {
     windValueLabel_->setText(formatNumber(point.windSpeedMps));
     insolationValueLabel_->setText(formatNumber(point.solarFluxWPerM2));
     materialValueLabel_->setText(point.materialId.isEmpty() ? QStringLiteral("—") : point.materialId);
+    tileAreaValueLabel_->setText(formatNumber(tileAreaKm2));
+    tileEdgeLengthValueLabel_->setText(formatNumber(tileEdgeLengthKm));
 }
 
 void SurfacePointStatusDialog::clearPoint() {
@@ -58,4 +66,6 @@ void SurfacePointStatusDialog::clearPoint() {
     windValueLabel_->setText(QStringLiteral("—"));
     insolationValueLabel_->setText(QStringLiteral("—"));
     materialValueLabel_->setText(QStringLiteral("—"));
+    tileAreaValueLabel_->setText(QStringLiteral("—"));
+    tileEdgeLengthValueLabel_->setText(QStringLiteral("—"));
 }

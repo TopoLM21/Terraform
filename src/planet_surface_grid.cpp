@@ -55,6 +55,60 @@ QVector3D latLonToCartesian(double latitudeDeg, double longitudeDeg) {
                      static_cast<float>(cosLat * qCos(lonRad)));
 }
 
+double centralAngleRadians(const QVector3D &a, const QVector3D &b) {
+    const QVector3D cross = QVector3D::crossProduct(a, b);
+    const double crossLength = static_cast<double>(cross.length());
+    const double dot = static_cast<double>(QVector3D::dotProduct(a, b));
+    return qAtan2(crossLength, dot);
+}
+
+double sphericalTriangleAreaSteradians(const QVector3D &a,
+                                       const QVector3D &b,
+                                       const QVector3D &c) {
+    // Формула сферического избытка для треугольника на единичной сфере:
+    // E = 2 * atan2(|a · (b × c)|, 1 + a·b + b·c + c·a).
+    const QVector3D cross = QVector3D::crossProduct(b, c);
+    const double numerator =
+        qAbs(static_cast<double>(QVector3D::dotProduct(a, cross)));
+    const double denominator = 1.0 + static_cast<double>(QVector3D::dotProduct(a, b)) +
+        static_cast<double>(QVector3D::dotProduct(b, c)) +
+        static_cast<double>(QVector3D::dotProduct(c, a));
+    return 2.0 * qAtan2(numerator, denominator);
+}
+
+double polygonAreaSteradians(const QVector<SurfaceVertex> &polygon) {
+    if (polygon.size() < 3) {
+        return 0.0;
+    }
+    const QVector3D origin = latLonToCartesian(polygon[0].latitudeDeg,
+                                               polygon[0].longitudeDeg);
+    double area = 0.0;
+    for (int i = 1; i + 1 < polygon.size(); ++i) {
+        const QVector3D a = latLonToCartesian(polygon[i].latitudeDeg,
+                                              polygon[i].longitudeDeg);
+        const QVector3D b = latLonToCartesian(polygon[i + 1].latitudeDeg,
+                                              polygon[i + 1].longitudeDeg);
+        area += sphericalTriangleAreaSteradians(origin, a, b);
+    }
+    return area;
+}
+
+double polygonPerimeterRadians(const QVector<SurfaceVertex> &polygon) {
+    if (polygon.size() < 2) {
+        return 0.0;
+    }
+    double perimeter = 0.0;
+    for (int i = 0; i < polygon.size(); ++i) {
+        const int nextIndex = (i + 1) % polygon.size();
+        const QVector3D a = latLonToCartesian(polygon[i].latitudeDeg,
+                                              polygon[i].longitudeDeg);
+        const QVector3D b = latLonToCartesian(polygon[nextIndex].latitudeDeg,
+                                              polygon[nextIndex].longitudeDeg);
+        perimeter += centralAngleRadians(a, b);
+    }
+    return perimeter;
+}
+
 SurfaceVertex cartesianToLatLon(const QVector3D &v) {
     const QVector3D n = normalized(v);
     const double lat = qAsin(qBound(-1.0, static_cast<double>(n.y()), 1.0));
@@ -162,6 +216,37 @@ int PlanetSurfaceGrid::pointCount() const {
 
 double PlanetSurfaceGrid::pointAreaKm2() const {
     return pointAreaKm2_;
+}
+
+double PlanetSurfaceGrid::tileAreaKm2(int pointIndex) const {
+    for (const auto &cell : cells_) {
+        if (cell.pointIndex != pointIndex) {
+            continue;
+        }
+        const double areaSteradians = polygonAreaSteradians(cell.polygon);
+        return areaSteradians * radiusKm_ * radiusKm_;
+    }
+    return pointAreaKm2_;
+}
+
+double PlanetSurfaceGrid::tileEdgeLengthKm(int pointIndex) const {
+    for (const auto &cell : cells_) {
+        if (cell.pointIndex != pointIndex) {
+            continue;
+        }
+        const double perimeterRadians = polygonPerimeterRadians(cell.polygon);
+        if (cell.polygon.isEmpty()) {
+            return 0.0;
+        }
+        return perimeterRadians * radiusKm_ / cell.polygon.size();
+    }
+    if (pointAreaKm2_ <= 0.0) {
+        return 0.0;
+    }
+    // Для равномерных точек без явного полигона используем эквивалентный
+    // правильный шестиугольник, чтобы оценить длину ребра по площади.
+    const double hexFactor = 3.0 * qSqrt(3.0) / 2.0;
+    return qSqrt(pointAreaKm2_ / hexFactor);
 }
 
 const QVector<SurfacePoint> &PlanetSurfaceGrid::points() const {

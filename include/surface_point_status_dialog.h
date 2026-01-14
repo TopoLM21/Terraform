@@ -12,7 +12,7 @@ class SurfacePointStatusDialog : public QDialog {
 public:
     explicit SurfacePointStatusDialog(QWidget *parent = nullptr);
 
-    void setPoint(const SurfacePoint &point);
+    void setPoint(const SurfacePoint &point, double tileAreaKm2, double tileEdgeLengthKm);
     void clearPoint();
 
 private:
@@ -25,4 +25,6 @@ private:
     QLabel *windValueLabel_ = nullptr;
     QLabel *insolationValueLabel_ = nullptr;
     QLabel *materialValueLabel_ = nullptr;
+    QLabel *tileAreaValueLabel_ = nullptr;
+    QLabel *tileEdgeLengthValueLabel_ = nullptr;
 };
