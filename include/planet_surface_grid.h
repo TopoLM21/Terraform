@@ -16,6 +16,8 @@ public:
 
     int pointCount() const;
     double pointAreaKm2() const;
+    double tileAreaKm2(int pointIndex) const;
+    double tileEdgeLengthKm(int pointIndex) const;
 
     const QVector<SurfacePoint> &points() const;
     QVector<SurfacePoint> &points();
