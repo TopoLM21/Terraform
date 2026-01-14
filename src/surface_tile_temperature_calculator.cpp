@@ -55,14 +55,22 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
 
     const bool isTidallyLocked = settings.rotationMode == RotationMode::TidalLocked;
     const double orbitalPhaseRadians = settings.orbitalPhaseRadians;
-    const auto resolveSubstellarLongitude = [isTidallyLocked, stepsPerDay, orbitalPhaseRadians](
-                                                int hourIndex) {
+    const auto resolveSubstellarLongitude =
+        [isTidallyLocked, stepsPerDay, orbitalPhaseRadians, settings](int hourIndex) {
         if (isTidallyLocked) {
             return 0.0;
         }
+        const int safeSpinOrbitP = qMax(1, settings.spinOrbitP);
+        const int safeSpinOrbitQ = qMax(1, settings.spinOrbitQ);
+        const double resonanceRatio = static_cast<double>(safeSpinOrbitP) /
+            static_cast<double>(safeSpinOrbitQ);
         const double phase = 2.0 * kPi * (static_cast<double>(hourIndex) + 0.5) /
                              static_cast<double>(stepsPerDay);
-        const double hourAngle = phase - kPi;
+        // Фаза вращения λ_spin (рад) учитывает резонанс p:q и задаётся формулой
+        // λ_spin = 2π * (t / P_spin) * (p / q). Здесь t и P_spin заданы шагами суток,
+        // а p/q — безразмерное отношение частот.
+        const double spinPhase = phase * resonanceRatio;
+        const double hourAngle = spinPhase - kPi;
         // Субзвёздная долгота — меридиан с нулевым часовым углом.
         return orbitalPhaseRadians - hourAngle;
     };

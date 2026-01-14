@@ -134,6 +134,8 @@ constexpr int kRoleSecondaryStarTemperature = Qt::UserRole + 28;
 constexpr int kRoleHasSecondaryStar = Qt::UserRole + 29;
 constexpr int kRoleStarPresetId = Qt::UserRole + 30;
 constexpr int kRoleRotationModeOverride = Qt::UserRole + 31;
+constexpr int kRoleSpinOrbitP = Qt::UserRole + 32;
+constexpr int kRoleSpinOrbitQ = Qt::UserRole + 33;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -180,16 +182,26 @@ RotationMode resolveRotationModeFromPeriods(double dayLengthDays,
 double resolveSubstellarLongitudeRadians(int hourIndex,
                                          int stepsPerDay,
                                          RotationMode rotationMode,
-                                         double orbitalPhaseRadians) {
+                                         double orbitalPhaseRadians,
+                                         int spinOrbitP,
+                                         int spinOrbitQ) {
     if (rotationMode == RotationMode::TidalLocked) {
         return 0.0;
     }
     if (stepsPerDay <= 0) {
         return 0.0;
     }
+    const int safeSpinOrbitP = qMax(1, spinOrbitP);
+    const int safeSpinOrbitQ = qMax(1, spinOrbitQ);
+    const double resonanceRatio = static_cast<double>(safeSpinOrbitP) /
+        static_cast<double>(safeSpinOrbitQ);
     const double phase =
         2.0 * M_PI * (static_cast<double>(hourIndex) + 0.5) / static_cast<double>(stepsPerDay);
-    const double hourAngle = phase - M_PI;
+    // Фаза вращения планеты (λ_spin) выражается через резонанс p:q:
+    // λ_spin = 2π * (t / P_spin) * (p / q), где t и P_spin — время и период вращения
+    // в одинаковых единицах (здесь шаги суток), а p/q — безразмерное отношение частот.
+    const double spinPhase = phase * resonanceRatio;
+    const double hourAngle = spinPhase - M_PI;
     // Субзвёздная долгота λ* задаётся разностью орбитальной и спиновой фаз:
     // λ* = λ_orbit - λ_spin, где λ_orbit — истинная долгота звезды (фаза орбиты),
     // а λ_spin = hourAngle — часовой угол на нулевом меридиане. Знак выбран так,
@@ -208,13 +220,17 @@ QVector3D resolveStarDirection(double declinationDegrees,
                                int hourIndex,
                                int stepsPerDay,
                                RotationMode rotationMode,
-                               double orbitalPhaseRadians) {
+                               double orbitalPhaseRadians,
+                               int spinOrbitP,
+                               int spinOrbitQ) {
     const double declinationRadians = qDegreesToRadians(declinationDegrees);
     const double substellarLongitude =
         resolveSubstellarLongitudeRadians(hourIndex,
                                           stepsPerDay,
                                           rotationMode,
-                                          orbitalPhaseRadians);
+                                          orbitalPhaseRadians,
+                                          spinOrbitP,
+                                          spinOrbitQ);
     // Направление на звезду совпадает с нормалью подсолнечной точки.
     return directionFromLatLonRadians(declinationRadians, substellarLongitude);
 }
@@ -437,6 +453,8 @@ struct SurfaceGridComputationInput {
     RotationMode rotationMode = RotationMode::Normal;
     double declinationDegrees = 0.0;
     double orbitalPhaseRadians = 0.0;
+    int spinOrbitP = 1;
+    int spinOrbitQ = 1;
     double segmentSolarConstant = 0.0;
     bool hasSolarConstant = false;
     int currentHourIndex = 0;
@@ -464,6 +482,8 @@ struct SurfaceGridComputationResult {
     double orbitalPhaseRadians = 0.0;
     int stepsPerDay = 1;
     RotationMode rotationMode = RotationMode::Normal;
+    int spinOrbitP = 1;
+    int spinOrbitQ = 1;
 };
 
 class SolarCalculatorWidget : public QWidget {
@@ -597,6 +617,17 @@ public:
         rotationModeComboBox_->addItem(
             QStringLiteral("Приливная синхронизация (угол от подсолнечной точки)"),
             static_cast<int>(RotationMode::TidalLocked));
+        spinOrbitPSpinBox_ = new QSpinBox(this);
+        spinOrbitPSpinBox_->setRange(1, 20);
+        spinOrbitPSpinBox_->setValue(1);
+        spinOrbitQSpinBox_ = new QSpinBox(this);
+        spinOrbitQSpinBox_->setRange(1, 20);
+        spinOrbitQSpinBox_->setValue(1);
+        const QString spinOrbitTooltip =
+            QStringLiteral("Резонанс p:q — отношение спиновой и орбитальной частот.\n"
+                           "Безразмерные коэффициенты, 1:1 соответствует синхронному вращению.");
+        spinOrbitPSpinBox_->setToolTip(spinOrbitTooltip);
+        spinOrbitQSpinBox_->setToolTip(spinOrbitTooltip);
         heightSeedSpinBox_ = new QSpinBox(this);
         heightSeedSpinBox_->setRange(0, std::numeric_limits<int>::max());
         flatHeightButton_ = new QPushButton(QStringLiteral("Обнулить высоту"), this);
@@ -655,6 +686,13 @@ public:
         rotationModeLayout->addWidget(rotationModeComboBox_);
         auto *rotationModeWidget = new QWidget(this);
         rotationModeWidget->setLayout(rotationModeLayout);
+        auto *spinOrbitWidget = new QWidget(this);
+        auto *spinOrbitLayout = new QHBoxLayout(spinOrbitWidget);
+        spinOrbitLayout->addWidget(spinOrbitPSpinBox_);
+        spinOrbitLayout->addWidget(new QLabel(QStringLiteral(":"), spinOrbitWidget));
+        spinOrbitLayout->addWidget(spinOrbitQSpinBox_);
+        spinOrbitLayout->addStretch();
+        spinOrbitLayout->setContentsMargins(0, 0, 0, 0);
         auto *latitudeStepWidget = new QWidget(this);
         auto *latitudeStepLayout = new QHBoxLayout();
         latitudeStepLayout->addWidget(latitudeStepLabel);
@@ -669,6 +707,7 @@ public:
         auto *planetControlsLayout = new QFormLayout();
         planetControlsLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
         planetControlsLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
+        planetControlsLayout->addRow(QStringLiteral("Резонанс вращения p:q:"), spinOrbitWidget);
         planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
         planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), flatHeightButton_);
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
@@ -961,6 +1000,7 @@ public:
                 surfaceGridDirty_ = true;
             }
             syncRotationModeWithPlanet();
+            syncSpinOrbitWithPlanet();
             syncHeightSeedWithPlanet();
             syncFlatHeightWithPlanet();
             syncCloudAlbedoWithPlanet();
@@ -1016,6 +1056,26 @@ public:
             syncPlanetRotationModeWithSelection();
             updateRotationModeIllustration();
             updateTemperaturePlot();
+        });
+
+        connect(spinOrbitPSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this](int) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetSpinOrbitWithSelection();
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
+        });
+
+        connect(spinOrbitQSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this](int) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetSpinOrbitWithSelection();
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
         });
 
         connect(heightSeedSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) {
@@ -1306,6 +1366,8 @@ private:
     QLabel *planetPerihelionArgumentLabel_ = nullptr;
     QComboBox *materialComboBox_ = nullptr;
     QComboBox *rotationModeComboBox_ = nullptr;
+    QSpinBox *spinOrbitPSpinBox_ = nullptr;
+    QSpinBox *spinOrbitQSpinBox_ = nullptr;
     QSpinBox *heightSeedSpinBox_ = nullptr;
     QPushButton *flatHeightButton_ = nullptr;
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
@@ -2070,6 +2132,8 @@ private:
         planetComboBox_->setItemData(index, planet.rotationModeOverride, kRoleRotationModeOverride);
         planetComboBox_->setItemData(index, isCustom, kRoleIsCustom);
         planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
+        planetComboBox_->setItemData(index, planet.spinOrbitP, kRoleSpinOrbitP);
+        planetComboBox_->setItemData(index, planet.spinOrbitQ, kRoleSpinOrbitQ);
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
         planetComboBox_->setItemData(index, QVariant::fromValue(planet.atmosphere), kRoleAtmosphere);
         planetComboBox_->setItemData(index, planet.greenhouseOpacity, kRoleGreenhouseOpacity);
@@ -2228,8 +2292,27 @@ private:
                                    static_cast<int>(RotationMode::Normal));
         rotationModeInput->addItem(QStringLiteral("Приливная синхронизация (угол от подсолнечной точки)"),
                                    static_cast<int>(RotationMode::TidalLocked));
+        auto *spinOrbitPInput = new QSpinBox(&dialog);
+        spinOrbitPInput->setRange(1, 20);
+        spinOrbitPInput->setValue(1);
+        auto *spinOrbitQInput = new QSpinBox(&dialog);
+        spinOrbitQInput->setRange(1, 20);
+        spinOrbitQInput->setValue(1);
+        const QString spinOrbitTooltip =
+            QStringLiteral("Резонанс p:q — отношение спиновой и орбитальной частот.\n"
+                           "Безразмерные коэффициенты, 1:1 соответствует синхронному вращению.");
+        spinOrbitPInput->setToolTip(spinOrbitTooltip);
+        spinOrbitQInput->setToolTip(spinOrbitTooltip);
+        auto *spinOrbitWidget = new QWidget(&dialog);
+        auto *spinOrbitLayout = new QHBoxLayout(spinOrbitWidget);
+        spinOrbitLayout->addWidget(spinOrbitPInput);
+        spinOrbitLayout->addWidget(new QLabel(QStringLiteral(":"), spinOrbitWidget));
+        spinOrbitLayout->addWidget(spinOrbitQInput);
+        spinOrbitLayout->addStretch();
+        spinOrbitLayout->setContentsMargins(0, 0, 0, 0);
         auto *atmosphereInput = new AtmosphereWidget(&dialog, true);
         formLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeInput);
+        formLayout->addRow(QStringLiteral("Резонанс вращения p:q:"), spinOrbitWidget);
 
         auto *formWidget = new QWidget(&dialog);
         formWidget->setLayout(formLayout);
@@ -2266,7 +2349,7 @@ private:
                  eccentricityInput, obliquityInput, perihelionArgumentInput,
                  greenhouseOpacityInput, manualGreenhouseOnTopInput, cloudAlbedoInput,
                  heightSeedInput, materialInput,
-                 rotationModeInput, atmosphereInput, this]() {
+                 rotationModeInput, spinOrbitPInput, spinOrbitQInput, atmosphereInput, this]() {
             const QString name = nameInput->text().trimmed();
             if (name.isEmpty()) {
                 showInputError(QStringLiteral("Введите имя планеты."));
@@ -2346,6 +2429,8 @@ private:
             const RotationMode rotationMode =
                 static_cast<RotationMode>(rotationModeInput->currentData().toInt());
             const bool tidallyLocked = (rotationMode == RotationMode::TidalLocked);
+            const int spinOrbitP = spinOrbitPInput->value();
+            const int spinOrbitQ = spinOrbitQInput->value();
             const quint32 heightSeed = static_cast<quint32>(heightSeedInput->value());
             const AtmosphereComposition composition = atmosphereInput->composition(false);
             StellarParameters primaryStar{1.0, 5772.0, 1.0};
@@ -2367,7 +2452,7 @@ private:
                                 perihelionArgument, massEarths, radiusKm, materialId,
                                 composition, QStringLiteral("custom"), primaryStar, secondaryStar,
                                 greenhouseOpacity, manualGreenhouseOnTop, cloudAlbedo,
-                                geothermalFlux, tidallyLocked};
+                                geothermalFlux, spinOrbitP, spinOrbitQ, tidallyLocked};
             preset.rotationModeOverride = true;
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
@@ -2392,6 +2477,8 @@ private:
                 planetComboBox_->setItemData(existingIndex, true, kRoleRotationModeOverride);
                 planetComboBox_->setItemData(existingIndex, true, kRoleIsCustom);
                 planetComboBox_->setItemData(existingIndex, name, kRolePlanetName);
+                planetComboBox_->setItemData(existingIndex, spinOrbitP, kRoleSpinOrbitP);
+                planetComboBox_->setItemData(existingIndex, spinOrbitQ, kRoleSpinOrbitQ);
                 planetComboBox_->setItemData(existingIndex, materialId, kRoleMaterialId);
                 planetComboBox_->setItemData(existingIndex, atmosphereValue, kRoleAtmosphere);
                 planetComboBox_->setItemData(existingIndex, preset.greenhouseOpacity,
@@ -2516,6 +2603,20 @@ private:
         updateRotationModeIllustration();
     }
 
+    void syncSpinOrbitWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !spinOrbitPSpinBox_ || !spinOrbitQSpinBox_) {
+            return;
+        }
+
+        const int spinOrbitP = planetComboBox_->itemData(index, kRoleSpinOrbitP).toInt();
+        const int spinOrbitQ = planetComboBox_->itemData(index, kRoleSpinOrbitQ).toInt();
+        const QSignalBlocker blockerP(spinOrbitPSpinBox_);
+        const QSignalBlocker blockerQ(spinOrbitQSpinBox_);
+        spinOrbitPSpinBox_->setValue(qMax(1, spinOrbitP));
+        spinOrbitQSpinBox_->setValue(qMax(1, spinOrbitQ));
+    }
+
     void syncHeightSeedWithPlanet() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0 || !heightSeedSpinBox_) {
@@ -2634,6 +2735,15 @@ private:
         }
         planetComboBox_->setItemData(index, rotationModeComboBox_->currentData(), kRoleRotationMode);
         planetComboBox_->setItemData(index, true, kRoleRotationModeOverride);
+    }
+
+    void syncPlanetSpinOrbitWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !spinOrbitPSpinBox_ || !spinOrbitQSpinBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(index, spinOrbitPSpinBox_->value(), kRoleSpinOrbitP);
+        planetComboBox_->setItemData(index, spinOrbitQSpinBox_->value(), kRoleSpinOrbitQ);
     }
 
     void syncPlanetHeightSeedWithSelection() {
@@ -3126,7 +3236,9 @@ private:
     void updateSurfaceStarRendering(double declinationDegrees,
                                     int stepsPerDay,
                                     RotationMode rotationMode,
-                                    double orbitalPhaseRadians) {
+                                    double orbitalPhaseRadians,
+                                    int spinOrbitP,
+                                    int spinOrbitQ) {
         if (!surfaceGlobeWidget_) {
             return;
         }
@@ -3136,7 +3248,9 @@ private:
                                  surfaceSimState_.hourIndex,
                                  stepsPerDay,
                                  rotationMode,
-                                 orbitalPhaseRadians);
+                                 orbitalPhaseRadians,
+                                 spinOrbitP,
+                                 spinOrbitQ);
         surfaceGlobeWidget_->setStarDirection(starDirection);
 
         StellarParameters primary{};
@@ -3297,6 +3411,8 @@ private:
         result.orbitalPhaseRadians = input.orbitalPhaseRadians;
         result.stepsPerDay = input.stepsPerDay;
         result.rotationMode = input.rotationMode;
+        result.spinOrbitP = input.spinOrbitP;
+        result.spinOrbitQ = input.spinOrbitQ;
 
         const auto shouldCancel = [&cancelFlag, requestIdCounter, requestId]() {
             if (cancelFlag && cancelFlag->load()) {
@@ -3360,6 +3476,8 @@ private:
         tileSettings.rotationMode = input.rotationMode;
         tileSettings.declinationDegrees = input.declinationDegrees;
         tileSettings.orbitalPhaseRadians = input.orbitalPhaseRadians;
+        tileSettings.spinOrbitP = input.spinOrbitP;
+        tileSettings.spinOrbitQ = input.spinOrbitQ;
         tileSettings.atmospherePressureAtm = atmospherePressureAtm;
         tileSettings.cloudAlbedo = input.cloudAlbedo;
         tileSettings.currentHourIndex = input.currentHourIndex;
@@ -3595,7 +3713,9 @@ private:
         updateSurfaceStarRendering(result.declinationDegrees,
                                    result.stepsPerDay,
                                    result.rotationMode,
-                                   result.orbitalPhaseRadians);
+                                   result.orbitalPhaseRadians,
+                                   result.spinOrbitP,
+                                   result.spinOrbitQ);
         if (result.hasTemperatureRange && result.minTemperatureK <= result.maxTemperatureK) {
             applySurfaceTemperatureRangeToViews(result.minTemperatureK, result.maxTemperatureK);
             updateSurfaceTemperatureLegend(true, result.minTemperatureK, result.maxTemperatureK);
@@ -3679,6 +3799,8 @@ private:
 
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
         const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
+        const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
+        const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
         const bool manualGreenhouseOnTop =
             planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
         const auto radiationModelType = static_cast<RadiationModelType>(
@@ -3709,6 +3831,8 @@ private:
         input.cloudAlbedo = cloudAlbedo;
         input.dayLengthDays = dayLengthDays;
         input.stepsPerDay = stepsPerDay;
+        input.spinOrbitP = spinOrbitP;
+        input.spinOrbitQ = spinOrbitQ;
         input.manualGreenhouseOpacity = stateDefaults->greenhouseOpacity;
         input.manualGreenhouseOnTop = manualGreenhouseOnTop;
         input.radiationModelType = radiationModelType;
@@ -3802,6 +3926,8 @@ private:
         const double yearLengthDays = planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
         const RotationMode rotationMode =
             resolveRotationModeForPlanetIndex(planetComboBox_->currentIndex());
+        const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
+        const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
         AtmosphereComposition atmosphere;
         const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
         if (atmosphereValue.isValid()) {
@@ -3886,7 +4012,9 @@ private:
             resolveSubstellarLongitudeRadians(surfaceSimState_.hourIndex,
                                               stepsPerDay,
                                               rotationMode,
-                                              orbitalPhaseRadians);
+                                              orbitalPhaseRadians,
+                                              spinOrbitP,
+                                              spinOrbitQ);
         const double declinationRadians = qDegreesToRadians(declinationDegrees);
         const double sinDeclination = std::sin(declinationRadians);
         const double cosDeclination = std::cos(declinationRadians);
@@ -4078,7 +4206,9 @@ private:
         updateSurfaceStarRendering(declinationDegrees,
                                    stepsPerDay,
                                    rotationMode,
-                                   orbitalPhaseRadians);
+                                   orbitalPhaseRadians,
+                                   spinOrbitP,
+                                   spinOrbitQ);
         if (minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
