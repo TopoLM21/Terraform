@@ -156,11 +156,11 @@ QVector<QPointF> StarSystemTopView::planetScreenPositions(const QSize &size) con
             positions.push_back(center);
             continue;
         }
-        // Для статической визуализации берём положение в перицентре (ν = 0).
+        // Положение на орбите определяется истинной аномалией.
         const QPointF orbitPoint = orbitPointAu(planet.semiMajorAxisAu,
                                                 planet.eccentricity,
                                                 qDegreesToRadians(planet.perihelionArgumentDegrees),
-                                                0.0);
+                                                planet.trueAnomalyRadians);
         positions.push_back(toScreen(orbitPoint, center, scale));
     }
 

@@ -14,6 +14,7 @@ public:
         double semiMajorAxisAu = 0.0;
         double eccentricity = 0.0;
         double perihelionArgumentDegrees = 0.0;
+        double trueAnomalyRadians = 0.0;
     };
 
     explicit StarSystemTopView(QWidget *parent = nullptr);
