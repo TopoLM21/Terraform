@@ -20,6 +20,9 @@ struct SurfaceTileTemperatureSettings {
     RotationMode rotationMode = RotationMode::Normal;
     double declinationDegrees = 0.0;
     double orbitalPhaseRadians = 0.0;
+    // Резонанс вращения p:q, безразмерный множитель спиновой фазы.
+    int spinOrbitP = 1;
+    int spinOrbitQ = 1;
     double atmospherePressureAtm = 0.0;
     double cloudAlbedo = 0.0;
     int spinUpDays = 6;
