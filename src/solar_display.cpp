@@ -133,6 +133,7 @@ constexpr int kRoleSecondaryStarRadius = Qt::UserRole + 27;
 constexpr int kRoleSecondaryStarTemperature = Qt::UserRole + 28;
 constexpr int kRoleHasSecondaryStar = Qt::UserRole + 29;
 constexpr int kRoleStarPresetId = Qt::UserRole + 30;
+constexpr int kRoleRotationModeOverride = Qt::UserRole + 31;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -163,6 +164,17 @@ double normalizeLongitudeRadians(double radians) {
 
 double longitudeDistanceRadians(double a, double b) {
     return std::abs(normalizeLongitudeRadians(a - b));
+}
+
+RotationMode resolveRotationModeFromPeriods(double dayLengthDays,
+                                            double yearLengthDays,
+                                            bool hasOverride,
+                                            RotationMode manualMode) {
+    if (hasOverride) {
+        return manualMode;
+    }
+    const bool isTidallyLocked = isTidallyLockedByPeriods(dayLengthDays, yearLengthDays);
+    return isTidallyLocked ? RotationMode::TidalLocked : RotationMode::Normal;
 }
 
 double resolveSubstellarLongitudeRadians(int hourIndex,
@@ -2055,6 +2067,7 @@ private:
         const RotationMode rotationMode =
             planet.tidallyLocked ? RotationMode::TidalLocked : RotationMode::Normal;
         planetComboBox_->setItemData(index, static_cast<int>(rotationMode), kRoleRotationMode);
+        planetComboBox_->setItemData(index, planet.rotationModeOverride, kRoleRotationModeOverride);
         planetComboBox_->setItemData(index, isCustom, kRoleIsCustom);
         planetComboBox_->setItemData(index, planet.name, kRolePlanetName);
         planetComboBox_->setItemData(index, planet.surfaceMaterialId, kRoleMaterialId);
@@ -2355,6 +2368,7 @@ private:
                                 composition, QStringLiteral("custom"), primaryStar, secondaryStar,
                                 greenhouseOpacity, manualGreenhouseOnTop, cloudAlbedo,
                                 geothermalFlux, tidallyLocked};
+            preset.rotationModeOverride = true;
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
             if (existingIndex >= 0) {
@@ -2375,6 +2389,7 @@ private:
                 planetComboBox_->setItemData(existingIndex, radiusKm, kRoleRadiusKm);
                 planetComboBox_->setItemData(existingIndex, static_cast<int>(rotationMode),
                                              kRoleRotationMode);
+                planetComboBox_->setItemData(existingIndex, true, kRoleRotationModeOverride);
                 planetComboBox_->setItemData(existingIndex, true, kRoleIsCustom);
                 planetComboBox_->setItemData(existingIndex, name, kRolePlanetName);
                 planetComboBox_->setItemData(existingIndex, materialId, kRoleMaterialId);
@@ -2492,8 +2507,7 @@ private:
             return;
         }
 
-        const RotationMode rotationMode =
-            static_cast<RotationMode>(planetComboBox_->itemData(index, kRoleRotationMode).toInt());
+        const RotationMode rotationMode = resolveRotationModeForPlanetIndex(index);
         const int modeIndex = rotationModeComboBox_->findData(static_cast<int>(rotationMode));
         if (modeIndex >= 0) {
             const QSignalBlocker blocker(rotationModeComboBox_);
@@ -2619,6 +2633,7 @@ private:
             return;
         }
         planetComboBox_->setItemData(index, rotationModeComboBox_->currentData(), kRoleRotationMode);
+        planetComboBox_->setItemData(index, true, kRoleRotationModeOverride);
     }
 
     void syncPlanetHeightSeedWithSelection() {
@@ -2670,6 +2685,20 @@ private:
             ? static_cast<RotationMode>(modeData.toInt())
             : RotationMode::Normal;
         modeIllustrationWidget_->setRotationMode(mode);
+    }
+
+    RotationMode resolveRotationModeForPlanetIndex(int index) const {
+        if (index < 0) {
+            return RotationMode::Normal;
+        }
+        const double dayLengthDays = planetComboBox_->itemData(index, kRoleDayLength).toDouble();
+        const double yearLengthDays =
+            planetComboBox_->itemData(index, kRoleYearLengthDays).toDouble();
+        const bool hasOverride =
+            planetComboBox_->itemData(index, kRoleRotationModeOverride).toBool();
+        const RotationMode manualMode =
+            static_cast<RotationMode>(planetComboBox_->itemData(index, kRoleRotationMode).toInt());
+        return resolveRotationModeFromPeriods(dayLengthDays, yearLengthDays, hasOverride, manualMode);
     }
 
     void clearTemperatureSegments() {
@@ -3655,7 +3684,7 @@ private:
         const auto radiationModelType = static_cast<RadiationModelType>(
             planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
         const RotationMode rotationMode =
-            static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
+            resolveRotationModeForPlanetIndex(planetComboBox_->currentIndex());
         ensureSurfaceOrbitAnimationReady();
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
@@ -3772,7 +3801,7 @@ private:
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
         const double yearLengthDays = planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
         const RotationMode rotationMode =
-            static_cast<RotationMode>(planetComboBox_->currentData(kRoleRotationMode).toInt());
+            resolveRotationModeForPlanetIndex(planetComboBox_->currentIndex());
         AtmosphereComposition atmosphere;
         const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
         if (atmosphereValue.isValid()) {
