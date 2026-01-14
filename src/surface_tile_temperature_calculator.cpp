@@ -7,6 +7,14 @@
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
+
+double normalizeLongitudeRadians(double radians) {
+    double wrapped = std::fmod(radians + kPi, 2.0 * kPi);
+    if (wrapped < 0.0) {
+        wrapped += 2.0 * kPi;
+    }
+    return wrapped - kPi;
+}
 }
 
 SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface(
@@ -55,8 +63,12 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
 
     const bool isTidallyLocked = settings.rotationMode == RotationMode::TidalLocked;
     const double orbitalPhaseRadians = settings.orbitalPhaseRadians;
+    const int absoluteHourIndex =
+        (settings.currentAbsoluteHourIndex != 0)
+            ? settings.currentAbsoluteHourIndex
+            : settings.currentHourIndex;
     const auto resolveSubstellarLongitude =
-        [isTidallyLocked, stepsPerDay, orbitalPhaseRadians, settings](int hourIndex) {
+        [isTidallyLocked, stepsPerDay, orbitalPhaseRadians, settings](int totalHourIndex) {
         if (isTidallyLocked) {
             return 0.0;
         }
@@ -64,7 +76,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         const int safeSpinOrbitQ = qMax(1, settings.spinOrbitQ);
         const double resonanceRatio = static_cast<double>(safeSpinOrbitP) /
             static_cast<double>(safeSpinOrbitQ);
-        const double phase = 2.0 * kPi * (static_cast<double>(hourIndex) + 0.5) /
+        const double phase = 2.0 * kPi * (static_cast<double>(totalHourIndex) + 0.5) /
                              static_cast<double>(stepsPerDay);
         // Фаза вращения λ_spin (рад) учитывает резонанс p:q и задаётся формулой
         // λ_spin = 2π * (t / P_spin) * (p / q). Здесь t и P_spin заданы шагами суток,
@@ -72,7 +84,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         const double spinPhase = phase * resonanceRatio;
         const double hourAngle = spinPhase - kPi;
         // Субзвёздная долгота — меридиан с нулевым часовым углом.
-        return orbitalPhaseRadians - hourAngle;
+        return normalizeLongitudeRadians(orbitalPhaseRadians - hourAngle);
     };
 
     double minTemperature = std::numeric_limits<double>::max();
@@ -93,8 +105,8 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
                                 material,
                                 defaults.subsurfaceSettings);
 
-        auto applyRadiativeStep = [&](int hourIndex) {
-            const double substellarLongitude = resolveSubstellarLongitude(hourIndex);
+        auto applyRadiativeStep = [&](int totalHourIndex) {
+            const double substellarLongitude = resolveSubstellarLongitude(totalHourIndex);
             const double localHourAngle = point.longitudeRadians - substellarLongitude;
             const double cosZenith =
                 point.sinLatitude * sinDeclination +
@@ -113,17 +125,21 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
 
         if (allowInsolation) {
             // Спин-ап прогревает точку до устойчивого цикла перед показом карты.
+            const int spinUpHours = spinUpDays * stepsPerDay;
+            // Отматываем время назад, чтобы спин-ап использовал непрерывную долготу.
+            const int baseAbsoluteHourIndex = qMax(0, absoluteHourIndex - spinUpHours);
             for (int day = 0; day < spinUpDays; ++day) {
                 for (int step = 0; step < stepsPerDay; ++step) {
-                    applyRadiativeStep(step);
+                    const int totalHourIndex =
+                        baseAbsoluteHourIndex + day * stepsPerDay + step;
+                    applyRadiativeStep(totalHourIndex);
                 }
             }
         }
 
         double blendedInsolation = 0.0;
         if (allowInsolation) {
-            const int hourIndex = qBound(0, settings.currentHourIndex, stepsPerDay - 1);
-            blendedInsolation = applyRadiativeStep(hourIndex);
+            blendedInsolation = applyRadiativeStep(qMax(0, absoluteHourIndex));
         }
 
         point.state = state;

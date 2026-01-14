@@ -27,6 +27,8 @@ struct SurfaceTileTemperatureSettings {
     double cloudAlbedo = 0.0;
     int spinUpDays = 6;
     int currentHourIndex = 0;
+    // Абсолютный индекс времени в часах для непрерывной подсолнечной долготы.
+    int currentAbsoluteHourIndex = 0;
     bool hasSolarConstant = false;
     // Используется при смене планеты: показываем «холодный старт» без прогрева.
     bool initializeWithMinTemperatureOnly = false;
