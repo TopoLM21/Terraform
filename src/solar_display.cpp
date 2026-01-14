@@ -389,6 +389,57 @@ struct StellarCacheKey {
     }
 };
 
+struct SurfacePointStateDefaults {
+    double albedo = 0.0;
+    double greenhouseOpacity = 0.0;
+    double minTemperatureKelvin = 3.0;
+    SurfaceMaterial material;
+    SubsurfaceModelSettings subsurfaceSettings;
+};
+
+struct SurfaceGridComputationInput {
+    PlanetSurfaceGrid grid;
+    AtmosphereComposition atmosphere;
+    SurfacePointStateDefaults stateDefaults;
+    QHash<QString, SurfaceMaterial> materialsById;
+    QString baseMaterialId;
+    double massEarths = 0.0;
+    double radiusKm = 0.0;
+    double cloudAlbedo = 0.0;
+    double dayLengthDays = 0.0;
+    int stepsPerDay = 1;
+    double manualGreenhouseOpacity = 0.0;
+    bool manualGreenhouseOnTop = false;
+    RadiationModelType radiationModelType = RadiationModelType::Fast;
+    RotationMode rotationMode = RotationMode::Normal;
+    double declinationDegrees = 0.0;
+    double segmentSolarConstant = 0.0;
+    bool hasSolarConstant = false;
+    int currentHourIndex = 0;
+    int logPointIndex = 0;
+};
+
+struct SurfaceGridComputationResult {
+    bool cancelled = false;
+    PlanetSurfaceGrid grid;
+    SubsurfaceModelSettings resolvedSubsurfaceSettings;
+    bool hasTemperatureRange = false;
+    double minTemperatureK = 0.0;
+    double maxTemperatureK = 0.0;
+    bool hasAirTemperatureRange = false;
+    double minAirTemperatureK = 0.0;
+    double maxAirTemperatureK = 0.0;
+    bool hasPressureRange = false;
+    double minPressureAtm = 0.0;
+    double maxPressureAtm = 0.0;
+    bool hasWindRange = false;
+    double minWindSpeedMps = 0.0;
+    double maxWindSpeedMps = 0.0;
+    double declinationDegrees = 0.0;
+    int stepsPerDay = 1;
+    RotationMode rotationMode = RotationMode::Normal;
+};
+
 class SolarCalculatorWidget : public QWidget {
 public:
     explicit SolarCalculatorWidget(int precision, QWidget *parent = nullptr)
@@ -1070,7 +1121,7 @@ public:
     ~SolarCalculatorWidget() override {
         cancelSurfaceGridTemperatureUpdate();
         if (surfaceGridWatcher_) {
-            surfaceGridWatcher_->waitForFinished();
+            surfaceGridWatcher_->future().waitForFinished();
         }
     }
 
@@ -2591,57 +2642,6 @@ private:
         }
     }
 
-    struct SurfacePointStateDefaults {
-        double albedo = 0.0;
-        double greenhouseOpacity = 0.0;
-        double minTemperatureKelvin = 3.0;
-        SurfaceMaterial material;
-        SubsurfaceModelSettings subsurfaceSettings;
-    };
-
-    struct SurfaceGridComputationInput {
-        PlanetSurfaceGrid grid;
-        AtmosphereComposition atmosphere;
-        SurfacePointStateDefaults stateDefaults;
-        QHash<QString, SurfaceMaterial> materialsById;
-        QString baseMaterialId;
-        double massEarths = 0.0;
-        double radiusKm = 0.0;
-        double cloudAlbedo = 0.0;
-        double dayLengthDays = 0.0;
-        int stepsPerDay = 1;
-        double manualGreenhouseOpacity = 0.0;
-        bool manualGreenhouseOnTop = false;
-        RadiationModelType radiationModelType = RadiationModelType::Fast;
-        RotationMode rotationMode = RotationMode::Normal;
-        double declinationDegrees = 0.0;
-        double segmentSolarConstant = 0.0;
-        bool hasSolarConstant = false;
-        int currentHourIndex = 0;
-        int logPointIndex = 0;
-    };
-
-    struct SurfaceGridComputationResult {
-        bool cancelled = false;
-        PlanetSurfaceGrid grid;
-        SubsurfaceModelSettings resolvedSubsurfaceSettings;
-        bool hasTemperatureRange = false;
-        double minTemperatureK = 0.0;
-        double maxTemperatureK = 0.0;
-        bool hasAirTemperatureRange = false;
-        double minAirTemperatureK = 0.0;
-        double maxAirTemperatureK = 0.0;
-        bool hasPressureRange = false;
-        double minPressureAtm = 0.0;
-        double maxPressureAtm = 0.0;
-        bool hasWindRange = false;
-        double minWindSpeedMps = 0.0;
-        double maxWindSpeedMps = 0.0;
-        double declinationDegrees = 0.0;
-        int stepsPerDay = 1;
-        RotationMode rotationMode = RotationMode::Normal;
-    };
-
     std::optional<SurfacePointStateDefaults> buildSurfacePointStateDefaults() const {
         const auto material = currentMaterial();
         if (!material) {
@@ -3166,8 +3166,11 @@ private:
         if (surfaceGridCancelFlag_) {
             surfaceGridCancelFlag_->store(true);
         }
-        if (surfaceGridWatcher_ && surfaceGridWatcher_->isRunning()) {
-            surfaceGridWatcher_->cancel();
+        if (surfaceGridWatcher_) {
+            auto future = surfaceGridWatcher_->future();
+            if (future.isRunning()) {
+                future.cancel();
+            }
         }
     }
 
@@ -3214,7 +3217,6 @@ private:
         }
 
         const double dayLengthDays = input.dayLengthDays;
-        const int stepsPerDay = input.stepsPerDay;
         double atmospherePressureAtm = 0.0;
         if (input.massEarths > 0.0 && input.radiusKm > 0.0) {
             atmospherePressureAtm = input.atmosphere.totalPressureAtm(input.massEarths,
@@ -3465,7 +3467,7 @@ private:
             return;
         }
 
-        SurfaceGridComputationResult result = surfaceGridWatcher_->result();
+        SurfaceGridComputationResult result = surfaceGridWatcher_->future().result();
         if (result.cancelled) {
             setSurfaceGridCalculationRunning(false);
             return;
