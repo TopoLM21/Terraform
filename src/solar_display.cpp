@@ -64,6 +64,7 @@
 #include <QtWidgets/QProgressBar>
 #include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QSpinBox>
+#include <QtWidgets/QToolButton>
 #include <algorithm>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QStackedWidget>
@@ -652,7 +653,6 @@ public:
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
-        auto *latitudeStepLabel = new QLabel(QStringLiteral("Через 1° (быстрые)"), this);
         addPlanetButton_ = new QPushButton(QStringLiteral("Добавить"), this);
         deletePlanetButton_ = new QPushButton(this);
         deletePlanetButton_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
@@ -693,13 +693,6 @@ public:
         spinOrbitLayout->addWidget(spinOrbitQSpinBox_);
         spinOrbitLayout->addStretch();
         spinOrbitLayout->setContentsMargins(0, 0, 0, 0);
-        auto *latitudeStepWidget = new QWidget(this);
-        auto *latitudeStepLayout = new QHBoxLayout();
-        latitudeStepLayout->addWidget(latitudeStepLabel);
-        latitudeStepLayout->addStretch();
-        latitudeStepLayout->setContentsMargins(0, 0, 0, 0);
-        latitudeStepWidget->setLayout(latitudeStepLayout);
-
         auto *planetColumnsLayout = new QHBoxLayout();
         planetColumnsLayout->addLayout(planetLeftFormLayout);
         planetColumnsLayout->addLayout(planetRightFormLayout);
@@ -713,7 +706,6 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
         planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
         planetControlsLayout->addRow(QString(), advancedRadiationCheckBox_);
-        planetControlsLayout->addRow(QStringLiteral("Шаг по широте:"), latitudeStepWidget);
         planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
 
         auto *planetActionsLayout = new QHBoxLayout();
@@ -785,8 +777,6 @@ public:
         surfaceSimSpeedComboBox_->addItem(QStringLiteral("1x"), 1.0);
         surfaceSimSpeedComboBox_->addItem(QStringLiteral("10x"), 10.0);
         surfaceSimTimeLabel_ = new QLabel(QStringLiteral("t = —"), this);
-        temperatureElapsedLabel_ = new QLabel(QStringLiteral("Прошло: 00:00"), this);
-        surfaceSeamlessCheckBox_ = new QCheckBox(QStringLiteral("Бесшовная карта"), this);
         surfaceMapModeComboBox_ = new QComboBox(this);
         surfaceMapModeComboBox_->addItem(QStringLiteral("Температура поверхности"),
                                          static_cast<int>(SurfaceMapMode::Temperature));
@@ -871,8 +861,6 @@ public:
         surfaceControlLayout->addWidget(surfaceSimToggleButton_);
         surfaceControlLayout->addWidget(surfaceSimSpeedComboBox_);
         surfaceControlLayout->addWidget(surfaceSimTimeLabel_);
-        surfaceControlLayout->addWidget(temperatureElapsedLabel_);
-        surfaceControlLayout->addWidget(surfaceSeamlessCheckBox_);
         surfaceControlLayout->addWidget(new QLabel(QStringLiteral("Карта:"), this));
         surfaceControlLayout->addWidget(surfaceMapModeComboBox_);
         surfaceControlLayout->addWidget(surfaceViewToggleButton_);
@@ -901,10 +889,24 @@ public:
                                      subsurfaceGeothermalFluxSpinBox_);
         auto *subsurfaceGroupBox = new QGroupBox(QStringLiteral("Подповерхностная модель"), this);
         subsurfaceGroupBox->setLayout(subsurfaceFormLayout);
+        subsurfaceGroupBox->setVisible(false);
+        auto *subsurfaceToggleButton = new QToolButton(this);
+        subsurfaceToggleButton->setText(QStringLiteral("Подповерхностная модель"));
+        subsurfaceToggleButton->setCheckable(true);
+        subsurfaceToggleButton->setChecked(false);
+        subsurfaceToggleButton->setArrowType(Qt::RightArrow);
+        subsurfaceToggleButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        connect(subsurfaceToggleButton, &QToolButton::toggled, this,
+                [subsurfaceGroupBox, subsurfaceToggleButton](bool checked) {
+                    subsurfaceGroupBox->setVisible(checked);
+                    subsurfaceToggleButton->setArrowType(checked ? Qt::DownArrow
+                                                                : Qt::RightArrow);
+                });
         auto *surfaceMapLayout = new QVBoxLayout();
         surfaceMapLayout->addLayout(surfaceLegendTopLayout);
         surfaceMapLayout->addLayout(surfaceControlLayout);
         surfaceMapLayout->addLayout(surfaceCalculationLayout);
+        surfaceMapLayout->addWidget(subsurfaceToggleButton);
         surfaceMapLayout->addWidget(subsurfaceGroupBox);
         surfaceMapLayout->addWidget(surfaceViewStack_, 1);
         surfaceMapLayout->addLayout(surfaceLegendBottomLayout);
@@ -1147,12 +1149,6 @@ public:
                     updateSurfaceSimulationUi();
                 });
 
-        connect(surfaceSeamlessCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
-            if (surfaceMapWidget_) {
-                surfaceMapWidget_->setInterpolationEnabled(checked);
-            }
-        });
-
         connect(surfaceMapModeComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [this](int) {
                     const SurfaceMapMode mode =
@@ -1393,8 +1389,6 @@ private:
     QPushButton *surfaceSimToggleButton_ = nullptr;
     QComboBox *surfaceSimSpeedComboBox_ = nullptr;
     QLabel *surfaceSimTimeLabel_ = nullptr;
-    QLabel *temperatureElapsedLabel_ = nullptr;
-    QCheckBox *surfaceSeamlessCheckBox_ = nullptr;
     QComboBox *surfaceMapModeComboBox_ = nullptr;
     QPushButton *surfaceViewToggleButton_ = nullptr;
     QCheckBox *surfaceMarkupCheckBox_ = nullptr;
@@ -4496,9 +4490,6 @@ private:
             temperatureUiTimer_->stop();
         }
         updateTemperaturePauseUi(false);
-        if (temperatureElapsedLabel_) {
-            temperatureElapsedLabel_->setText(QStringLiteral("Прошло: 00:00"));
-        }
     }
 
     void startTemperatureElapsedUi(int requestId, const QPointer<QProgressDialog> &dialogGuard) {
@@ -4527,13 +4518,6 @@ private:
             if (dialogGuard) {
                 dialogGuard->setLabelText(
                     QStringLiteral("Вычисление температурного профиля... %1:%2%3")
-                        .arg(minutes, 2, 10, QLatin1Char('0'))
-                        .arg(seconds, 2, 10, QLatin1Char('0'))
-                        .arg(pauseSuffix));
-            }
-            if (temperatureElapsedLabel_) {
-                temperatureElapsedLabel_->setText(
-                    QStringLiteral("Прошло: %1:%2%3")
                         .arg(minutes, 2, 10, QLatin1Char('0'))
                         .arg(seconds, 2, 10, QLatin1Char('0'))
                         .arg(pauseSuffix));
