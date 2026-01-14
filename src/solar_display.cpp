@@ -180,7 +180,7 @@ RotationMode resolveRotationModeFromPeriods(double dayLengthDays,
     return isTidallyLocked ? RotationMode::TidalLocked : RotationMode::Normal;
 }
 
-double resolveSubstellarLongitudeRadians(int hourIndex,
+double resolveSubstellarLongitudeRadians(int totalHourIndex,
                                          int stepsPerDay,
                                          RotationMode rotationMode,
                                          double orbitalPhaseRadians,
@@ -197,7 +197,8 @@ double resolveSubstellarLongitudeRadians(int hourIndex,
     const double resonanceRatio = static_cast<double>(safeSpinOrbitP) /
         static_cast<double>(safeSpinOrbitQ);
     const double phase =
-        2.0 * M_PI * (static_cast<double>(hourIndex) + 0.5) / static_cast<double>(stepsPerDay);
+        2.0 * M_PI * (static_cast<double>(totalHourIndex) + 0.5) /
+        static_cast<double>(stepsPerDay);
     // Фаза вращения планеты (λ_spin) выражается через резонанс p:q:
     // λ_spin = 2π * (t / P_spin) * (p / q), где t и P_spin — время и период вращения
     // в одинаковых единицах (здесь шаги суток), а p/q — безразмерное отношение частот.
@@ -218,7 +219,7 @@ QVector3D directionFromLatLonRadians(double latitudeRad, double longitudeRad) {
 }
 
 QVector3D resolveStarDirection(double declinationDegrees,
-                               int hourIndex,
+                               int totalHourIndex,
                                int stepsPerDay,
                                RotationMode rotationMode,
                                double orbitalPhaseRadians,
@@ -226,7 +227,7 @@ QVector3D resolveStarDirection(double declinationDegrees,
                                int spinOrbitQ) {
     const double declinationRadians = qDegreesToRadians(declinationDegrees);
     const double substellarLongitude =
-        resolveSubstellarLongitudeRadians(hourIndex,
+        resolveSubstellarLongitudeRadians(totalHourIndex,
                                           stepsPerDay,
                                           rotationMode,
                                           orbitalPhaseRadians,
@@ -459,6 +460,7 @@ struct SurfaceGridComputationInput {
     double segmentSolarConstant = 0.0;
     bool hasSolarConstant = false;
     int currentHourIndex = 0;
+    int currentAbsoluteHourIndex = 0;
     int logPointIndex = 0;
     bool initializeWithMinTemperatureOnly = false;
 };
@@ -3237,9 +3239,11 @@ private:
             return;
         }
 
+        const int totalHourIndex =
+            surfaceSimState_.dayIndex * stepsPerDay + surfaceSimState_.hourIndex;
         const QVector3D starDirection =
             resolveStarDirection(declinationDegrees,
-                                 surfaceSimState_.hourIndex,
+                                 totalHourIndex,
                                  stepsPerDay,
                                  rotationMode,
                                  orbitalPhaseRadians,
@@ -3475,6 +3479,7 @@ private:
         tileSettings.atmospherePressureAtm = atmospherePressureAtm;
         tileSettings.cloudAlbedo = input.cloudAlbedo;
         tileSettings.currentHourIndex = input.currentHourIndex;
+        tileSettings.currentAbsoluteHourIndex = input.currentAbsoluteHourIndex;
         tileSettings.hasSolarConstant = input.hasSolarConstant;
         tileSettings.initializeWithMinTemperatureOnly = input.initializeWithMinTemperatureOnly;
 
@@ -3836,6 +3841,8 @@ private:
         input.segmentSolarConstant = segmentSolarConstant;
         input.hasSolarConstant = hasSolarConstant_;
         input.currentHourIndex = surfaceSimState_.hourIndex;
+        input.currentAbsoluteHourIndex =
+            surfaceSimState_.dayIndex * stepsPerDay + surfaceSimState_.hourIndex;
         input.logPointIndex = selectedSurfacePointIndex_;
         input.initializeWithMinTemperatureOnly = initializeWithMinTemperatureOnly;
 
@@ -4002,8 +4009,10 @@ private:
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+        const int totalHourIndex =
+            surfaceSimState_.dayIndex * stepsPerDay + surfaceSimState_.hourIndex;
         const double substellarLongitudeRadians =
-            resolveSubstellarLongitudeRadians(surfaceSimState_.hourIndex,
+            resolveSubstellarLongitudeRadians(totalHourIndex,
                                               stepsPerDay,
                                               rotationMode,
                                               orbitalPhaseRadians,
