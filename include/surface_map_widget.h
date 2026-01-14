@@ -40,7 +40,9 @@ private:
     QRgb windToColor(double speedMps) const;
     QRgb pressureToColor(double pressureAtm) const;
     int pointIdAt(const QPoint &pixel) const;
-    QString formatPointTooltip(const SurfacePoint &point) const;
+    QString formatPointTooltip(const SurfacePoint &point, int pointIndex) const;
+    double tileAreaKm2(int pointIndex) const;
+    double tileEdgeLengthKm(int pointIndex) const;
     double pointRadiusPx(int pointCount, const QSize &imageSize) const;
     QSize scaledRenderSize() const;
     SurfaceMapCacheKey currentCacheKey(int neighborCount) const;

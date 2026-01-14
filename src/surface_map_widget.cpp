@@ -6,6 +6,7 @@
 #include <QPainterPath>
 #include <QToolTip>
 #include <QTransform>
+#include <QVector3D>
 #include <QtMath>
 
 #include "height_color_scale.h"
@@ -15,6 +16,68 @@
 namespace {
 const double kMaxX = 2.0 * qSqrt(2.0);
 const double kMaxY = qSqrt(2.0);
+QVector3D latLonToUnitVector(double latitudeDeg, double longitudeDeg) {
+    const double latRad = qDegreesToRadians(latitudeDeg);
+    const double lonRad = qDegreesToRadians(longitudeDeg);
+    const double cosLat = qCos(latRad);
+    return QVector3D(static_cast<float>(cosLat * qCos(lonRad)),
+                     static_cast<float>(qSin(latRad)),
+                     static_cast<float>(cosLat * qSin(lonRad)));
+}
+
+double centralAngleRadians(const QVector3D &a, const QVector3D &b) {
+    const QVector3D cross = QVector3D::crossProduct(a, b);
+    const double crossLength = static_cast<double>(cross.length());
+    const double dot = static_cast<double>(QVector3D::dotProduct(a, b));
+    return qAtan2(crossLength, dot);
+}
+
+double sphericalTriangleAreaSteradians(const QVector3D &a,
+                                       const QVector3D &b,
+                                       const QVector3D &c) {
+    // Формула сферического избытка для треугольника на единичной сфере:
+    // E = 2 * atan2(|a · (b × c)|, 1 + a·b + b·c + c·a).
+    const QVector3D cross = QVector3D::crossProduct(b, c);
+    const double numerator =
+        qAbs(static_cast<double>(QVector3D::dotProduct(a, cross)));
+    const double denominator = 1.0 + static_cast<double>(QVector3D::dotProduct(a, b)) +
+        static_cast<double>(QVector3D::dotProduct(b, c)) +
+        static_cast<double>(QVector3D::dotProduct(c, a));
+    return 2.0 * qAtan2(numerator, denominator);
+}
+
+double polygonAreaSteradians(const QVector<SurfaceVertex> &polygon) {
+    if (polygon.size() < 3) {
+        return 0.0;
+    }
+    const QVector3D origin = latLonToUnitVector(polygon[0].latitudeDeg,
+                                                polygon[0].longitudeDeg);
+    double area = 0.0;
+    for (int i = 1; i + 1 < polygon.size(); ++i) {
+        const QVector3D a = latLonToUnitVector(polygon[i].latitudeDeg,
+                                               polygon[i].longitudeDeg);
+        const QVector3D b = latLonToUnitVector(polygon[i + 1].latitudeDeg,
+                                               polygon[i + 1].longitudeDeg);
+        area += sphericalTriangleAreaSteradians(origin, a, b);
+    }
+    return area;
+}
+
+double polygonPerimeterRadians(const QVector<SurfaceVertex> &polygon) {
+    if (polygon.size() < 2) {
+        return 0.0;
+    }
+    double perimeter = 0.0;
+    for (int i = 0; i < polygon.size(); ++i) {
+        const int nextIndex = (i + 1) % polygon.size();
+        const QVector3D a = latLonToUnitVector(polygon[i].latitudeDeg,
+                                               polygon[i].longitudeDeg);
+        const QVector3D b = latLonToUnitVector(polygon[nextIndex].latitudeDeg,
+                                               polygon[nextIndex].longitudeDeg);
+        perimeter += centralAngleRadians(a, b);
+    }
+    return perimeter;
+}
 
 QRgb encodeId(int id) {
     const int value = id + 1;
@@ -194,7 +257,7 @@ void SurfaceMapWidget::mousePressEvent(QMouseEvent *event) {
     if (!point) {
         return;
     }
-    QToolTip::showText(event->globalPos(), formatPointTooltip(*point), this);
+    QToolTip::showText(event->globalPos(), formatPointTooltip(*point, id), this);
 }
 
 void SurfaceMapWidget::resizeEvent(QResizeEvent *event) {
@@ -507,10 +570,13 @@ int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
     return decodeId(idImage_.pixel(pixel));
 }
 
-QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point) const {
+QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point, int pointIndex) const {
+    const double areaKm2 = tileAreaKm2(pointIndex);
+    const double edgeLengthKm = tileEdgeLengthKm(pointIndex);
     return QStringLiteral("Широта: %1°\nДолгота: %2°\nТемпература поверхности: %3 K\n"
                           "Температура воздуха: %4 K\nВысота: %5 км\nДавление: %6 атм\n"
-                          "Солнечный поток: %7 Вт/м²\nВетер: %8 м/с")
+                          "Солнечный поток: %7 Вт/м²\nВетер: %8 м/с\n"
+                          "Площадь тайла: %9 км²\nСредняя длина ребра: %10 км")
         .arg(point.latitudeDeg, 0, 'f', 2)
         .arg(point.longitudeDeg, 0, 'f', 2)
         .arg(point.temperatureK, 0, 'f', 2)
@@ -518,7 +584,47 @@ QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point) const {
         .arg(point.heightKm, 0, 'f', 2)
         .arg(point.pressureAtm, 0, 'f', 3)
         .arg(point.solarFluxWPerM2, 0, 'f', 2)
-        .arg(point.windSpeedMps, 0, 'f', 2);
+        .arg(point.windSpeedMps, 0, 'f', 2)
+        .arg(areaKm2, 0, 'f', 2)
+        .arg(edgeLengthKm, 0, 'f', 2);
+}
+
+double SurfaceMapWidget::tileAreaKm2(int pointIndex) const {
+    if (!grid_) {
+        return 0.0;
+    }
+    for (const auto &cell : grid_->cells()) {
+        if (cell.pointIndex != pointIndex) {
+            continue;
+        }
+        const double areaSteradians = polygonAreaSteradians(cell.polygon);
+        return areaSteradians * grid_->radiusKm() * grid_->radiusKm();
+    }
+    return grid_->pointAreaKm2();
+}
+
+double SurfaceMapWidget::tileEdgeLengthKm(int pointIndex) const {
+    if (!grid_) {
+        return 0.0;
+    }
+    for (const auto &cell : grid_->cells()) {
+        if (cell.pointIndex != pointIndex) {
+            continue;
+        }
+        const double perimeterRadians = polygonPerimeterRadians(cell.polygon);
+        if (cell.polygon.isEmpty()) {
+            return 0.0;
+        }
+        return perimeterRadians * grid_->radiusKm() / cell.polygon.size();
+    }
+    const double areaKm2 = grid_->pointAreaKm2();
+    if (areaKm2 <= 0.0) {
+        return 0.0;
+    }
+    // Для равномерных точек без явного полигона используем эквивалентный
+    // правильный шестиугольник, чтобы оценить длину ребра по площади.
+    const double hexFactor = 3.0 * qSqrt(3.0) / 2.0;
+    return qSqrt(areaKm2 / hexFactor);
 }
 
 double SurfaceMapWidget::pointRadiusPx(int pointCount, const QSize &imageSize) const {
