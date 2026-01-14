@@ -5,6 +5,7 @@
 #include "solar_calculator.h"
 #include "thermal_conductivity_model.h"
 
+#include <cmath>
 #include <optional>
 #include <QtCore/QString>
 #include <QtCore/QVector>
@@ -74,7 +75,21 @@ struct PlanetPreset {
     bool hasSeaLevel = false;
     // Процедурный режим "continents" (маска суши + горы/равнины).
     bool useContinentsHeight = false;
+    // Явно выбранный пользователем режим вращения переопределяет авто-оценку.
+    bool rotationModeOverride = false;
 };
+
+// Допуск 2% от орбитального периода: сглаживает округления и различия между
+// солнечными и сидерическими сутками, не маскируя резонансы вращения.
+constexpr double kTidalLockToleranceFraction = 0.02;
+
+inline bool isTidallyLockedByPeriods(double spinPeriodDays, double orbitalPeriodDays) {
+    if (spinPeriodDays <= 0.0 || orbitalPeriodDays <= 0.0) {
+        return false;
+    }
+    const double toleranceDays = orbitalPeriodDays * kTidalLockToleranceFraction;
+    return std::abs(spinPeriodDays - orbitalPeriodDays) <= toleranceDays;
+}
 
 QVector<SurfaceMaterial> surfaceMaterials();
 QVector<PlanetPreset> solarSystemPresets();
