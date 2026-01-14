@@ -1,9 +1,12 @@
 #include "planet_presets.h"
 
+#include "geothermal_flux_model.h"
+
 #include <QtCore/QPair>
 
 namespace {
 constexpr double kKgPerGigaton = 1.0e12;
+constexpr double kEarthMassKg = 5.972e24;
 // Для пресетов используем эталонные параметры звезд: расстояние держим равным 1 а.е.,
 // так как реальная дистанция до планеты задаётся отдельно через большую полуось орбиты.
 constexpr StellarParameters kSolarPrimary{1.0, 5772.0, 1.0};
@@ -13,6 +16,34 @@ const QString kSolarStarPresetId = QStringLiteral("solar_primary");
 constexpr StellarParameters kSweetSkyPrimary{0.3761, 2576.0, 1.0};
 constexpr StellarParameters kSweetSkySecondary{0.3741, 2349.0, 1.0};
 const QString kSweetSkyStarPresetId = QStringLiteral("sweet_sky_binary");
+constexpr double kDefaultPlanetAgeGyr = 4.5;
+
+double estimateGeothermalFluxWPerM2(const GeothermalFluxModel &model,
+                                    double massEarths,
+                                    double radiusKm,
+                                    double ageGyr,
+                                    double radiogenicScale,
+                                    double residualScale,
+                                    double radiogenicDecayGyr = 8.0,
+                                    double residualDecayGyr = 4.0,
+                                    double parentMassKg = 0.0,
+                                    double semiMajorAxisM = 0.0,
+                                    double eccentricity = 0.0,
+                                    double k2OverQ = 0.0) {
+    GeothermalBodyParameters parameters;
+    parameters.massKg = massEarths * kEarthMassKg;
+    parameters.radiusM = radiusKm * 1000.0;
+    parameters.ageGyr = ageGyr;
+    parameters.radiogenicScale = radiogenicScale;
+    parameters.residualScale = residualScale;
+    parameters.radiogenicDecayGyr = radiogenicDecayGyr;
+    parameters.residualDecayGyr = residualDecayGyr;
+    parameters.parentMassKg = parentMassKg;
+    parameters.semiMajorAxisM = semiMajorAxisM;
+    parameters.eccentricity = eccentricity;
+    parameters.k2OverQ = k2OverQ;
+    return model.surfaceFluxWPerM2(parameters);
+}
 
 AtmosphereComposition atmosphereByPressureAtm(double pressureAtm,
                                               double planetMassEarths,
@@ -66,12 +97,40 @@ QVector<SurfaceMaterial> surfaceMaterials() {
 QVector<PlanetPreset> solarSystemPresets() {
     // Пресеты Солнечной системы используют параметры Солнца (R☉ = 1, T = 5772 K),
     // поскольку планеты вращаются вокруг одной звезды.
+    const GeothermalFluxModel geothermalModel;
+    // Эмпирические коэффициенты подобраны так, чтобы простая модель совпала
+    // с характерными значениями для известных тел.
+    const double mercuryGeothermalFlux =
+        estimateGeothermalFluxWPerM2(geothermalModel, 0.0553, 2439.7, kDefaultPlanetAgeGyr, 0.9, 0.9);
+    const double venusGeothermalFlux =
+        estimateGeothermalFluxWPerM2(geothermalModel, 0.815, 6051.8, kDefaultPlanetAgeGyr, 1.0, 1.0);
+    const double earthGeothermalFlux =
+        estimateGeothermalFluxWPerM2(geothermalModel, 1.0, 6371.0, kDefaultPlanetAgeGyr, 1.0, 1.0);
+    const double moonGeothermalFlux =
+        estimateGeothermalFluxWPerM2(geothermalModel,
+                                     0.0123,
+                                     1737.4,
+                                     kDefaultPlanetAgeGyr,
+                                     1.4,
+                                     1.4,
+                                     8.0,
+                                     4.0,
+                                     kEarthMassKg,
+                                     384400000.0,
+                                     0.0549,
+                                     1.0e-3);
+    const double marsGeothermalFlux =
+        estimateGeothermalFluxWPerM2(geothermalModel, 0.107, 3389.5, kDefaultPlanetAgeGyr, 0.76, 0.76);
+    const double ceresGeothermalFlux =
+        estimateGeothermalFluxWPerM2(geothermalModel, 0.00015, 473.0, kDefaultPlanetAgeGyr, 1.0, 1.0);
+
     return {
         // dayLengthDays: солнечные сутки (длительность солнечного дня), не сидерический период.
         // Например, у Венеры солнечные сутки ~116.75, а 243 дня — сидерическое вращение.
         {QStringLiteral("Меркурий"), 0.39, 176.0, 0.2056, 0.03, 29.12, 0.0553, 2439.7,
          QStringLiteral("regolith_mercury"), AtmosphereComposition{}, kSolarStarPresetId,
-         kSolarPrimary, std::nullopt, 0.0, false, 0.0, 0.0, false, HeightSourceType::Procedural,
+         kSolarPrimary, std::nullopt, 0.0, false, 0.0, mercuryGeothermalFlux, false,
+         HeightSourceType::Procedural,
          QString(), 0.0, 1001u, false, true},
         {QStringLiteral("Венера"), 0.72, 116.75, 0.0068, 177.36, 54.88, 0.815, 6051.8,
          QStringLiteral("desert"),
@@ -82,7 +141,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          0.0,
          false,
          0.75,
-         0.0,
+         venusGeothermalFlux,
          false,
          HeightSourceType::Procedural, QString(), 0.0, 1002u, true, true},
         {QStringLiteral("Земля"), 1.00, 1.0, 0.0167, 23.44, 102.94, 1.0, 6371.0,
@@ -103,7 +162,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          0.0,
          false,
          0.0,
-         0.0,
+         earthGeothermalFlux,
          false,
          HeightSourceType::Procedural,
          QString(),
@@ -114,8 +173,7 @@ QVector<PlanetPreset> solarSystemPresets() {
         {QStringLiteral("Луна"), 1.00, 29.5, 0.0167, // Эксцентриситет солнечной орбиты, не лунной.
          6.68, 0.0, 0.0123, 1737.4,
          QStringLiteral("regolith_moon"), AtmosphereComposition{}, kSolarStarPresetId,
-         kSolarPrimary, std::nullopt, 0.0, false, 0.0,
-         0.025, // Типичный диапазон лунного геотермального потока ~0.01–0.03 Вт/м².
+         kSolarPrimary, std::nullopt, 0.0, false, 0.0, moonGeothermalFlux,
          false, HeightSourceType::Procedural, QString(), 0.0, 1004u, false, true},
         {QStringLiteral("Марс"), 1.52, 1.03, 0.0934, 25.19, 286.5, 0.107, 3389.5,
          QStringLiteral("desert"),
@@ -126,7 +184,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          0.0,
          false,
          0.0,
-         0.0,
+         marsGeothermalFlux,
          false,
          HeightSourceType::Procedural,
          QString(),
@@ -135,8 +193,8 @@ QVector<PlanetPreset> solarSystemPresets() {
          true,
          true},
         {QStringLiteral("Церрера"), 2.77, 0.38, 0.0758, 4.0, 73.6, 0.00015, 473.0,
-         QStringLiteral("ice"), AtmosphereComposition{}, kSolarStarPresetId,
-         kSolarPrimary, std::nullopt, 0.0, false, 0.0, 0.0, false, HeightSourceType::Procedural,
+         QStringLiteral("ice"), AtmosphereComposition{}, kSolarStarPresetId, kSolarPrimary,
+         std::nullopt, 0.0, false, 0.0, ceresGeothermalFlux, false, HeightSourceType::Procedural,
          QString(), 0.0, 1006u, false, true},
     };
 }
