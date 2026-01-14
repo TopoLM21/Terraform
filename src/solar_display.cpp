@@ -23,6 +23,7 @@
 #include "wind_field_model.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
+#include "orbit_segment_calculator.h"
 #include "radiation_model.h"
 #include "layered_radiation_model.h"
 #include "radiation_model_utils.h"
@@ -784,8 +785,13 @@ public:
         surfaceViewStack_->setCurrentWidget(surfaceGlobeWidget_);
         surfaceMinTemperatureLabel_ = new QLabel(QStringLiteral("Мин: —"), this);
         surfaceMaxTemperatureLabel_ = new QLabel(QStringLiteral("Макс: —"), this);
+        surfaceSolarConstantLabel_ = new QLabel(QStringLiteral("S0: —"), this);
+        surfaceSolarConstantLabel_->setToolTip(
+            QStringLiteral("Солнечная постоянная, пересчитанная на текущее расстояние."));
         temperaturePauseButton_ = new QPushButton(QStringLiteral("Пауза"), this);
-        surfaceSimToggleButton_ = new QPushButton(QStringLiteral("Старт"), this);
+        surfaceSimToggleButton_ = new QPushButton(QStringLiteral("Течение времени"), this);
+        surfaceSimToggleButton_->setToolTip(
+            QStringLiteral("Запустить или остановить течение времени"));
         surfaceSimSpeedComboBox_ = new QComboBox(this);
         surfaceSimSpeedComboBox_->addItem(QStringLiteral("1x"), 1.0);
         surfaceSimSpeedComboBox_->addItem(QStringLiteral("10x"), 10.0);
@@ -867,13 +873,12 @@ public:
         auto *surfaceLegendTopLayout = new QHBoxLayout();
         surfaceLegendTopLayout->addWidget(surfaceMinTemperatureLabel_);
         surfaceLegendTopLayout->addStretch();
+        surfaceLegendTopLayout->addWidget(surfaceSolarConstantLabel_);
+        surfaceLegendTopLayout->addStretch();
         surfaceLegendTopLayout->addWidget(surfaceMaxTemperatureLabel_);
         auto *surfaceControlLayout = new QHBoxLayout();
         // Управление дублирует диалог, чтобы расчётом можно было управлять без модального окна.
         surfaceControlLayout->addWidget(temperaturePauseButton_);
-        surfaceControlLayout->addWidget(surfaceSimToggleButton_);
-        surfaceControlLayout->addWidget(surfaceSimSpeedComboBox_);
-        surfaceControlLayout->addWidget(surfaceSimTimeLabel_);
         surfaceControlLayout->addWidget(new QLabel(QStringLiteral("Карта:"), this));
         surfaceControlLayout->addWidget(surfaceMapModeComboBox_);
         surfaceControlLayout->addWidget(surfaceViewToggleButton_);
@@ -979,6 +984,12 @@ public:
                 });
 
         auto *rightLayout = new QVBoxLayout();
+        auto *timeFlowLayout = new QHBoxLayout();
+        timeFlowLayout->addWidget(surfaceSimToggleButton_);
+        timeFlowLayout->addWidget(surfaceSimSpeedComboBox_);
+        timeFlowLayout->addWidget(surfaceSimTimeLabel_);
+        timeFlowLayout->addStretch();
+        rightLayout->addLayout(timeFlowLayout);
         rightLayout->addWidget(rightTabs_, 1);
 
         auto *layout = new QHBoxLayout(this);
@@ -1031,7 +1042,7 @@ public:
             } else {
                 updateTemperaturePlot();
             }
-            updateStarSystemSelection();
+            updateStarSystemOrbits();
         });
 
         connect(addPlanetButton_, &QPushButton::clicked, this, [this]() { onAddPlanetRequested(); });
@@ -1291,6 +1302,7 @@ private:
         hasSolarConstant_ = true;
         refreshSubsurfaceSettingsUi();
         updateTemperaturePlot();
+        updateSurfaceOrbitLighting();
     }
 
     bool readStellarParameters(QLineEdit *radiusInput, QLineEdit *temperatureInput,
@@ -1402,6 +1414,7 @@ private:
     QStackedWidget *surfaceViewStack_ = nullptr;
     QLabel *surfaceMinTemperatureLabel_ = nullptr;
     QLabel *surfaceMaxTemperatureLabel_ = nullptr;
+    QLabel *surfaceSolarConstantLabel_ = nullptr;
     QPushButton *temperaturePauseButton_ = nullptr;
     QPushButton *surfaceSimToggleButton_ = nullptr;
     QComboBox *surfaceSimSpeedComboBox_ = nullptr;
@@ -1511,8 +1524,10 @@ private:
 
     void updateSurfaceSimulationUi() {
         if (surfaceSimToggleButton_) {
-            surfaceSimToggleButton_->setText(surfaceSimRunning_ ? QStringLiteral("Стоп")
-                                                                : QStringLiteral("Старт"));
+            surfaceSimToggleButton_->setText(
+                surfaceSimRunning_
+                    ? QStringLiteral("Остановить течение")
+                    : QStringLiteral("Течение времени"));
         }
         if (surfaceSimTimeLabel_) {
             const QString speedLabel =
@@ -1539,6 +1554,43 @@ private:
         surfaceSimTimer_->setInterval(intervalMs);
     }
 
+    int resolveSurfaceStepsPerDay() const {
+        if (!planetComboBox_) {
+            return 24;
+        }
+        const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        if (dayLengthDays <= 0.0) {
+            return 24;
+        }
+        return qMax(1, qRound(dayLengthDays * 24.0));
+    }
+
+    double resolveSurfaceElapsedDays(int stepsPerDay) const {
+        if (stepsPerDay <= 0) {
+            return 0.0;
+        }
+        return static_cast<double>(surfaceSimState_.dayIndex) +
+            static_cast<double>(surfaceSimState_.hourIndex) / static_cast<double>(stepsPerDay);
+    }
+
+    OrbitSegment resolvePlanetOrbitSegment(double elapsedDays,
+                                           double yearLengthDays,
+                                           double semiMajorAxisAu,
+                                           double eccentricity) const {
+        OrbitSegment segment;
+        segment.distanceAU = semiMajorAxisAu;
+        if (yearLengthDays <= 0.0 || semiMajorAxisAu <= 0.0) {
+            return segment;
+        }
+        double fraction = std::fmod(elapsedDays / yearLengthDays, 1.0);
+        if (fraction < 0.0) {
+            fraction += 1.0;
+        }
+        const double meanAnomaly = 2.0 * M_PI * fraction;
+        OrbitSegmentCalculator calculator(semiMajorAxisAu, eccentricity);
+        return calculator.orbitAtMeanAnomaly(meanAnomaly);
+    }
+
     void resetSurfaceSimulation() {
         surfaceSimRunning_ = false;
         surfaceSimState_ = {};
@@ -1548,6 +1600,7 @@ private:
             surfaceSimTimer_->stop();
         }
         updateSurfaceSimulationUi();
+        updateStarSystemOrbits();
     }
 
     void resetSurfaceOrbitAnimation() {
@@ -1898,9 +1951,23 @@ private:
     }
 
     void refreshStarSystemView() {
+        updateStarSystemOrbits();
+    }
+
+    void updateStarSystemSelection() {
+        if (!starSystemTopView_) {
+            return;
+        }
+        starSystemTopView_->setSelectedIndex(planetComboBox_ ? planetComboBox_->currentIndex() : -1);
+    }
+
+    void updateStarSystemOrbits() {
         if (!starSystemTopView_ || !planetComboBox_) {
             return;
         }
+
+        const int stepsPerDay = resolveSurfaceStepsPerDay();
+        const double elapsedDays = resolveSurfaceElapsedDays(stepsPerDay);
 
         QVector<StarSystemTopView::PlanetOrbit> planets;
         planets.reserve(planetComboBox_->count());
@@ -1911,18 +1978,19 @@ private:
             orbit.eccentricity = planetComboBox_->itemData(i, kRoleEccentricity).toDouble();
             orbit.perihelionArgumentDegrees =
                 planetComboBox_->itemData(i, kRolePerihelionArgument).toDouble();
+            const double yearLengthDays =
+                planetComboBox_->itemData(i, kRoleYearLengthDays).toDouble();
+            const OrbitSegment segment = resolvePlanetOrbitSegment(elapsedDays,
+                                                                  yearLengthDays,
+                                                                  orbit.semiMajorAxisAu,
+                                                                  orbit.eccentricity);
+            orbit.trueAnomalyRadians = segment.trueAnomalyRadians;
             planets.push_back(orbit);
         }
 
         starSystemTopView_->setPlanets(planets);
         updateStarSystemSelection();
-    }
-
-    void updateStarSystemSelection() {
-        if (!starSystemTopView_) {
-            return;
-        }
-        starSystemTopView_->setSelectedIndex(planetComboBox_ ? planetComboBox_->currentIndex() : -1);
+        updateSurfaceOrbitLighting();
     }
 
     QString formatPlanetName(const PlanetPreset &planet) const {
@@ -3282,7 +3350,8 @@ private:
                                     RotationMode rotationMode,
                                     double orbitalPhaseRadians,
                                     int spinOrbitP,
-                                    int spinOrbitQ) {
+                                    int spinOrbitQ,
+                                    double distanceAu) {
         if (!surfaceGlobeWidget_) {
             return;
         }
@@ -3322,10 +3391,69 @@ private:
             surfaceGlobeWidget_->setStarRadiusSolar(primary.radiusInSolarRadii);
         }
 
-        const double distanceAu = surfaceOrbitAnimation_.distanceAU();
         if (distanceAu > 0.0) {
             surfaceGlobeWidget_->setStarDistanceAu(distanceAu);
         }
+    }
+
+    void updateSurfaceSolarConstantLabel(double segmentSolarConstant, double distanceAu) {
+        if (!surfaceSolarConstantLabel_) {
+            return;
+        }
+        if (!hasSolarConstant_ || segmentSolarConstant <= 0.0) {
+            surfaceSolarConstantLabel_->setText(QStringLiteral("S0: —"));
+            surfaceSolarConstantLabel_->setToolTip(
+                QStringLiteral("Солнечная постоянная недоступна."));
+            return;
+        }
+        surfaceSolarConstantLabel_->setText(
+            QStringLiteral("S0: %1 Вт/м²").arg(segmentSolarConstant, 0, 'f', 1));
+        surfaceSolarConstantLabel_->setToolTip(
+            QStringLiteral("Поток на расстоянии %1 а.е.").arg(distanceAu, 0, 'f', 3));
+    }
+
+    void updateSurfaceOrbitLighting() {
+        if (!surfaceGlobeWidget_ || !planetComboBox_ || planetComboBox_->currentIndex() < 0) {
+            updateSurfaceSolarConstantLabel(0.0, 0.0);
+            return;
+        }
+
+        const int stepsPerDay = resolveSurfaceStepsPerDay();
+        const double elapsedDays = resolveSurfaceElapsedDays(stepsPerDay);
+        const double semiMajorAxis = planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble();
+        const double eccentricity = planetComboBox_->currentData(kRoleEccentricity).toDouble();
+        const double obliquity = planetComboBox_->currentData(kRoleObliquity).toDouble();
+        const double perihelionArgument =
+            planetComboBox_->currentData(kRolePerihelionArgument).toDouble();
+        const double yearLengthDays = planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
+        const OrbitSegment segment =
+            resolvePlanetOrbitSegment(elapsedDays, yearLengthDays, semiMajorAxis, eccentricity);
+        const double orbitalPhaseRadians =
+            segment.trueAnomalyRadians + qDegreesToRadians(perihelionArgument);
+        const double declinationDegrees = qRadiansToDegrees(
+            std::asin(std::sin(qDegreesToRadians(obliquity)) * std::sin(orbitalPhaseRadians)));
+        const RotationMode rotationMode =
+            resolveRotationModeForPlanetIndex(planetComboBox_->currentIndex());
+        const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
+        const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
+
+        // Направление на звезду совпадает с нормалью подсолнечной точки.
+        updateSurfaceStarRendering(declinationDegrees,
+                                   stepsPerDay,
+                                   rotationMode,
+                                   orbitalPhaseRadians,
+                                   spinOrbitP,
+                                   spinOrbitQ,
+                                   segment.distanceAU);
+
+        double segmentSolarConstant = 0.0;
+        if (hasSolarConstant_ && lastSolarConstantDistanceAU_ > 0.0 && segment.distanceAU > 0.0) {
+            // Поток у планеты масштабируется как 1 / r^2 относительно опорной дистанции.
+            segmentSolarConstant =
+                lastSolarConstant_ *
+                std::pow(lastSolarConstantDistanceAU_ / segment.distanceAU, 2.0);
+        }
+        updateSurfaceSolarConstantLabel(segmentSolarConstant, segment.distanceAU);
     }
 
     void updateSurfaceWindField(const AtmosphereComposition &atmosphere,
@@ -3757,12 +3885,14 @@ private:
         updateSubsurfaceSettingsUi(result.resolvedSubsurfaceSettings);
         applySurfaceGridToViews();
         updateSurfaceHeightLegendFromGrid();
+        const double distanceAu = surfaceOrbitAnimation_.distanceAU();
         updateSurfaceStarRendering(result.declinationDegrees,
                                    result.stepsPerDay,
                                    result.rotationMode,
                                    result.orbitalPhaseRadians,
                                    result.spinOrbitP,
-                                   result.spinOrbitQ);
+                                   result.spinOrbitQ,
+                                   distanceAu);
         if (result.hasTemperatureRange && result.minTemperatureK <= result.maxTemperatureK) {
             applySurfaceTemperatureRangeToViews(result.minTemperatureK, result.maxTemperatureK);
             updateSurfaceTemperatureLegend(true, result.minTemperatureK, result.maxTemperatureK);
@@ -3863,6 +3993,9 @@ private:
             segmentSolarConstant =
                 lastSolarConstant_ *
                 std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
+            updateSurfaceSolarConstantLabel(segmentSolarConstant, distanceAU);
+        } else {
+            updateSurfaceSolarConstantLabel(0.0, 0.0);
         }
         const bool initializeWithMinTemperatureOnly = surfaceInitializeWithMinTemperatureOnly_;
         surfaceInitializeWithMinTemperatureOnly_ = false;
@@ -3936,6 +4069,7 @@ private:
                 surfaceSimTimer_->stop();
             }
             updateSurfaceSimulationUi();
+            updateStarSystemOrbits();
             return;
         }
 
@@ -3959,6 +4093,7 @@ private:
         if (!temperaturePauseFlag_.load()) {
             surfaceSimTimer_->start();
         }
+        updateStarSystemOrbits();
     }
 
     void advanceSurfaceSimulation() {
@@ -4036,6 +4171,7 @@ private:
         const double segmentSolarConstant =
             lastSolarConstant_ *
             std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
+        updateSurfaceSolarConstantLabel(segmentSolarConstant, distanceAU);
         const double transport =
             (atmospherePressureAtm > 50.0)
                 ? 0.99
@@ -4259,7 +4395,8 @@ private:
                                    rotationMode,
                                    orbitalPhaseRadians,
                                    spinOrbitP,
-                                   spinOrbitQ);
+                                   spinOrbitQ,
+                                   distanceAU);
         if (minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);
             updateSurfaceTemperatureLegend(true, minTemperature, maxTemperature);
@@ -4297,6 +4434,7 @@ private:
         }
         surfaceSimState_.orbitSegmentAccumulator -= segmentsToAdvance;
         updateSurfaceSimulationUi();
+        updateStarSystemOrbits();
     }
 
     void updateSurfaceTemperatureLegend(bool hasRange, double minTemperature, double maxTemperature) {
@@ -4611,6 +4749,7 @@ private:
         resultLabel_->setText(
             QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."));
         updateTemperaturePlot();
+        updateSurfaceSolarConstantLabel(0.0, 0.0);
     }
 };
 }  // namespace
