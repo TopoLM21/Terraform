@@ -17,6 +17,7 @@
 #include "surface_pressure_scale_widget.h"
 #include "surface_realistic_scale_widget.h"
 #include "surface_map_mode.h"
+#include "StarSystemTopView.h"
 #include "surface_advection_model.h"
 #include "surface_pressure_transport_model.h"
 #include "wind_field_model.h"
@@ -746,6 +747,14 @@ public:
         starsPanel->setLayout(starsPanelLayout);
 
         temperaturePlot_ = new SurfaceTemperaturePlot(this);
+        starSystemTopView_ = new StarSystemTopView(this);
+        starSystemTopView_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        connect(starSystemTopView_, &StarSystemTopView::planetSelected, this, [this](int index) {
+            if (!planetComboBox_ || index < 0 || index >= planetComboBox_->count()) {
+                return;
+            }
+            planetComboBox_->setCurrentIndex(index);
+        });
         surfaceMapWidget_ = new SurfaceMapWidget(this);
         surfaceMapWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
         surfaceMapWidget_->setGrid(&surfaceGrid_);
@@ -952,6 +961,7 @@ public:
 
         rightTabs_ = new QTabWidget(this);
         rightTabs_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        rightTabs_->addTab(starSystemTopView_, tr("Система"));
         rightTabs_->addTab(plotGroupBox, tr("Температура"));
         rightTabs_->addTab(atmosphereWidget_, tr("Атмосфера"));
         rightTabs_->addTab(surfaceMapContainer_, tr("Поверхность"));
@@ -1021,6 +1031,7 @@ public:
             } else {
                 updateTemperaturePlot();
             }
+            updateStarSystemSelection();
         });
 
         connect(addPlanetButton_, &QPushButton::clicked, this, [this]() { onAddPlanetRequested(); });
@@ -1050,6 +1061,7 @@ public:
             updateSurfaceTemperatureAggregationHistoryDays();
             updatePlanetActions();
             updateTemperaturePlot();
+            refreshStarSystemView();
         });
 
         connect(materialComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
@@ -1382,6 +1394,7 @@ private:
 
     QLabel *resultLabel_ = nullptr;
     SurfaceTemperaturePlot *temperaturePlot_ = nullptr;
+    StarSystemTopView *starSystemTopView_ = nullptr;
     SurfaceMapWidget *surfaceMapWidget_ = nullptr;
     SurfaceGlobeWidget *surfaceGlobeWidget_ = nullptr;
     QPointer<SurfacePointStatusDialog> surfacePointStatusDialog_;
@@ -1833,6 +1846,7 @@ private:
         syncAdvancedRadiationWithPlanet();
         applyStellarPresetForCurrentPlanet();
         updatePlanetActions();
+        refreshStarSystemView();
     }
 
     void clearPlanetPresets() {
@@ -1880,6 +1894,35 @@ private:
         }
         updatePlanetActions();
         updateTemperaturePlot();
+        refreshStarSystemView();
+    }
+
+    void refreshStarSystemView() {
+        if (!starSystemTopView_ || !planetComboBox_) {
+            return;
+        }
+
+        QVector<StarSystemTopView::PlanetOrbit> planets;
+        planets.reserve(planetComboBox_->count());
+        for (int i = 0; i < planetComboBox_->count(); ++i) {
+            StarSystemTopView::PlanetOrbit orbit;
+            orbit.name = planetComboBox_->itemData(i, kRolePlanetName).toString();
+            orbit.semiMajorAxisAu = planetComboBox_->itemData(i, kRoleSemiMajorAxis).toDouble();
+            orbit.eccentricity = planetComboBox_->itemData(i, kRoleEccentricity).toDouble();
+            orbit.perihelionArgumentDegrees =
+                planetComboBox_->itemData(i, kRolePerihelionArgument).toDouble();
+            planets.push_back(orbit);
+        }
+
+        starSystemTopView_->setPlanets(planets);
+        updateStarSystemSelection();
+    }
+
+    void updateStarSystemSelection() {
+        if (!starSystemTopView_) {
+            return;
+        }
+        starSystemTopView_->setSelectedIndex(planetComboBox_ ? planetComboBox_->currentIndex() : -1);
     }
 
     QString formatPlanetName(const PlanetPreset &planet) const {
@@ -2542,10 +2585,10 @@ private:
                 planetComboBox_->setCurrentIndex(planetComboBox_->count() - 1);
             }
 
-        updatePlanetSemiMajorAxisLabel();
-        updatePlanetDayLengthLabel();
-        updatePlanetYearLengthLabel();
-        updatePlanetMassLabel();
+            updatePlanetSemiMajorAxisLabel();
+            updatePlanetDayLengthLabel();
+            updatePlanetYearLengthLabel();
+            updatePlanetMassLabel();
             updatePlanetRadiusLabel();
             updatePlanetDerivedLabels();
             updateAtmosphereComposition();
@@ -2553,6 +2596,7 @@ private:
             syncMaterialWithPlanet();
             syncRotationModeWithPlanet();
             updatePlanetActions();
+            refreshStarSystemView();
             dialog.accept();
         });
 
