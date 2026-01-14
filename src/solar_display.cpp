@@ -417,6 +417,7 @@ struct SurfaceGridComputationInput {
     bool hasSolarConstant = false;
     int currentHourIndex = 0;
     int logPointIndex = 0;
+    bool initializeWithMinTemperatureOnly = false;
 };
 
 struct SurfaceGridComputationResult {
@@ -921,6 +922,8 @@ public:
             updatePlanetOrbitLabels();
             syncMaterialWithPlanet();
             syncGeothermalFluxWithPlanet();
+            // При смене планеты показываем «холодный старт» без спин-апа.
+            surfaceInitializeWithMinTemperatureOnly_ = true;
             if (isSurfaceTabActive()) {
                 scheduleSurfaceGridTemperatureUpdate(true);
             } else {
@@ -1359,6 +1362,7 @@ private:
     std::optional<StellarCacheKey> lastStellarKey_;
     bool surfaceSimRunning_ = false;
     bool surfaceGridDirty_ = false;
+    bool surfaceInitializeWithMinTemperatureOnly_ = false;
     struct SurfaceSimulationState {
         int dayIndex = 0;
         int hourIndex = 0;
@@ -3250,6 +3254,7 @@ private:
         tileSettings.cloudAlbedo = input.cloudAlbedo;
         tileSettings.currentHourIndex = input.currentHourIndex;
         tileSettings.hasSolarConstant = input.hasSolarConstant;
+        tileSettings.initializeWithMinTemperatureOnly = input.initializeWithMinTemperatureOnly;
 
         SurfaceTileTemperatureCalculator tileCalculator;
         SurfaceTileTemperatureResult tileResult =
@@ -3578,6 +3583,8 @@ private:
                 lastSolarConstant_ *
                 std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
         }
+        const bool initializeWithMinTemperatureOnly = surfaceInitializeWithMinTemperatureOnly_;
+        surfaceInitializeWithMinTemperatureOnly_ = false;
 
         SurfaceGridComputationInput input;
         input.grid = surfaceGrid_;
@@ -3599,6 +3606,7 @@ private:
         input.hasSolarConstant = hasSolarConstant_;
         input.currentHourIndex = surfaceSimState_.hourIndex;
         input.logPointIndex = selectedSurfacePointIndex_;
+        input.initializeWithMinTemperatureOnly = initializeWithMinTemperatureOnly;
 
         surfaceGridCancelFlag_ = std::make_shared<std::atomic_bool>(false);
         if (!surfaceGridRequestId_) {
