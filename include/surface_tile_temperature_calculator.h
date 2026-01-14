@@ -24,6 +24,8 @@ struct SurfaceTileTemperatureSettings {
     int spinUpDays = 6;
     int currentHourIndex = 0;
     bool hasSolarConstant = false;
+    // Используется при смене планеты: показываем «холодный старт» без прогрева.
+    bool initializeWithMinTemperatureOnly = false;
 };
 
 struct SurfaceTileTemperatureResult {

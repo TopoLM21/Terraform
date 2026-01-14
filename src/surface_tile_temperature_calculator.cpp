@@ -43,6 +43,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
     const int spinUpDays = qMax(0, settings.spinUpDays);
     const bool allowInsolation =
+        !settings.initializeWithMinTemperatureOnly &&
         settings.hasSolarConstant && settings.segmentSolarConstant > 0.0 && timeStepSeconds > 0.0;
     // Если инсоляции нет, не поднимаем стартовый уровень искусственно: температура должна
     // остывать естественно, оставаясь ограниченной только физическим минимумом модели.
