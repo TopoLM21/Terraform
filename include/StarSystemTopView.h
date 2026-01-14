@@ -20,6 +20,7 @@ public:
     explicit StarSystemTopView(QWidget *parent = nullptr);
 
     void setPlanets(const QVector<PlanetOrbit> &planets);
+    void setStarParameters(double temperatureKelvin, double radiusSolar);
     void setSelectedIndex(int index);
     int selectedIndex() const;
 
@@ -36,4 +37,6 @@ private:
 
     QVector<PlanetOrbit> planets_;
     int selectedIndex_ = -1;
+    double starTemperatureKelvin_ = 5772.0;
+    double starRadiusSolar_ = 1.0;
 };
