@@ -3,6 +3,7 @@
 #include "geothermal_flux_model.h"
 
 #include <QtCore/QPair>
+#include <QtCore/QtGlobal>
 
 namespace {
 constexpr double kKgPerGigaton = 1.0e12;
@@ -17,6 +18,14 @@ constexpr StellarParameters kSweetSkyPrimary{0.3761, 2576.0, 1.0};
 constexpr StellarParameters kSweetSkySecondary{0.3741, 2349.0, 1.0};
 const QString kSweetSkyStarPresetId = QStringLiteral("sweet_sky_binary");
 constexpr double kDefaultPlanetAgeGyr = 4.5;
+
+double solarToSiderealPeriodDays(double solarPeriodDays, double orbitalPeriodDays) {
+    if (solarPeriodDays <= 0.0 || orbitalPeriodDays <= 0.0) {
+        return 0.0;
+    }
+    // 1 / P_solar = 1 / P_sidereal - 1 / P_orbit => 1 / P_sidereal = 1 / P_solar + 1 / P_orbit.
+    return 1.0 / (1.0 / solarPeriodDays + 1.0 / orbitalPeriodDays);
+}
 
 double estimateGeothermalFluxWPerM2(const GeothermalFluxModel &model,
                                     double massEarths,
@@ -123,13 +132,21 @@ QVector<PlanetPreset> solarSystemPresets() {
         estimateGeothermalFluxWPerM2(geothermalModel, 0.107, 3389.5, kDefaultPlanetAgeGyr, 0.76, 0.76);
     const double ceresGeothermalFlux =
         estimateGeothermalFluxWPerM2(geothermalModel, 0.00015, 473.0, kDefaultPlanetAgeGyr, 1.0, 1.0);
+    const double mercurySolarDayDays = 176.0;
+    const double mercuryOrbitalPeriodDays = 87.97;
+    const double mercurySiderealPeriodDays =
+        solarToSiderealPeriodDays(mercurySolarDayDays, mercuryOrbitalPeriodDays);
+    Q_ASSERT(mercurySiderealPeriodDays > 0.0);
 
     return {
         // dayLengthDays: солнечные сутки (длительность солнечного дня), не сидерический период.
         // Например, у Венеры солнечные сутки ~116.75, а 243 дня — сидерическое вращение.
-        {QStringLiteral("Меркурий"), 0.39, 176.0, 87.97, 0.2056, 0.03, 29.12, 0.0553, 2439.7,
+        {QStringLiteral("Меркурий"), 0.39, mercurySolarDayDays, mercuryOrbitalPeriodDays, 0.2056, 0.03,
+         29.12, 0.0553, 2439.7,
          QStringLiteral("regolith_mercury"), AtmosphereComposition{}, kSolarStarPresetId,
-         kSolarPrimary, std::nullopt, 0.0, false, 0.0, mercuryGeothermalFlux, 1, 1, false,
+         kSolarPrimary, std::nullopt, 0.0, false, 0.0, mercuryGeothermalFlux,
+         // Резонанс 3:2 задан по сидерическому периоду (~58.65 суток), а не по солнечным суткам.
+         3, 2, false,
          HeightSourceType::Procedural,
          QString(), 0.0, 1001u, false, true},
         {QStringLiteral("Венера"), 0.72, 116.75, 224.70, 0.0068, 177.36, 54.88, 0.815, 6051.8,
@@ -142,6 +159,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          false,
          0.75,
          venusGeothermalFlux,
+         // Свободное вращение: резонанс 1:1 задаётся в сидерическом смысле.
          1,
          1,
          false,
@@ -165,6 +183,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          false,
          0.0,
          earthGeothermalFlux,
+         // Свободное вращение: резонанс 1:1 задаётся в сидерическом смысле.
          1,
          1,
          false,
@@ -193,6 +212,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          false,
          0.0,
          marsGeothermalFlux,
+         // Свободное вращение: резонанс 1:1 задаётся в сидерическом смысле.
          1,
          1,
          false,
