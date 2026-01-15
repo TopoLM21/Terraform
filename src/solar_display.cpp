@@ -4417,6 +4417,7 @@ private:
             const double planetMassKg = massEarths * kEarthMassKg;
             surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
+        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
         const double localSeaLevelPressureAtm =
             calculateCellPressureAtmFromKg(atmosphere.totalMassKg(),
                                            massEarths,
@@ -4568,7 +4569,6 @@ private:
         if (advectedPressures.size() != surfaceGrid_.points().size()) {
             advectedPressures = pressuresAtm;
         }
-        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
         constexpr double kPressureRelaxFactor = 0.1;
         double minPressureAtm = std::numeric_limits<double>::max();
         double maxPressureAtm = std::numeric_limits<double>::lowest();
