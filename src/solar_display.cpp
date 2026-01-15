@@ -153,6 +153,8 @@ constexpr double kDefaultSurfaceRoughness = 20.0;
 constexpr double kDefaultBasinShape = 3.5;
 constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
+// Один реальный секундный тик соответствует часу системного времени (1/24 дня).
+constexpr double kStarSystemDaysPerSecond = 1.0 / 24.0;
 
 enum class TemperaturePlotSource {
     SurfaceGrid = 0,
@@ -972,6 +974,7 @@ public:
         rightTabs_->addTab(surfaceMapContainer_, tr("Поверхность"));
         connect(rightTabs_, &QTabWidget::currentChanged, this,
                 [this](int) {
+                    updateStarSystemTimerState();
                     if (!isSurfaceTabActive()) {
                         updateSurfaceCalculationIndicator();
                         return;
@@ -1233,6 +1236,11 @@ public:
         applyPrimary(StellarParameters{1.0, 5772.0, 1.0});
         applySecondary(std::nullopt);
         setPlanetPresets(solarSystemPresets(), QStringLiteral("Венера"));
+
+        starSystemTimer_ = new QTimer(this);
+        starSystemTimer_->setInterval(50);
+        connect(starSystemTimer_, &QTimer::timeout, this, [this]() { advanceStarSystemTime(); });
+        updateStarSystemTimerState();
     }
 
     ~SolarCalculatorWidget() override {
@@ -1446,6 +1454,8 @@ private:
     QTimer *temperatureUiTimer_ = nullptr;
     QTimer *surfaceSimTimer_ = nullptr;
     QTimer *surfaceGridDebounceTimer_ = nullptr;
+    QElapsedTimer starSystemElapsedTimer_;
+    QTimer *starSystemTimer_ = nullptr;
     PlanetSurfaceGrid surfaceGrid_;
     std::shared_ptr<std::atomic_bool> temperatureCancelFlag_;
     std::shared_ptr<std::atomic_bool> surfaceGridCancelFlag_;
@@ -1571,6 +1581,7 @@ private:
     } surfaceTemperatureAggregation_;
     OrbitAnimationModel surfaceOrbitAnimation_;
     bool surfaceOrbitAnimationInitialized_ = false;
+    double starSystemElapsedDays_ = 0.0;
     struct SurfaceOrbitConfig {
         double semiMajorAxis = 1.0;
         double eccentricity = 0.0;
@@ -1578,6 +1589,49 @@ private:
         double perihelionArgument = 0.0;
         bool isValid = false;
     } surfaceOrbitConfig_;
+
+    bool isStarSystemTabActive() const {
+        return rightTabs_ && starSystemTopView_ &&
+            rightTabs_->currentWidget() == starSystemTopView_;
+    }
+
+    void updateStarSystemTimerState() {
+        if (isStarSystemTabActive()) {
+            startStarSystemTimer();
+            updateStarSystemOrbits();
+        } else {
+            stopStarSystemTimer();
+        }
+    }
+
+    void startStarSystemTimer() {
+        if (!starSystemTimer_ || starSystemTimer_->isActive()) {
+            return;
+        }
+        starSystemElapsedTimer_.start();
+        starSystemTimer_->start();
+    }
+
+    void stopStarSystemTimer() {
+        if (!starSystemTimer_ || !starSystemTimer_->isActive()) {
+            return;
+        }
+        starSystemTimer_->stop();
+    }
+
+    void advanceStarSystemTime() {
+        if (!starSystemTimer_) {
+            return;
+        }
+        if (!starSystemElapsedTimer_.isValid()) {
+            starSystemElapsedTimer_.start();
+            return;
+        }
+        const qint64 elapsedMs = starSystemElapsedTimer_.restart();
+        const double elapsedSeconds = static_cast<double>(elapsedMs) / 1000.0;
+        starSystemElapsedDays_ += elapsedSeconds * kStarSystemDaysPerSecond;
+        updateStarSystemOrbits();
+    }
 
     void updateFlatHeightButtonText(bool useFlatHeight) {
         if (!flatHeightButton_) {
@@ -2126,7 +2180,7 @@ private:
                                                   primary.radiusInSolarRadii);
         }
 
-        const double elapsedDays = resolveSurfaceElapsedDays();
+        const double elapsedDays = starSystemElapsedDays_;
 
         QVector<StarSystemTopView::PlanetOrbit> planets;
         planets.reserve(planetComboBox_->count());
