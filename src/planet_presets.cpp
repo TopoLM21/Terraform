@@ -1,5 +1,7 @@
 #include "planet_presets.h"
 
+#include "rotation_period_utils.h"
+
 #include "geothermal_flux_model.h"
 
 #include <QtCore/QPair>
@@ -18,14 +20,6 @@ constexpr StellarParameters kSweetSkyPrimary{0.3761, 2576.0, 1.0};
 constexpr StellarParameters kSweetSkySecondary{0.3741, 2349.0, 1.0};
 const QString kSweetSkyStarPresetId = QStringLiteral("sweet_sky_binary");
 constexpr double kDefaultPlanetAgeGyr = 4.5;
-
-double solarToSiderealPeriodDays(double solarPeriodDays, double orbitalPeriodDays) {
-    if (solarPeriodDays <= 0.0 || orbitalPeriodDays <= 0.0) {
-        return 0.0;
-    }
-    // 1 / P_solar = 1 / P_sidereal - 1 / P_orbit => 1 / P_sidereal = 1 / P_solar + 1 / P_orbit.
-    return 1.0 / (1.0 / solarPeriodDays + 1.0 / orbitalPeriodDays);
-}
 
 double estimateGeothermalFluxWPerM2(const GeothermalFluxModel &model,
                                     double massEarths,

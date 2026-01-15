@@ -19,6 +19,7 @@ struct SurfaceTileTemperatureDefaults {
 struct SurfaceTileTemperatureSettings {
     double segmentSolarConstant = 0.0;
     double dayLengthDays = 0.0;
+    double yearLengthDays = 0.0;
     RotationMode rotationMode = RotationMode::Normal;
     double declinationDegrees = 0.0;
     double orbitalPhaseRadians = 0.0;
