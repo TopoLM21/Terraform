@@ -156,6 +156,40 @@ constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
 // Один реальный секундный тик соответствует часу системного времени (1/24 дня).
 constexpr double kStarSystemDaysPerSecond = 1.0 / 24.0;
 
+struct LongwaveFluxes {
+    double downwardFluxWPerM2 = 0.0;
+    double upwardFluxWPerM2 = 0.0;
+};
+
+LongwaveFluxes computeLongwaveFluxes(const RadiationModel &radiationModel,
+                                     RadiationModelType radiationModelType,
+                                     double surfaceEmittedFluxWPerM2,
+                                     double airTemperatureKelvin) {
+    LongwaveFluxes fluxes;
+    if (radiationModelType == RadiationModelType::Layered) {
+        const auto *layeredModel = dynamic_cast<const LayeredRadiationModel *>(&radiationModel);
+        if (layeredModel) {
+            const auto profile = layeredModel->longwaveFluxProfile(surfaceEmittedFluxWPerM2);
+            if (!profile.downwardFluxWPerM2.isEmpty()) {
+                fluxes.downwardFluxWPerM2 = profile.downwardFluxWPerM2.first();
+            }
+            if (!profile.upwardFluxWPerM2.isEmpty()) {
+                fluxes.upwardFluxWPerM2 = profile.upwardFluxWPerM2.last();
+            }
+            return fluxes;
+        }
+    }
+
+    const double transmission = qBound(0.0, radiationModel.outgoingTransmission(), 1.0);
+    const double emissivity = 1.0 - transmission;
+    // Серый двухпотоковый баланс: атмосфера излучает вверх и вниз как σ T_air^4 * ε(τ).
+    const double atmosphericEmission =
+        emissivity * kStefanBoltzmannConstant * std::pow(qMax(0.0, airTemperatureKelvin), 4.0);
+    fluxes.downwardFluxWPerM2 = atmosphericEmission;
+    fluxes.upwardFluxWPerM2 = atmosphericEmission + surfaceEmittedFluxWPerM2 * transmission;
+    return fluxes;
+}
+
 enum class TemperaturePlotSource {
     SurfaceGrid = 0,
     LatitudeModel1D = 1,
@@ -256,6 +290,7 @@ double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
                                     double initialAirTemperature,
                                     double blendedInsolation,
                                     double cloudShortwaveTransmission,
+                                    RadiationModelType radiationModelType,
                                     const RadiationModel &radiationModel,
                                     double timeStepSeconds) {
     if (pressureAtm <= 0.0 || gravity <= 0.0) {
@@ -277,14 +312,20 @@ double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
 
     // Радиационный нагрев воздуха:
     // Q_sw_air = S_blend * T_cloud * (1 - T_atm), где T_atm = incomingTransmission().
-    // Q_lw_air = F_surf * (1 - T_lw), где T_lw = outgoingTransmission().
+    // Длинноволновый баланс берём в двухпотоковой серой аппроксимации:
+    // атмосферный слой излучает вверх/вниз как σ T_air^4 * ε(τ).
     const double emittedFlux = surfaceState.emittedFlux();
     const double shortwaveAbsorbedByAir =
         blendedInsolation * cloudShortwaveTransmission *
         (1.0 - radiationModel.incomingTransmission());
-    const double longwaveAbsorbedByAir =
-        emittedFlux * (1.0 - radiationModel.outgoingTransmission());
-    const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveAbsorbedByAir;
+    const LongwaveFluxes longwaveFluxes =
+        computeLongwaveFluxes(radiationModel,
+                              radiationModelType,
+                              emittedFlux,
+                              airState.airTemperatureKelvin());
+    const double longwaveNetAir =
+        emittedFlux - (longwaveFluxes.upwardFluxWPerM2 + longwaveFluxes.downwardFluxWPerM2);
+    const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveNetAir;
     const double airRadiativeDelta =
         airRadiativeHeatingFlux * timeStepSeconds / airHeatCapacity;
     airState.setAirTemperatureKelvin(airState.airTemperatureKelvin() + airRadiativeDelta);
@@ -326,6 +367,7 @@ double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
                                         initialAirTemperature,
                                         blendedInsolation,
                                         cloudShortwaveTransmission,
+                                        radiationModelType,
                                         radiationModel,
                                         timeStepSeconds);
 }
@@ -4531,8 +4573,17 @@ private:
             // Запоминаем солнечный поток у поверхности для UI и логов.
             point.solarFluxWPerM2 = surfaceShortwaveFlux;
 
-            const double absorbedFlux = point.state.absorbedFlux(surfaceShortwaveFlux);
             const double emittedFlux = point.state.emittedFlux();
+            const double airTemperatureForFlux =
+                (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
+            const LongwaveFluxes longwaveFluxes =
+                computeLongwaveFluxes(*radiationModel,
+                                      radiationModelType,
+                                      emittedFlux,
+                                      airTemperatureForFlux);
+            // Баланс поверхности: учитываем нисходящее LW излучение атмосферы.
+            const double absorbedFlux =
+                point.state.absorbedFlux(surfaceShortwaveFlux) + longwaveFluxes.downwardFluxWPerM2;
             // Применяем шаговый радиационный баланс для состояния точки.
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             // Обновляем поверхностную температуру до переноса в соседние точки.

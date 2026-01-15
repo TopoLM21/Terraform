@@ -13,6 +13,12 @@ public:
         double shortwaveOpticalDepth = 0.0;
     };
 
+    struct LongwaveFluxProfile {
+        // Потоки на границах слоёв: индекс 0 соответствует поверхности, последний — верх атмосферы.
+        QVector<double> upwardFluxWPerM2;
+        QVector<double> downwardFluxWPerM2;
+    };
+
     LayeredRadiationModel(const AtmosphereComposition &composition,
                           double pressureAtm,
                           double baseTemperatureKelvin,
@@ -23,9 +29,11 @@ public:
     double incomingTransmission() const override;
     double outgoingTransmission() const override;
     double bottomLayerTemperatureKelvin() const;
+    LongwaveFluxProfile longwaveFluxProfile(double surfaceEmittedFluxWPerM2) const;
 
 private:
     void buildLayers();
+    double layerLongwaveEmissivity(double opticalDepth) const;
 
     AtmosphereComposition composition_;
     double pressureAtm_ = 0.0;
