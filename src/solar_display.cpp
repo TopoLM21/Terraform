@@ -438,6 +438,7 @@ struct SurfacePointStateDefaults {
     double albedo = 0.0;
     double greenhouseOpacity = 0.0;
     double minTemperatureKelvin = 3.0;
+    RadiationModelType radiationModelType = RadiationModelType::Fast;
     SurfaceMaterial material;
     SubsurfaceModelSettings subsurfaceSettings;
 };
@@ -3894,6 +3895,7 @@ private:
         SurfaceTileTemperatureDefaults tileDefaults;
         tileDefaults.minTemperatureKelvin = input.stateDefaults.minTemperatureKelvin;
         tileDefaults.greenhouseOpacity = input.stateDefaults.greenhouseOpacity;
+        tileDefaults.radiationModelType = input.stateDefaults.radiationModelType;
         tileDefaults.subsurfaceSettings = input.stateDefaults.subsurfaceSettings;
 
         SurfaceTileTemperatureSettings tileSettings;
@@ -4200,7 +4202,7 @@ private:
             return;
         }
 
-        const auto stateDefaults = buildSurfacePointStateDefaults();
+        auto stateDefaults = buildSurfacePointStateDefaults();
         if (!stateDefaults) {
             applySurfaceGridToViews();
             updateSurfaceTemperatureLegend(false, 0.0, 0.0);
@@ -4239,6 +4241,7 @@ private:
             planetComboBox_->currentData(kRoleManualGreenhouseOnTopOfAtmosphere).toBool();
         const auto radiationModelType = static_cast<RadiationModelType>(
             planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
+        stateDefaults->radiationModelType = radiationModelType;
         const RotationMode rotationMode =
             resolveRotationModeForPlanetIndex(planetComboBox_->currentIndex());
         ensureSurfaceOrbitAnimationReady();

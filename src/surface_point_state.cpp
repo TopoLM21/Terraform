@@ -14,13 +14,15 @@ constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 SurfacePointState::SurfacePointState(double initialTemperatureKelvin,
                                      double albedo,
                                      double greenhouseOpacity,
+                                     RadiationModelType radiationModelType,
                                      double minTemperatureKelvin,
                                      const SurfaceMaterial &material,
                                      const SubsurfaceModelSettings &subsurfaceSettings)
     : albedo_(qBound(0.0, albedo, 1.0)),
       greenhouseOpacity_(qBound(0.0, greenhouseOpacity, 0.999)),
       emissivity_(qBound(0.0, material.emissivity, 1.0)),
-      minTemperatureKelvin_(qMax(0.0, minTemperatureKelvin)) {
+      minTemperatureKelvin_(qMax(0.0, minTemperatureKelvin)),
+      radiationModelType_(radiationModelType) {
     const SubsurfaceGrid grid(subsurfaceSettings.layerCount,
                               subsurfaceSettings.topLayerThicknessMeters,
                               subsurfaceSettings.bottomDepthMeters);
@@ -57,7 +59,8 @@ double SurfacePointState::absorbedFlux(double solarIrradiance) const {
 
 double SurfacePointState::emittedFlux() const {
     // Длинноволновое излучение идёт от слоя τ≈1 — он «видим космосу».
-    const double tauSurface = opticalDepthFromGreenhouseOpacity(greenhouseOpacity_);
+    const double tauSurface =
+        opticalDepthFromGreenhouseOpacity(greenhouseOpacity_, radiationModelType_);
     const double emissionTemperature =
         emissionLayerTemperature(temperatureKelvin(), tauSurface);
     // Физически корректный множитель ε в законе Стефана–Больцмана.
@@ -69,7 +72,8 @@ void SurfacePointState::updateTemperature(double absorbedFlux,
                                           double dtSeconds) {
     Q_UNUSED(emittedFlux)
     const double surfaceTemperature = temperatureKelvin();
-    const double tauSurface = opticalDepthFromGreenhouseOpacity(greenhouseOpacity_);
+    const double tauSurface =
+        opticalDepthFromGreenhouseOpacity(greenhouseOpacity_, radiationModelType_);
     const double emissionTemperature =
         emissionLayerTemperature(surfaceTemperature, tauSurface);
     const double emittedNow =
