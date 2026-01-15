@@ -3923,7 +3923,9 @@ private:
         tileSettings.orbitalPhaseRadians = input.orbitalPhaseRadians;
         tileSettings.spinOrbitP = input.spinOrbitP;
         tileSettings.spinOrbitQ = input.spinOrbitQ;
+        tileSettings.atmosphere = input.atmosphere;
         tileSettings.atmospherePressureAtm = atmospherePressureAtm;
+        tileSettings.surfaceGravity = gravity;
         tileSettings.cloudAlbedo = input.cloudAlbedo;
         tileSettings.currentHourIndex = input.currentHourIndex;
         tileSettings.currentAbsoluteHourIndex = input.currentAbsoluteHourIndex;
@@ -3988,8 +3990,6 @@ private:
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
-            // Храним текущий солнечный поток в точке, чтобы показывать его в подсказке тайла.
-            point.solarFluxWPerM2 = blendedInsolation;
             const auto materialIt = input.materialsById.constFind(point.materialId);
             const SurfaceMaterial material =
                 materialIt != input.materialsById.cend()
@@ -4042,6 +4042,12 @@ private:
                                    effectiveTemperatureKelvin,
                                    gravity,
                                    input.radiationModelType);
+            // Поток у поверхности: S_surf = S_blend * T_cloud * T_atm.
+            const double surfaceShortwaveFlux =
+                blendedInsolation * cloudShortwaveTransmission *
+                radiationModel->incomingTransmission();
+            // Храним текущий солнечный поток у поверхности в точке для подсказки тайла.
+            point.solarFluxWPerM2 = surfaceShortwaveFlux;
             point.airTemperatureK =
                 resolveAirTemperatureKelvin(point.state,
                                             point.pressureAtm,
@@ -4494,10 +4500,28 @@ private:
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
             blendedInsolations.push_back(blendedInsolation);
-            // Запоминаем солнечный поток для UI, чтобы клик по тайлу показывал актуальные данные.
-            point.solarFluxWPerM2 = blendedInsolation;
+            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
+            const double planetaryAlbedo = qMax(materialAlbedo, cloudAlbedo);
+            const double effectiveFlux =
+                blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
+            const double effectiveTemperatureKelvin =
+                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
+            const auto radiationModel =
+                makeRadiationModel(atmosphere,
+                                   point.pressureAtm,
+                                   point.state.temperatureKelvin(),
+                                   effectiveTemperatureKelvin,
+                                   gravity,
+                                   radiationModelType);
+            // Поток у поверхности: S_surf = S_blend * T_cloud * T_atm.
+            const double surfaceShortwaveFlux =
+                blendedInsolation * cloudShortwaveTransmission *
+                radiationModel->incomingTransmission();
+            // Запоминаем солнечный поток у поверхности для UI и логов.
+            point.solarFluxWPerM2 = surfaceShortwaveFlux;
 
-            const double absorbedFlux = point.state.absorbedFlux(blendedInsolation);
+            const double absorbedFlux = point.state.absorbedFlux(surfaceShortwaveFlux);
             const double emittedFlux = point.state.emittedFlux();
             // Применяем шаговый радиационный баланс для состояния точки.
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
