@@ -1,5 +1,6 @@
 #pragma once
 
+#include "radiation_model.h"
 #include "subsurface_temperature_solver.h"
 
 class SurfaceMaterial;
@@ -10,6 +11,7 @@ public:
     SurfacePointState(double initialTemperatureKelvin,
                       double albedo,
                       double greenhouseOpacity,
+                      RadiationModelType radiationModelType,
                       double minTemperatureKelvin,
                       const SurfaceMaterial &material,
                       const SubsurfaceModelSettings &subsurfaceSettings);
@@ -31,5 +33,6 @@ private:
     double greenhouseOpacity_ = 0.0;
     double emissivity_ = 1.0;
     double minTemperatureKelvin_ = 3.0;
+    RadiationModelType radiationModelType_ = RadiationModelType::Fast;
     SubsurfaceTemperatureSolver solver_;
 };

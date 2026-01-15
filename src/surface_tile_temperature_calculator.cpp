@@ -101,6 +101,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         SurfacePointState state(visualizationStartTemperature,
                                 albedo,
                                 defaults.greenhouseOpacity,
+                                defaults.radiationModelType,
                                 visualizationStartTemperature,
                                 material,
                                 defaults.subsurfaceSettings);

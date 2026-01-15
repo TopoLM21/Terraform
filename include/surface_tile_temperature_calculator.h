@@ -1,6 +1,7 @@
 #pragma once
 
 #include "planet_presets.h"
+#include "radiation_model.h"
 #include "planet_surface_grid.h"
 #include "rotation_mode.h"
 #include "subsurface_temperature_solver.h"
@@ -11,6 +12,7 @@
 struct SurfaceTileTemperatureDefaults {
     double minTemperatureKelvin = 3.0;
     double greenhouseOpacity = 0.0;
+    RadiationModelType radiationModelType = RadiationModelType::Fast;
     SubsurfaceModelSettings subsurfaceSettings;
 };
 
