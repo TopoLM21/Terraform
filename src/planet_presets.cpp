@@ -74,6 +74,25 @@ AtmosphereComposition atmosphereByPressureAtm(double pressureAtm,
     }
     return composition;
 }
+
+QVector<QPair<QString, double>> normalizeAtmosphereShares(
+    const QVector<QPair<QString, double>> &shares) {
+    double totalShare = 0.0;
+    for (const auto &entry : shares) {
+        totalShare += entry.second;
+    }
+    if (totalShare <= 0.0) {
+        return shares;
+    }
+
+    // Нормализуем доли, чтобы проценты/доли сходились к 1.0 без ручного пересчета.
+    QVector<QPair<QString, double>> normalized;
+    normalized.reserve(shares.size());
+    for (const auto &entry : shares) {
+        normalized.append({entry.first, entry.second / totalShare});
+    }
+    return normalized;
+}
 } // namespace
 
 QVector<SurfaceMaterial> surfaceMaterials() {
@@ -313,6 +332,29 @@ QVector<PlanetPreset> sweetSkyPresets() {
          QString(),
          0.0,
          2003u,
+         true,
+         true},
+        {QStringLiteral("Планета 4"), 0.94, 1.9, 478.9, 0.0104, 169.82, 50.99, 2.3259, 9649.0,
+         QStringLiteral("ice"),
+         atmosphereByPressureAtm(
+             656.39,
+             2.3259,
+             9649.0,
+             normalizeAtmosphereShares({{QStringLiteral("n2"), 99.9}, {QStringLiteral("ar"), 1.0}})),
+         kSweetSkyStarPresetId,
+         kSweetSkyPrimary,
+         kSweetSkySecondary,
+         0.0,
+         false,
+         0.0,
+         0.0,
+         1,
+         1,
+         false,
+         HeightSourceType::Procedural,
+         QString(),
+         0.0,
+         2004u,
          true,
          true},
     };
