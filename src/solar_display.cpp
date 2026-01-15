@@ -304,7 +304,9 @@ double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
     }
 
     AtmosphericCellState airState(qMax(0.0, initialAirTemperature), airHeatCapacity);
-    const double couplingScale = qBound(0.0, pressureAtm, 1.0);
+    // Масштабируем теплообмен по давлению, чтобы плотные атмосферы (например, Венеры)
+    // давали более интенсивный обмен, чем разреженные.
+    const double couplingScale = qMax(0.0, pressureAtm);
     const double heatTransfer = kDefaultHeatTransferWPerM2K * couplingScale;
     if (timeStepSeconds <= 0.0) {
         return airState.airTemperatureKelvin();
@@ -4694,8 +4696,6 @@ private:
             point.state.setTemperatureKelvin(advectedTemperatures.at(i));
             // Температура после переноса хранится как поверхностная величина.
             point.temperatureK = point.state.temperatureKelvin();
-            minTemperature = qMin(minTemperature, point.temperatureK);
-            maxTemperature = qMax(maxTemperature, point.temperatureK);
             const double initialAirTemperature =
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const double blendedInsolation =
@@ -4738,6 +4738,26 @@ private:
                                           << "index=" << i
                                           << "airTemperatureK=" << point.airTemperatureK;
             }
+            const double safePressureAtm = qMax(0.0, point.pressureAtm);
+            if (safePressureAtm > 0.0 && gravity > 0.0) {
+                const double columnMassKgPerM2 =
+                    (safePressureAtm * kStandardPressurePa) / gravity;
+                const double airHeatCapacity =
+                    columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
+                if (airHeatCapacity > 0.0) {
+                    AtmosphericCellState airState(point.airTemperatureK, airHeatCapacity);
+                    // Чувствительный теплообмен: Q = h_c * (T_surface - T_air).
+                    // Устойчивость явного шага: dt < C / h_c.
+                    const double heatTransfer =
+                        kDefaultHeatTransferWPerM2K * safePressureAtm;
+                    SurfaceAtmosphereCoupler coupler(heatTransfer);
+                    coupler.exchangeSensibleHeat(point.state, airState, timeStepSeconds);
+                    point.airTemperatureK = airState.airTemperatureKelvin();
+                    point.temperatureK = point.state.temperatureKelvin();
+                }
+            }
+            minTemperature = qMin(minTemperature, point.temperatureK);
+            maxTemperature = qMax(maxTemperature, point.temperatureK);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
         }
