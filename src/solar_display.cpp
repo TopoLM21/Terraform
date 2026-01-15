@@ -21,6 +21,7 @@
 #include "surface_advection_model.h"
 #include "surface_pressure_transport_model.h"
 #include "wind_field_model.h"
+#include "rotation_period_utils.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
 #include "orbit_segment_calculator.h"
@@ -284,6 +285,13 @@ RotationMode resolveRotationModeFromPeriods(double dayLengthDays,
     }
     const bool isTidallyLocked = isTidallyLockedByPeriods(dayLengthDays, yearLengthDays);
     return isTidallyLocked ? RotationMode::TidalLocked : RotationMode::Normal;
+}
+
+double resolveSiderealDayLengthDays(double solarDayLengthDays, double yearLengthDays) {
+    // Для расчёта часового угла нужна сидерическая длительность суток.
+    const double siderealDays =
+        solarToSiderealPeriodDays(solarDayLengthDays, yearLengthDays);
+    return (siderealDays > 0.0) ? siderealDays : solarDayLengthDays;
 }
 
 double resolveSubstellarLongitudeRadians(int totalHourIndex,
@@ -578,6 +586,7 @@ struct SurfaceGridComputationInput {
     double radiusKm = 0.0;
     double cloudAlbedo = 0.0;
     double dayLengthDays = 0.0;
+    double yearLengthDays = 0.0;
     int stepsPerDay = 1;
     double manualGreenhouseOpacity = 0.0;
     bool manualGreenhouseOnTop = false;
@@ -4037,7 +4046,12 @@ private:
         }
 
         syncSurfaceOrbitAnimationToTime();
-        const int stepsPerDay = resolveSurfaceStepsPerDay();
+        const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        const double yearLengthDays =
+            planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
+        const double siderealDayLengthDays =
+            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays);
+        const int siderealStepsPerDay = qMax(1, qRound(siderealDayLengthDays * 24.0));
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
         const RotationMode rotationMode =
@@ -4052,7 +4066,7 @@ private:
                 : surfaceOrbitAnimation_.distanceAU();
         // Направление на звезду совпадает с нормалью подсолнечной точки.
         updateSurfaceStarRendering(declinationDegrees,
-                                   stepsPerDay,
+                                   siderealStepsPerDay,
                                    rotationMode,
                                    orbitalPhaseRadians,
                                    spinOrbitP,
@@ -4254,6 +4268,7 @@ private:
         SurfaceTileTemperatureSettings tileSettings;
         tileSettings.segmentSolarConstant = input.segmentSolarConstant;
         tileSettings.dayLengthDays = dayLengthDays;
+        tileSettings.yearLengthDays = input.yearLengthDays;
         tileSettings.rotationMode = input.rotationMode;
         tileSettings.declinationDegrees = input.declinationDegrees;
         tileSettings.orbitalPhaseRadians = input.orbitalPhaseRadians;
@@ -4599,7 +4614,11 @@ private:
         }
 
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
-        const int stepsPerDay = qMax(1, qRound(dayLengthDays * 24.0));
+        const double yearLengthDays =
+            planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
+        const double siderealDayLengthDays =
+            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays);
+        const int stepsPerDay = qMax(1, qRound(siderealDayLengthDays * 24.0));
         const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
         const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
         const bool manualGreenhouseOnTop =
@@ -4635,6 +4654,7 @@ private:
         input.radiusKm = radiusKm;
         input.cloudAlbedo = cloudAlbedo;
         input.dayLengthDays = dayLengthDays;
+        input.yearLengthDays = yearLengthDays;
         input.stepsPerDay = stepsPerDay;
         input.spinOrbitP = spinOrbitP;
         input.spinOrbitQ = spinOrbitQ;
@@ -4733,6 +4753,8 @@ private:
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
         const RotationMode rotationMode =
             resolveRotationModeForPlanetIndex(planetComboBox_->currentIndex());
+        const double yearLengthDays =
+            planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
         const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
         const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
         AtmosphereComposition atmosphere;
@@ -4778,7 +4800,10 @@ private:
         };
 
         syncSurfaceOrbitAnimationToTime();
-        const int stepsPerDay = surfaceTime_.stepsPerDay;
+        const double siderealDayLengthDays =
+            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays);
+        const int siderealStepsPerDay = qMax(1, qRound(siderealDayLengthDays * 24.0));
+        const int solarStepsPerDay = surfaceTime_.stepsPerDay;
         // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
@@ -4813,7 +4838,7 @@ private:
         const int totalHourIndex = surfaceTime_.surfaceTotalHourIndex();
         const double substellarLongitudeRadians =
             resolveSubstellarLongitudeRadians(totalHourIndex,
-                                              stepsPerDay,
+                                              siderealStepsPerDay,
                                               rotationMode,
                                               orbitalPhaseRadians,
                                               spinOrbitP,
@@ -5056,7 +5081,7 @@ private:
         // температура и давление после шага переноса.
         applySurfaceGridToViews();
         updateSurfaceStarRendering(declinationDegrees,
-                                   stepsPerDay,
+                                   siderealStepsPerDay,
                                    rotationMode,
                                    orbitalPhaseRadians,
                                    spinOrbitP,
@@ -5083,7 +5108,7 @@ private:
             updateSurfacePressureLegend(false, 0.0, 0.0);
         }
 
-        const bool publishDaily = surfaceTime_.hourIndex + 1 >= stepsPerDay;
+        const bool publishDaily = surfaceTime_.hourIndex + 1 >= solarStepsPerDay;
         updateSurfaceTemperatureAggregation(publishDaily, rotationMode, useAtmosphericModel);
 
         advanceSurfaceTimeFlow();

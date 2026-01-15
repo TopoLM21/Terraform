@@ -1,5 +1,7 @@
 #include "surface_tile_temperature_calculator.h"
 
+#include "rotation_period_utils.h"
+
 #include <QtCore/QtMath>
 
 #include <cmath>
@@ -52,8 +54,13 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         cloudShortwaveTransmission *= 0.2;
     }
     cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
-    const int stepsPerDay = qMax(1, qRound(settings.dayLengthDays * 24.0));
-    const double dayLengthSeconds = qMax(0.01, settings.dayLengthDays) * 86400.0;
+    const double siderealDayLengthDays =
+        solarToSiderealPeriodDays(settings.dayLengthDays, settings.yearLengthDays);
+    // Используем сидерический период для вращения, сохраняя солнечные сутки в UI.
+    const double rotationDayLengthDays =
+        (siderealDayLengthDays > 0.0) ? siderealDayLengthDays : settings.dayLengthDays;
+    const int stepsPerDay = qMax(1, qRound(rotationDayLengthDays * 24.0));
+    const double dayLengthSeconds = qMax(0.01, rotationDayLengthDays) * 86400.0;
     const double timeStepSeconds =
         (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
     const int spinUpDays = qMax(0, settings.spinUpDays);

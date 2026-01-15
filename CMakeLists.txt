@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.81 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.82 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +48,7 @@ add_executable(solar_constant
     include/surface_map_cache.h
     include/star_color.h
     include/StarSystemTopView.h
+    include/rotation_period_utils.h
     include/surface_cell.h
     include/surface_advection_model.h
     include/surface_pressure_transport_model.h
