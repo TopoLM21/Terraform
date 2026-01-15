@@ -74,6 +74,7 @@
 #include <QtWidgets/QTabWidget>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
+#include <QtCore/QPointF>
 
 #include <atomic>
 #include <cmath>
@@ -162,6 +163,7 @@ constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
 // Один реальный секундный тик соответствует часу системного времени (1/24 дня).
 constexpr double kStarSystemDaysPerSecond = 1.0 / 24.0;
+constexpr int kKeplerIterations = 8;
 
 struct LongwaveFluxes {
     double downwardFluxWPerM2 = 0.0;
@@ -212,6 +214,65 @@ double normalizeLongitudeRadians(double radians) {
 
 double longitudeDistanceRadians(double a, double b) {
     return std::abs(normalizeLongitudeRadians(a - b));
+}
+
+double normalizeOrbitAngleRadians(double angle) {
+    double wrapped = std::fmod(angle, 2.0 * M_PI);
+    if (wrapped < 0.0) {
+        wrapped += 2.0 * M_PI;
+    }
+    return wrapped;
+}
+
+double solveEccentricAnomalyRadians(double meanAnomaly, double eccentricity) {
+    // Решаем уравнение Кеплера: M = E - e * sin(E).
+    const double normalizedM = normalizeOrbitAngleRadians(meanAnomaly);
+    double eccentricAnomaly = (eccentricity < 0.8) ? normalizedM : M_PI;
+    for (int i = 0; i < kKeplerIterations; ++i) {
+        const double f = eccentricAnomaly - eccentricity * qSin(eccentricAnomaly) - normalizedM;
+        const double fPrime = 1.0 - eccentricity * qCos(eccentricAnomaly);
+        if (qFuzzyIsNull(fPrime)) {
+            break;
+        }
+        eccentricAnomaly -= f / fPrime;
+    }
+    return eccentricAnomaly;
+}
+
+double trueAnomalyFromMeanAnomalyRadians(double meanAnomaly, double eccentricity) {
+    const double eccentricAnomaly = solveEccentricAnomalyRadians(meanAnomaly, eccentricity);
+    // tan(ν/2) = sqrt((1+e)/(1-e)) * tan(E/2).
+    const double factor = qSqrt((1.0 + eccentricity) / (1.0 - eccentricity));
+    return 2.0 * std::atan2(factor * qSin(eccentricAnomaly / 2.0),
+                            qCos(eccentricAnomaly / 2.0));
+}
+
+QPointF orbitPointAuInclined(double semiMajorAxis,
+                             double eccentricity,
+                             double perihelionArgumentRadians,
+                             double inclinationRadians,
+                             double trueAnomalyRadians) {
+    // Полярное уравнение эллипса относительно фокуса:
+    // r = a * (1 - e^2) / (1 + e * cos(ν)).
+    const double radius =
+        semiMajorAxis * (1.0 - eccentricity * eccentricity) /
+        (1.0 + eccentricity * qCos(trueAnomalyRadians));
+    const double xOrbital = radius * qCos(trueAnomalyRadians);
+    const double yOrbital = radius * qSin(trueAnomalyRadians);
+
+    // Поворот орбиты на аргумент перицентра (ω).
+    const double cosArg = qCos(perihelionArgumentRadians);
+    const double sinArg = qSin(perihelionArgumentRadians);
+    const double xRotated = xOrbital * cosArg - yOrbital * sinArg;
+    const double yRotated = xOrbital * sinArg + yOrbital * cosArg;
+
+    // Наклонение i учитываем как поворот вокруг оси X (проекция на плоскость).
+    return QPointF(xRotated, yRotated * qCos(inclinationRadians));
+}
+
+QPointF orbitPointFromPhase(double distanceAu, double orbitalPhaseRadians) {
+    return QPointF(distanceAu * std::cos(orbitalPhaseRadians),
+                   distanceAu * std::sin(orbitalPhaseRadians));
 }
 
 RotationMode resolveRotationModeFromPeriods(double dayLengthDays,
@@ -1316,6 +1377,16 @@ public:
     }
 
 private:
+    struct SurfaceFluxBreakdown {
+        double totalFluxWPerM2 = 0.0;
+        double primaryFluxWPerM2 = 0.0;
+        double secondaryFluxWPerM2 = 0.0;
+        double primaryDistanceAu = 0.0;
+        double secondaryDistanceAu = 0.0;
+        bool hasPrimary = false;
+        bool hasSecondary = false;
+    };
+
     void onCalculateRequested() {
         BinarySystemParameters parameters{};
 
@@ -3803,25 +3874,165 @@ private:
         }
     }
 
-    void updateSurfaceSolarConstantLabel(double segmentSolarConstant, double distanceAu) {
+    SurfaceFluxBreakdown computeSurfaceFluxBreakdown() {
+        SurfaceFluxBreakdown breakdown;
+        if (!planetComboBox_ || planetComboBox_->currentIndex() < 0) {
+            return breakdown;
+        }
+
+        syncSurfaceOrbitAnimationToTime();
+        const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
+        const double planetDistanceAu = surfaceOrbitAnimation_.distanceAU();
+        if (planetDistanceAu <= 0.0) {
+            return breakdown;
+        }
+
+        const QPointF planetPositionAu = orbitPointFromPhase(planetDistanceAu,
+                                                             orbitalPhaseRadians);
+
+        StellarParameters primary{};
+        bool hasPrimary = readStellarParametersForRender(radiusInput_, temperatureInput_, primary);
+        if (!hasPrimary && planetComboBox_->currentIndex() >= 0) {
+            bool radiusOk = false;
+            bool temperatureOk = false;
+            const double radius =
+                planetComboBox_->currentData(kRolePrimaryStarRadius).toDouble(&radiusOk);
+            const double temperature =
+                planetComboBox_->currentData(kRolePrimaryStarTemperature).toDouble(&temperatureOk);
+            if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                primary.radiusInSolarRadii = radius;
+                primary.temperatureKelvin = temperature;
+                hasPrimary = true;
+            }
+        }
+
+        StellarParameters secondary{};
+        bool hasSecondary = false;
+        if (secondStarCheckBox_ && secondStarCheckBox_->isChecked()) {
+            hasSecondary = readStellarParametersForRender(secondaryRadiusInput_,
+                                                          secondaryTemperatureInput_,
+                                                          secondary);
+        }
+        if (!hasSecondary && planetComboBox_->currentIndex() >= 0) {
+            bool radiusOk = false;
+            bool temperatureOk = false;
+            const double radius =
+                planetComboBox_->currentData(kRoleSecondaryStarRadius).toDouble(&radiusOk);
+            const double temperature =
+                planetComboBox_->currentData(kRoleSecondaryStarTemperature).toDouble(&temperatureOk);
+            if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                secondary.radiusInSolarRadii = radius;
+                secondary.temperatureKelvin = temperature;
+                hasSecondary = true;
+            }
+        }
+
+        QPointF primaryPositionAu(0.0, 0.0);
+        QPointF secondaryPositionAu(0.0, 0.0);
+        const bool hasBinaryOrbit = planetComboBox_->currentData(kRoleHasBinaryOrbit).toBool();
+        if (hasBinaryOrbit) {
+            const double semiMajorAxisAu =
+                planetComboBox_->currentData(kRoleBinarySemiMajorAxis).toDouble();
+            const double periodDays =
+                planetComboBox_->currentData(kRoleBinaryPeriodDays).toDouble();
+            const double eccentricity =
+                planetComboBox_->currentData(kRoleBinaryEccentricity).toDouble();
+            const double inclinationDegrees =
+                planetComboBox_->currentData(kRoleBinaryInclinationDegrees).toDouble();
+            const double argumentPericenterDegreesA =
+                planetComboBox_->currentData(kRoleBinaryArgumentPericenterA).toDouble();
+            const double argumentPericenterDegreesB =
+                planetComboBox_->currentData(kRoleBinaryArgumentPericenterB).toDouble();
+            if (semiMajorAxisAu > 0.0 && periodDays > 0.0) {
+                // Положение звёзд вокруг барицентра считаем по тем же элементам,
+                // что используются в StarSystemTopView.
+                const double elapsedDays = resolveStarSystemElapsedDays();
+                const double meanAnomaly = 2.0 * M_PI * (elapsedDays / periodDays);
+                const double trueAnomaly =
+                    trueAnomalyFromMeanAnomalyRadians(meanAnomaly, eccentricity);
+                const double inclinationRadians = qDegreesToRadians(inclinationDegrees);
+                primaryPositionAu = orbitPointAuInclined(
+                    semiMajorAxisAu,
+                    eccentricity,
+                    qDegreesToRadians(argumentPericenterDegreesA),
+                    inclinationRadians,
+                    trueAnomaly);
+                secondaryPositionAu = orbitPointAuInclined(
+                    semiMajorAxisAu,
+                    eccentricity,
+                    qDegreesToRadians(argumentPericenterDegreesB),
+                    inclinationRadians,
+                    trueAnomaly);
+            }
+        }
+
+        // Поток рассчитываем по текущему расстоянию до каждой звезды:
+        // F = L / (4πr^2), где r — актуальная дистанция «звезда–планета».
+        if (hasPrimary) {
+            breakdown.primaryDistanceAu =
+                std::hypot(planetPositionAu.x() - primaryPositionAu.x(),
+                           planetPositionAu.y() - primaryPositionAu.y());
+            breakdown.primaryFluxWPerM2 = SolarCalculator::stellarFluxAtDistance(
+                primary.radiusInSolarRadii,
+                primary.temperatureKelvin,
+                breakdown.primaryDistanceAu);
+            breakdown.totalFluxWPerM2 += breakdown.primaryFluxWPerM2;
+            breakdown.hasPrimary = true;
+        }
+        if (hasSecondary) {
+            breakdown.secondaryDistanceAu =
+                std::hypot(planetPositionAu.x() - secondaryPositionAu.x(),
+                           planetPositionAu.y() - secondaryPositionAu.y());
+            breakdown.secondaryFluxWPerM2 = SolarCalculator::stellarFluxAtDistance(
+                secondary.radiusInSolarRadii,
+                secondary.temperatureKelvin,
+                breakdown.secondaryDistanceAu);
+            breakdown.totalFluxWPerM2 += breakdown.secondaryFluxWPerM2;
+            breakdown.hasSecondary = true;
+        }
+
+        return breakdown;
+    }
+
+    QString buildSurfaceFluxTooltip(const SurfaceFluxBreakdown &breakdown) const {
+        if (breakdown.totalFluxWPerM2 <= 0.0) {
+            return QStringLiteral("Солнечная постоянная недоступна.");
+        }
+
+        QStringList lines;
+        lines << QStringLiteral("Суммарный поток: %1 Вт/м²")
+                     .arg(breakdown.totalFluxWPerM2, 0, 'f', 1);
+        if (breakdown.hasPrimary) {
+            lines << QStringLiteral("Первая звезда: %1 Вт/м² (r=%2 а.е.)")
+                         .arg(breakdown.primaryFluxWPerM2, 0, 'f', 1)
+                         .arg(breakdown.primaryDistanceAu, 0, 'f', 3);
+        }
+        if (breakdown.hasSecondary) {
+            lines << QStringLiteral("Вторая звезда: %1 Вт/м² (r=%2 а.е.)")
+                         .arg(breakdown.secondaryFluxWPerM2, 0, 'f', 1)
+                         .arg(breakdown.secondaryDistanceAu, 0, 'f', 3);
+        }
+        lines << QStringLiteral("Расчёт выполнен по текущим расстояниям.");
+        return lines.join(QStringLiteral("\n"));
+    }
+
+    void updateSurfaceSolarConstantLabel(const SurfaceFluxBreakdown &breakdown) {
         if (!surfaceSolarConstantLabel_) {
             return;
         }
-        if (!hasSolarConstant_ || segmentSolarConstant <= 0.0) {
+        if (breakdown.totalFluxWPerM2 <= 0.0) {
             surfaceSolarConstantLabel_->setText(QStringLiteral("S0: —"));
-            surfaceSolarConstantLabel_->setToolTip(
-                QStringLiteral("Солнечная постоянная недоступна."));
+            surfaceSolarConstantLabel_->setToolTip(buildSurfaceFluxTooltip(breakdown));
             return;
         }
         surfaceSolarConstantLabel_->setText(
-            QStringLiteral("S0: %1 Вт/м²").arg(segmentSolarConstant, 0, 'f', 1));
-        surfaceSolarConstantLabel_->setToolTip(
-            QStringLiteral("Поток на расстоянии %1 а.е.").arg(distanceAu, 0, 'f', 3));
+            QStringLiteral("S0: %1 Вт/м²").arg(breakdown.totalFluxWPerM2, 0, 'f', 1));
+        surfaceSolarConstantLabel_->setToolTip(buildSurfaceFluxTooltip(breakdown));
     }
 
     void updateSurfaceOrbitLighting() {
         if (!surfaceGlobeWidget_ || !planetComboBox_ || planetComboBox_->currentIndex() < 0) {
-            updateSurfaceSolarConstantLabel(0.0, 0.0);
+            updateSurfaceSolarConstantLabel(SurfaceFluxBreakdown{});
             return;
         }
 
@@ -3834,6 +4045,11 @@ private:
         const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
         const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
 
+        const SurfaceFluxBreakdown breakdown = computeSurfaceFluxBreakdown();
+        const double renderDistanceAu =
+            breakdown.hasPrimary && breakdown.primaryDistanceAu > 0.0
+                ? breakdown.primaryDistanceAu
+                : surfaceOrbitAnimation_.distanceAU();
         // Направление на звезду совпадает с нормалью подсолнечной точки.
         updateSurfaceStarRendering(declinationDegrees,
                                    stepsPerDay,
@@ -3841,17 +4057,9 @@ private:
                                    orbitalPhaseRadians,
                                    spinOrbitP,
                                    spinOrbitQ,
-                                   surfaceOrbitAnimation_.distanceAU());
+                                   renderDistanceAu);
 
-        double segmentSolarConstant = 0.0;
-        const double distanceAu = surfaceOrbitAnimation_.distanceAU();
-        if (hasSolarConstant_ && lastSolarConstantDistanceAU_ > 0.0 && distanceAu > 0.0) {
-            // Поток у планеты масштабируется как 1 / r^2 относительно опорной дистанции.
-            segmentSolarConstant =
-                lastSolarConstant_ *
-                std::pow(lastSolarConstantDistanceAU_ / distanceAu, 2.0);
-        }
-        updateSurfaceSolarConstantLabel(segmentSolarConstant, distanceAu);
+        updateSurfaceSolarConstantLabel(breakdown);
     }
 
     void updateSurfaceWindField(const AtmosphereComposition &atmosphere,
@@ -4410,9 +4618,9 @@ private:
             segmentSolarConstant =
                 lastSolarConstant_ *
                 std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
-            updateSurfaceSolarConstantLabel(segmentSolarConstant, distanceAU);
+            updateSurfaceSolarConstantLabel(computeSurfaceFluxBreakdown());
         } else {
-            updateSurfaceSolarConstantLabel(0.0, 0.0);
+            updateSurfaceSolarConstantLabel(SurfaceFluxBreakdown{});
         }
         const bool initializeWithMinTemperatureOnly = surfaceInitializeWithMinTemperatureOnly_;
         surfaceInitializeWithMinTemperatureOnly_ = false;
@@ -4580,7 +4788,7 @@ private:
         const double segmentSolarConstant =
             lastSolarConstant_ *
             std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
-        updateSurfaceSolarConstantLabel(segmentSolarConstant, distanceAU);
+        updateSurfaceSolarConstantLabel(computeSurfaceFluxBreakdown());
         const double transport =
             (atmospherePressureAtm > 50.0)
                 ? 0.99
@@ -5193,7 +5401,7 @@ private:
         resultLabel_->setText(
             QStringLiteral("Введите параметры и нажмите \"Рассчитать\"."));
         updateTemperaturePlot();
-        updateSurfaceSolarConstantLabel(0.0, 0.0);
+        updateSurfaceSolarConstantLabel(SurfaceFluxBreakdown{});
     }
 };
 }  // namespace

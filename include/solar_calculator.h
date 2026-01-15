@@ -15,6 +15,9 @@ struct BinarySystemParameters {
 
 class SolarCalculator {
 public:
+    static double stellarFluxAtDistance(double radiusInSolarRadii,
+                                        double temperatureKelvin,
+                                        double distanceInAU);
     static double solarConstant(const StellarParameters &parameters);
     static double solarConstant(const BinarySystemParameters &parameters);
 };
