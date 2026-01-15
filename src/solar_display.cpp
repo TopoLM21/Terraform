@@ -1495,6 +1495,8 @@ private:
     struct SurfaceTimeFlow {
         int dayIndex = 0;
         int hourIndex = 0;
+        // Орбитальное время ведём в земных часах (24 ч/сутки), отдельно от планетных суток.
+        qint64 orbitHourIndex = 0;
         double orbitSegmentAccumulator = 0.0;
         int stepsPerDay = 24;
         double orbitSegmentStep = 0.0;
@@ -1502,21 +1504,30 @@ private:
         void reset() {
             dayIndex = 0;
             hourIndex = 0;
+            orbitHourIndex = 0;
             orbitSegmentAccumulator = 0.0;
             stepsPerDay = 24;
             orbitSegmentStep = 0.0;
         }
 
-        int totalHourIndex() const {
+        int surfaceTotalHourIndex() const {
             return (stepsPerDay > 0) ? dayIndex * stepsPerDay + hourIndex : 0;
         }
 
-        double elapsedDays() const {
+        qint64 orbitTotalHourIndex() const {
+            return orbitHourIndex;
+        }
+
+        double surfaceElapsedDays() const {
             if (stepsPerDay <= 0) {
                 return 0.0;
             }
             return static_cast<double>(dayIndex) +
                 static_cast<double>(hourIndex) / static_cast<double>(stepsPerDay);
+        }
+
+        double orbitElapsedDays() const {
+            return static_cast<double>(orbitHourIndex) / 24.0;
         }
 
         void configure(double dayLengthDays, double yearLengthDays) {
@@ -1540,7 +1551,7 @@ private:
             orbitSegmentStep =
                 static_cast<double>(kSurfaceOrbitSegmentsPerYear) / yearLengthHours;
             const double exactSegments =
-                static_cast<double>(totalHours) * orbitSegmentStep;
+                static_cast<double>(orbitHourIndex) * orbitSegmentStep;
             orbitSegmentAccumulator = exactSegments - std::floor(exactSegments);
         }
 
@@ -1549,11 +1560,12 @@ private:
                 return 0;
             }
             const double exactSegments =
-                static_cast<double>(totalHourIndex()) * orbitSegmentStep;
+                static_cast<double>(orbitHourIndex) * orbitSegmentStep;
             return static_cast<int>(std::floor(exactSegments));
         }
 
         void advanceHour(OrbitAnimationModel *orbitAnimation) {
+            ++orbitHourIndex;
             orbitSegmentAccumulator += orbitSegmentStep;
             const int segmentsToAdvance =
                 static_cast<int>(std::floor(orbitSegmentAccumulator));
@@ -1707,7 +1719,7 @@ private:
 
     double resolveSurfaceElapsedDays() {
         syncSurfaceTimeSettingsFromPlanet();
-        return surfaceTime_.elapsedDays();
+        return surfaceTime_.surfaceElapsedDays();
     }
 
     OrbitSegment resolvePlanetOrbitSegment(double elapsedDays,
@@ -2180,8 +2192,8 @@ private:
     double resolveStarSystemElapsedDays() {
         // Если есть прогресс поверхностной симуляции, синхронизируем орбитальный виджет
         // с этой шкалой времени, чтобы положение планет отражало текущую «симуляционную» дату.
-        if (surfaceSimRunning_ || surfaceTime_.totalHourIndex() > 0) {
-            return surfaceTime_.elapsedDays();
+        if (surfaceSimRunning_ || surfaceTime_.orbitTotalHourIndex() > 0) {
+            return surfaceTime_.orbitElapsedDays();
         }
         return starSystemElapsedDays_;
     }
@@ -2213,7 +2225,7 @@ private:
         }
 
         const double elapsedDays = resolveStarSystemElapsedDays();
-        if (surfaceSimRunning_ || surfaceTime_.totalHourIndex() > 0) {
+        if (surfaceSimRunning_ || surfaceTime_.orbitTotalHourIndex() > 0) {
             // Держим локальный таймер синхронизированным с симуляцией,
             // чтобы после остановки времени орбиты не перескакивали назад.
             starSystemElapsedDays_ = elapsedDays;
@@ -3606,7 +3618,7 @@ private:
             return;
         }
 
-        const int totalHourIndex = surfaceTime_.totalHourIndex();
+        const int totalHourIndex = surfaceTime_.surfaceTotalHourIndex();
         const QVector3D starDirection =
             resolveStarDirection(declinationDegrees,
                                  totalHourIndex,
@@ -4267,7 +4279,7 @@ private:
         input.segmentSolarConstant = segmentSolarConstant;
         input.hasSolarConstant = hasSolarConstant_;
         input.currentHourIndex = surfaceTime_.hourIndex;
-        input.currentAbsoluteHourIndex = surfaceTime_.totalHourIndex();
+        input.currentAbsoluteHourIndex = surfaceTime_.surfaceTotalHourIndex();
         input.logPointIndex = selectedSurfacePointIndex_;
         input.initializeWithMinTemperatureOnly = initializeWithMinTemperatureOnly;
 
@@ -4429,7 +4441,7 @@ private:
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
-        const int totalHourIndex = surfaceTime_.totalHourIndex();
+        const int totalHourIndex = surfaceTime_.surfaceTotalHourIndex();
         const double substellarLongitudeRadians =
             resolveSubstellarLongitudeRadians(totalHourIndex,
                                               stepsPerDay,
