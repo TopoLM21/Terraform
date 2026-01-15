@@ -1640,6 +1640,8 @@ private:
             return;
         }
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
+        const double yearLengthDays =
+            planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
         surfaceTime_.configure(dayLengthDays, yearLengthDays);
     }
 
@@ -1749,6 +1751,13 @@ private:
         if (!surfaceOrbitAnimationInitialized_) {
             resetSurfaceOrbitAnimation();
             advanceSurfaceOrbitAnimationToCurrentTime();
+        }
+    }
+
+    void ensureSurfaceOrbitAnimationReady() {
+        syncSurfaceOrbitAnimationToTime();
+        if (!surfaceOrbitAnimationInitialized_) {
+            resetSurfaceOrbitAnimation();
         }
     }
 
@@ -4246,7 +4255,6 @@ private:
         }
 
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
-        const double yearLengthDays = planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
         const RotationMode rotationMode =
             resolveRotationModeForPlanetIndex(planetComboBox_->currentIndex());
         const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
