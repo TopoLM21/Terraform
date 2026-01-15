@@ -1489,6 +1489,7 @@ private:
     double surfaceSimSpeedMultiplier_ = 1.0;
     std::optional<StellarCacheKey> lastStellarKey_;
     bool surfaceSimRunning_ = false;
+    bool surfaceSimResumeAfterGridUpdate_ = false;
     bool surfaceGridDirty_ = false;
     bool surfaceInitializeWithMinTemperatureOnly_ = false;
     struct SurfaceTimeFlow {
@@ -1727,15 +1728,36 @@ private:
         return calculator.orbitAtMeanAnomaly(meanAnomaly);
     }
 
-    void resetSurfaceSimulation() {
+    void resetSurfaceSimulation(bool resetTime) {
         surfaceSimRunning_ = false;
-        surfaceTime_.reset();
+        if (resetTime) {
+            surfaceTime_.reset();
+        }
         resetSurfaceTemperatureAggregation();
         resetSurfaceOrbitAnimation();
         if (surfaceSimTimer_) {
             surfaceSimTimer_->stop();
         }
         updateSurfaceSimulationUi();
+        updateStarSystemOrbits();
+    }
+
+    void resumeSurfaceSimulationAfterGridUpdate() {
+        if (!surfaceSimResumeAfterGridUpdate_) {
+            return;
+        }
+        surfaceSimResumeAfterGridUpdate_ = false;
+        if (!surfaceSimTimer_) {
+            surfaceSimTimer_ = new QTimer(this);
+            connect(surfaceSimTimer_, &QTimer::timeout, this,
+                    [this]() { advanceSurfaceSimulation(); });
+        }
+        updateSurfaceSimulationTimerInterval();
+        surfaceSimRunning_ = true;
+        updateSurfaceSimulationUi();
+        if (!temperaturePauseFlag_.load()) {
+            surfaceSimTimer_->start();
+        }
         updateStarSystemOrbits();
     }
 
@@ -4128,11 +4150,14 @@ private:
         }
 
         setSurfaceGridCalculationRunning(false);
+        resumeSurfaceSimulationAfterGridUpdate();
     }
 
     void startSurfaceGridTemperatureUpdate() {
         cancelSurfaceGridTemperatureUpdate();
-        resetSurfaceSimulation();
+        const bool wasRunning = surfaceSimRunning_;
+        resetSurfaceSimulation(false);
+        surfaceSimResumeAfterGridUpdate_ = wasRunning;
         rebuildSurfaceGrid();
         surfaceGridDirty_ = false;
         updateSurfaceHeightLegendFromGrid();
@@ -4144,6 +4169,7 @@ private:
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
+            resumeSurfaceSimulationAfterGridUpdate();
             return;
         }
 
@@ -4155,6 +4181,7 @@ private:
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
+            resumeSurfaceSimulationAfterGridUpdate();
             return;
         }
 
