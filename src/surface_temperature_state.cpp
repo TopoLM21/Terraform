@@ -1,6 +1,7 @@
 #include "surface_temperature_state.h"
 
 #include "emission_layer_model.h"
+#include "radiation_model_utils.h"
 #include "planet_presets.h"
 
 #include <QtCore/QtMath>
