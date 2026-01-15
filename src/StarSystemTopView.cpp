@@ -108,6 +108,7 @@ void StarSystemTopView::paintEvent(QPaintEvent *event) {
         qBound(kMinStarRadius, kSunRadius * qSqrt(starRadiusSolar_), kMaxStarRadius);
     painter.drawEllipse(center, starRadiusPixels, starRadiusPixels);
 
+    const QBrush baseBrush = painter.brush();
     QVector<QPointF> planetPositions = planetScreenPositions(bounds.size().toSize());
 
     for (int i = 0; i < planets_.size(); ++i) {
@@ -121,6 +122,7 @@ void StarSystemTopView::paintEvent(QPaintEvent *event) {
         QPen orbitPen(orbitColor, selected ? kOrbitWidthSelected : kOrbitWidth);
         orbitPen.setCosmetic(true);
         painter.setPen(orbitPen);
+        painter.setBrush(Qt::NoBrush);
 
         QPainterPath orbitPath;
         for (int step = 0; step <= kOrbitSteps; ++step) {
@@ -137,6 +139,7 @@ void StarSystemTopView::paintEvent(QPaintEvent *event) {
             }
         }
         painter.drawPath(orbitPath);
+        painter.setBrush(baseBrush);
 
         if (i < planetPositions.size()) {
             painter.setPen(Qt::NoPen);
