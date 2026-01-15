@@ -336,6 +336,7 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      double planetRadiusKm,
                                      double surfaceGravity,
                                      double blendedInsolation,
+                                     double baseTemperatureKelvin,
                                      double manualGreenhouseOpacity,
                                      bool useAtmosphericModel,
                                      RadiationModelType radiationModelType,
@@ -364,9 +365,11 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
         std::pow((blendedInsolation * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
                      (4.0 * kStefanBoltzmannConstant),
                  0.25);
+    // В плотных атмосферах фиксирование профиля на T_eff завышает τ, поэтому
+    // профиль строим от текущей температуры поверхности/нижнего слоя.
     const auto preRadiationModel = makeRadiationModel(atmosphere,
                                                       pressureAtm,
-                                                      tEffPre,
+                                                      baseTemperatureKelvin,
                                                       tEffPre,
                                                       surfaceGravity,
                                                       radiationModelType);
@@ -3996,6 +3999,11 @@ private:
                     ? *materialIt
                     : input.stateDefaults.material;
             const bool logDetails = i == logPointIndex;
+            const double greenhouseBaseTemperature =
+                (input.radiationModelType == RadiationModelType::Layered &&
+                 point.airTemperatureK > 0.0)
+                    ? point.airTemperatureK
+                    : point.state.temperatureKelvin();
             const double localGreenhouseOpacity =
                 computeLocalGreenhouseOpacity(input.atmosphere,
                                               material,
@@ -4003,6 +4011,7 @@ private:
                                               input.radiusKm,
                                               gravity,
                                               blendedInsolation,
+                                              greenhouseBaseTemperature,
                                               input.manualGreenhouseOpacity,
                                               useAtmosphericModel,
                                               input.radiationModelType,
@@ -4584,6 +4593,10 @@ private:
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point.materialId);
             const bool logDetails = shouldLogRadiationForPoint(i);
+            const double greenhouseBaseTemperature =
+                (radiationModelType == RadiationModelType::Layered && point.airTemperatureK > 0.0)
+                    ? point.airTemperatureK
+                    : point.state.temperatureKelvin();
             const double localGreenhouseOpacity =
                 computeLocalGreenhouseOpacity(atmosphere,
                                               material,
@@ -4591,6 +4604,7 @@ private:
                                               radiusKm,
                                               gravity,
                                               blendedInsolation,
+                                              greenhouseBaseTemperature,
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
                                               radiationModelType,
