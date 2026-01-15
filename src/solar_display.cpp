@@ -409,11 +409,20 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
         std::pow((blendedInsolation * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
                      (4.0 * kStefanBoltzmannConstant),
                  0.25);
-    // В плотных атмосферах фиксирование профиля на T_eff завышает τ, поэтому
-    // профиль строим от текущей температуры поверхности/нижнего слоя.
+    const double denseAtmosphereThresholdAtm = 0.1;
+    double profileBaseTemperatureKelvin = baseTemperatureKelvin;
+    if (pressureAtm >= denseAtmosphereThresholdAtm) {
+        // Для плотных атмосфер (например, Венера) профиль нельзя строить от
+        // экстремально холодной поверхности: модель «схлопывается» в холодный
+        // режим и не выходит из него. Поднимаем базовую температуру хотя бы до
+        // эффективной.
+        profileBaseTemperatureKelvin = qMax(baseTemperatureKelvin, tEffPre);
+    }
+    // В разреженных атмосферах (Марс/Луна) оставляем прежнюю базу, чтобы не
+    // искажать локальные условия.
     const auto preRadiationModel = makeRadiationModel(atmosphere,
                                                       pressureAtm,
-                                                      baseTemperatureKelvin,
+                                                      profileBaseTemperatureKelvin,
                                                       tEffPre,
                                                       surfaceGravity,
                                                       radiationModelType);
