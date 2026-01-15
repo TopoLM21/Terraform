@@ -1,5 +1,7 @@
 #include "StarSystemTopView.h"
 
+#include "star_color.h"
+
 #include <QtCore/QtMath>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
@@ -13,6 +15,8 @@ constexpr qreal kPlanetRadius = 3.5;
 constexpr qreal kPlanetRadiusSelected = 5.0;
 constexpr qreal kOrbitWidth = 1.2;
 constexpr qreal kOrbitWidthSelected = 2.2;
+constexpr qreal kMinStarRadius = 4.0;
+constexpr qreal kMaxStarRadius = 16.0;
 
 QPointF orbitPointAu(double semiMajorAxis,
                     double eccentricity,
@@ -54,6 +58,19 @@ void StarSystemTopView::setPlanets(const QVector<PlanetOrbit> &planets) {
     update();
 }
 
+void StarSystemTopView::setStarParameters(double temperatureKelvin, double radiusSolar) {
+    if (temperatureKelvin <= 0.0 || radiusSolar <= 0.0) {
+        return;
+    }
+    if (qFuzzyCompare(starTemperatureKelvin_, temperatureKelvin) &&
+        qFuzzyCompare(starRadiusSolar_, radiusSolar)) {
+        return;
+    }
+    starTemperatureKelvin_ = temperatureKelvin;
+    starRadiusSolar_ = radiusSolar;
+    update();
+}
+
 void StarSystemTopView::setSelectedIndex(int index) {
     if (selectedIndex_ == index) {
         return;
@@ -77,9 +94,19 @@ void StarSystemTopView::paintEvent(QPaintEvent *event) {
     const double radiusPixels = qMax(1.0, qMin(bounds.width(), bounds.height()) / 2.0 - kMarginPixels);
     const double scale = radiusPixels / maxDistanceAu;
 
+    painter.fillRect(bounds, Qt::black);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(255, 213, 79));
-    painter.drawEllipse(center, kSunRadius, kSunRadius);
+    QColor starColor = starColorFromTemperature(starTemperatureKelvin_);
+    // Яркость диска слегка зависит от радиуса звезды (визуальный акцент, не фотометрия).
+    const double brightnessFactor =
+        qBound(0.75, 0.9 + 0.1 * qSqrt(starRadiusSolar_), 1.25);
+    starColor.setRedF(qMin(1.0, starColor.redF() * brightnessFactor));
+    starColor.setGreenF(qMin(1.0, starColor.greenF() * brightnessFactor));
+    starColor.setBlueF(qMin(1.0, starColor.blueF() * brightnessFactor));
+    painter.setBrush(starColor);
+    const qreal starRadiusPixels =
+        qBound(kMinStarRadius, kSunRadius * qSqrt(starRadiusSolar_), kMaxStarRadius);
+    painter.drawEllipse(center, starRadiusPixels, starRadiusPixels);
 
     QVector<QPointF> planetPositions = planetScreenPositions(bounds.size().toSize());
 
@@ -90,7 +117,7 @@ void StarSystemTopView::paintEvent(QPaintEvent *event) {
         }
 
         const bool selected = (i == selectedIndex_);
-        const QColor orbitColor = selected ? QColor(102, 178, 255) : QColor(160, 160, 160);
+        const QColor orbitColor = selected ? QColor(102, 178, 255) : QColor(255, 255, 255);
         QPen orbitPen(orbitColor, selected ? kOrbitWidthSelected : kOrbitWidth);
         orbitPen.setCosmetic(true);
         painter.setPen(orbitPen);

@@ -1966,6 +1966,27 @@ private:
             return;
         }
 
+        StellarParameters primary{};
+        bool hasPrimary = readStellarParametersForRender(radiusInput_, temperatureInput_, primary);
+        if (!hasPrimary && planetComboBox_->currentIndex() >= 0) {
+            // Используем параметры пресета, если поля ввода звезды пустые или некорректны.
+            bool radiusOk = false;
+            bool temperatureOk = false;
+            const double radius =
+                planetComboBox_->currentData(kRolePrimaryStarRadius).toDouble(&radiusOk);
+            const double temperature =
+                planetComboBox_->currentData(kRolePrimaryStarTemperature).toDouble(&temperatureOk);
+            if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                primary.radiusInSolarRadii = radius;
+                primary.temperatureKelvin = temperature;
+                hasPrimary = true;
+            }
+        }
+        if (hasPrimary) {
+            starSystemTopView_->setStarParameters(primary.temperatureKelvin,
+                                                  primary.radiusInSolarRadii);
+        }
+
         const int stepsPerDay = resolveSurfaceStepsPerDay();
         const double elapsedDays = resolveSurfaceElapsedDays(stepsPerDay);
 
