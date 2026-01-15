@@ -1,6 +1,6 @@
 #include "surface_atmosphere_coupler.h"
 
-#include "surface_temperature_state.h"
+#include "surface_point_state.h"
 
 #include <QtCore/QtMath>
 
@@ -16,7 +16,7 @@ double SurfaceAtmosphereCoupler::heatTransferCoefficientWPerM2K() const {
     return heatTransferCoefficientWPerM2K_;
 }
 
-void SurfaceAtmosphereCoupler::exchangeSensibleHeat(SurfaceTemperatureState &surface,
+void SurfaceAtmosphereCoupler::exchangeSensibleHeat(SurfacePointState &surface,
                                                     AtmosphericCellState &atmosphere,
                                                     double dtSeconds) const {
     if (dtSeconds <= 0.0) {

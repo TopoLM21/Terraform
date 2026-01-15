@@ -68,6 +68,10 @@ double SurfacePointState::emittedFlux() const {
     return emissivity_ * kStefanBoltzmannConstant * std::pow(emissionTemperature, 4.0);
 }
 
+double SurfacePointState::topLayerHeatCapacityJPerM2K() const {
+    return solver_.topLayerHeatCapacity();
+}
+
 void SurfacePointState::updateTemperature(double absorbedFlux,
                                           double emittedFlux,
                                           double dtSeconds) {
@@ -97,6 +101,11 @@ void SurfacePointState::updateTemperature(double absorbedFlux,
         ? (radiativeDerivative * dtSeconds / heatCapacity)
         : 0.0;
     const double netFlux = (absorbedFlux - emittedNow) / (1.0 + qMax(0.0, alpha));
+    solver_.stepImplicit(netFlux, dtSeconds);
+    clampProfile();
+}
+
+void SurfacePointState::applySurfaceFlux(double netFlux, double dtSeconds) {
     solver_.stepImplicit(netFlux, dtSeconds);
     clampProfile();
 }
