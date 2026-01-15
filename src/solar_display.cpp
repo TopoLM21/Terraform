@@ -437,6 +437,7 @@ struct StellarCacheKey {
 struct SurfacePointStateDefaults {
     double albedo = 0.0;
     double greenhouseOpacity = 0.0;
+    double manualGreenhouseOpacity = 0.0;
     double minTemperatureKelvin = 3.0;
     RadiationModelType radiationModelType = RadiationModelType::Fast;
     SurfaceMaterial material;
@@ -3243,16 +3244,32 @@ private:
             return std::nullopt;
         }
 
-        const double greenhouseOpacity =
+        const double manualGreenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
         const double albedo = qBound(0.0, material->albedo, 1.0);
         // Не задаем высокий нижний порог: карта поверхности должна стартовать от физического минимума,
         // чтобы при слабой инсоляции температура могла быть значительно ниже 200 K.
         const double minTemperatureKelvin = 3.0;
 
+        AtmosphereComposition atmosphere;
+        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
+        if (atmosphereValue.isValid()) {
+            atmosphere = atmosphereValue.value<AtmosphereComposition>();
+        }
+        const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
+        const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        double atmospherePressureAtm = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+        }
+        const bool hasAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
+        const bool hasAtmospherePressure = atmospherePressureAtm > 0.0;
+        const bool atmosphereEnabled = hasAtmosphericModel || hasAtmospherePressure;
+
         SurfacePointStateDefaults defaults;
         defaults.albedo = albedo;
-        defaults.greenhouseOpacity = greenhouseOpacity;
+        defaults.manualGreenhouseOpacity = atmosphereEnabled ? 0.0 : manualGreenhouseOpacity;
+        defaults.greenhouseOpacity = defaults.manualGreenhouseOpacity;
         defaults.minTemperatureKelvin = minTemperatureKelvin;
         defaults.material = *material;
         defaults.subsurfaceSettings = buildSubsurfaceSettings();
@@ -4273,7 +4290,7 @@ private:
         input.stepsPerDay = stepsPerDay;
         input.spinOrbitP = spinOrbitP;
         input.spinOrbitQ = spinOrbitQ;
-        input.manualGreenhouseOpacity = stateDefaults->greenhouseOpacity;
+        input.manualGreenhouseOpacity = stateDefaults->manualGreenhouseOpacity;
         input.manualGreenhouseOnTop = manualGreenhouseOnTop;
         input.radiationModelType = radiationModelType;
         input.rotationMode = rotationMode;
