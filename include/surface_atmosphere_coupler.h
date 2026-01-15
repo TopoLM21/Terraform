@@ -2,7 +2,7 @@
 
 #include "atmospheric_cell_state.h"
 
-class SurfaceTemperatureState;
+class SurfacePointState;
 
 class SurfaceAtmosphereCoupler {
 public:
@@ -12,7 +12,7 @@ public:
     void setHeatTransferCoefficientWPerM2K(double coefficient);
     double heatTransferCoefficientWPerM2K() const;
 
-    void exchangeSensibleHeat(SurfaceTemperatureState &surface,
+    void exchangeSensibleHeat(SurfacePointState &surface,
                               AtmosphericCellState &atmosphere,
                               double dtSeconds) const;
 
