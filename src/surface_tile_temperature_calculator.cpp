@@ -7,6 +7,7 @@
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
+constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 
 double normalizeLongitudeRadians(double radians) {
     double wrapped = std::fmod(radians + kPi, 2.0 * kPi);
@@ -45,6 +46,12 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     result.baselineAirTemperatures.reserve(pointCount);
 
     const double clampedCloudAlbedo = qBound(0.0, settings.cloudAlbedo, 1.0);
+    double cloudShortwaveTransmission = 1.0 - clampedCloudAlbedo;
+    if (clampedCloudAlbedo > 0.7) {
+        // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+        cloudShortwaveTransmission *= 0.2;
+    }
+    cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
     const int stepsPerDay = qMax(1, qRound(settings.dayLengthDays * 24.0));
     const double dayLengthSeconds = qMax(0.01, settings.dayLengthDays) * 86400.0;
     const double timeStepSeconds =
@@ -60,6 +67,9 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const double declinationRadians = qDegreesToRadians(settings.declinationDegrees);
     const double sinDeclination = std::sin(declinationRadians);
     const double cosDeclination = std::cos(declinationRadians);
+    const double surfaceGravity = (settings.surfaceGravity > 0.0)
+        ? settings.surfaceGravity
+        : 9.80665;
 
     const bool isTidallyLocked = settings.rotationMode == RotationMode::TidalLocked;
     const double orbitalPhaseRadians = settings.orbitalPhaseRadians;
@@ -118,7 +128,22 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
             // Перенос тепла через глобальную инсоляцию отключён как нефизичный костыль;
             // допускается только атмосферный механизм переноса.
             const double blendedInsolation = localInsolation;
-            const double absorbedFlux = state.absorbedFlux(blendedInsolation);
+            const double effectiveFlux =
+                blendedInsolation * qMax(0.0, 1.0 - albedo);
+            const double effectiveTemperatureKelvin =
+                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
+            const auto radiationModel =
+                makeRadiationModel(settings.atmosphere,
+                                   settings.atmospherePressureAtm,
+                                   state.temperatureKelvin(),
+                                   effectiveTemperatureKelvin,
+                                   surfaceGravity,
+                                   defaults.radiationModelType);
+            // Поток у поверхности: S_surf = S_blend * T_cloud * T_atm.
+            const double surfaceShortwaveFlux =
+                blendedInsolation * cloudShortwaveTransmission *
+                radiationModel->incomingTransmission();
+            const double absorbedFlux = state.absorbedFlux(surfaceShortwaveFlux);
             const double emittedFlux = state.emittedFlux();
             state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             return blendedInsolation;
