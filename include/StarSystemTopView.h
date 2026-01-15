@@ -17,10 +17,22 @@ public:
         double trueAnomalyRadians = 0.0;
     };
 
+    struct BinaryOrbitParameters {
+        double semiMajorAxisAu = 0.0;
+        double periodDays = 0.0;
+        double eccentricity = 0.0;
+        double inclinationDegrees = 0.0;
+        double argumentPericenterDegreesA = 0.0;
+        double argumentPericenterDegreesB = 0.0;
+    };
+
     explicit StarSystemTopView(QWidget *parent = nullptr);
 
     void setPlanets(const QVector<PlanetOrbit> &planets);
     void setStarParameters(double temperatureKelvin, double radiusSolar);
+    void setSecondaryStarParameters(double temperatureKelvin, double radiusSolar);
+    void setBinarySystemParameters(const BinaryOrbitParameters &parameters);
+    void setBinarySystemElapsedDays(double elapsedDays);
     void setSelectedIndex(int index);
     int selectedIndex() const;
 
@@ -39,4 +51,10 @@ private:
     int selectedIndex_ = -1;
     double starTemperatureKelvin_ = 5772.0;
     double starRadiusSolar_ = 1.0;
+    bool hasSecondaryStar_ = false;
+    double secondaryStarTemperatureKelvin_ = 0.0;
+    double secondaryStarRadiusSolar_ = 0.0;
+    bool hasBinarySystem_ = false;
+    BinaryOrbitParameters binaryParameters_;
+    double binaryElapsedDays_ = 0.0;
 };

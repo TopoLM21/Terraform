@@ -82,6 +82,14 @@ struct PlanetPreset {
     bool useContinentsHeight = false;
     // Явно выбранный пользователем режим вращения переопределяет авто-оценку.
     bool rotationModeOverride = false;
+    // Параметры бинарной орбиты для визуализации (вокруг барицентра).
+    bool hasBinaryOrbit = false;
+    double binarySemiMajorAxisAu = 0.0;
+    double binaryPeriodDays = 0.0;
+    double binaryEccentricity = 0.0;
+    double binaryInclinationDegrees = 0.0;
+    double binaryArgumentPericenterDegreesA = 0.0;
+    double binaryArgumentPericenterDegreesB = 0.0;
 };
 
 // Допуск 2% от орбитального периода: сглаживает округления и различия между
