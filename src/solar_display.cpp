@@ -1732,6 +1732,7 @@ private:
         surfaceSimRunning_ = false;
         if (resetTime) {
             surfaceTime_.reset();
+            starSystemElapsedDays_ = 0.0;
         }
         resetSurfaceTemperatureAggregation();
         resetSurfaceOrbitAnimation();
@@ -2176,6 +2177,15 @@ private:
         starSystemTopView_->setSelectedIndex(planetComboBox_ ? planetComboBox_->currentIndex() : -1);
     }
 
+    double resolveStarSystemElapsedDays() {
+        // Если есть прогресс поверхностной симуляции, синхронизируем орбитальный виджет
+        // с этой шкалой времени, чтобы положение планет отражало текущую «симуляционную» дату.
+        if (surfaceSimRunning_ || surfaceTime_.totalHourIndex() > 0) {
+            return surfaceTime_.elapsedDays();
+        }
+        return starSystemElapsedDays_;
+    }
+
     void updateStarSystemOrbits() {
         if (!starSystemTopView_ || !planetComboBox_) {
             return;
@@ -2202,7 +2212,12 @@ private:
                                                   primary.radiusInSolarRadii);
         }
 
-        const double elapsedDays = starSystemElapsedDays_;
+        const double elapsedDays = resolveStarSystemElapsedDays();
+        if (surfaceSimRunning_ || surfaceTime_.totalHourIndex() > 0) {
+            // Держим локальный таймер синхронизированным с симуляцией,
+            // чтобы после остановки времени орбиты не перескакивали назад.
+            starSystemElapsedDays_ = elapsedDays;
+        }
 
         QVector<StarSystemTopView::PlanetOrbit> planets;
         planets.reserve(planetComboBox_->count());
