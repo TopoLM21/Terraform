@@ -139,6 +139,13 @@ constexpr int kRoleStarPresetId = Qt::UserRole + 30;
 constexpr int kRoleRotationModeOverride = Qt::UserRole + 31;
 constexpr int kRoleSpinOrbitP = Qt::UserRole + 32;
 constexpr int kRoleSpinOrbitQ = Qt::UserRole + 33;
+constexpr int kRoleBinarySemiMajorAxis = Qt::UserRole + 34;
+constexpr int kRoleBinaryPeriodDays = Qt::UserRole + 35;
+constexpr int kRoleBinaryEccentricity = Qt::UserRole + 36;
+constexpr int kRoleBinaryInclinationDegrees = Qt::UserRole + 37;
+constexpr int kRoleBinaryArgumentPericenterA = Qt::UserRole + 38;
+constexpr int kRoleBinaryArgumentPericenterB = Qt::UserRole + 39;
+constexpr int kRoleHasBinaryOrbit = Qt::UserRole + 40;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -2281,6 +2288,32 @@ private:
             starSystemTopView_->setStarParameters(primary.temperatureKelvin,
                                                   primary.radiusInSolarRadii);
         }
+        StellarParameters secondary{};
+        bool hasSecondary = false;
+        if (secondStarCheckBox_ && secondStarCheckBox_->isChecked()) {
+            hasSecondary = readStellarParametersForRender(secondaryRadiusInput_,
+                                                          secondaryTemperatureInput_,
+                                                          secondary);
+        }
+        if (!hasSecondary && planetComboBox_->currentIndex() >= 0) {
+            bool radiusOk = false;
+            bool temperatureOk = false;
+            const double radius =
+                planetComboBox_->currentData(kRoleSecondaryStarRadius).toDouble(&radiusOk);
+            const double temperature =
+                planetComboBox_->currentData(kRoleSecondaryStarTemperature).toDouble(&temperatureOk);
+            if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                secondary.radiusInSolarRadii = radius;
+                secondary.temperatureKelvin = temperature;
+                hasSecondary = true;
+            }
+        }
+        if (hasSecondary) {
+            starSystemTopView_->setSecondaryStarParameters(secondary.temperatureKelvin,
+                                                           secondary.radiusInSolarRadii);
+        } else {
+            starSystemTopView_->setSecondaryStarParameters(0.0, 0.0);
+        }
 
         const double elapsedDays = resolveStarSystemElapsedDays();
         if (surfaceSimRunning_ || surfaceTime_.orbitTotalHourIndex() > 0) {
@@ -2309,6 +2342,25 @@ private:
         }
 
         starSystemTopView_->setPlanets(planets);
+        StarSystemTopView::BinaryOrbitParameters binaryParameters;
+        const bool hasBinaryOrbit =
+            planetComboBox_->currentData(kRoleHasBinaryOrbit).toBool();
+        if (hasBinaryOrbit) {
+            binaryParameters.semiMajorAxisAu =
+                planetComboBox_->currentData(kRoleBinarySemiMajorAxis).toDouble();
+            binaryParameters.periodDays =
+                planetComboBox_->currentData(kRoleBinaryPeriodDays).toDouble();
+            binaryParameters.eccentricity =
+                planetComboBox_->currentData(kRoleBinaryEccentricity).toDouble();
+            binaryParameters.inclinationDegrees =
+                planetComboBox_->currentData(kRoleBinaryInclinationDegrees).toDouble();
+            binaryParameters.argumentPericenterDegreesA =
+                planetComboBox_->currentData(kRoleBinaryArgumentPericenterA).toDouble();
+            binaryParameters.argumentPericenterDegreesB =
+                planetComboBox_->currentData(kRoleBinaryArgumentPericenterB).toDouble();
+        }
+        starSystemTopView_->setBinarySystemParameters(binaryParameters);
+        starSystemTopView_->setBinarySystemElapsedDays(elapsedDays);
         updateStarSystemSelection();
         updateSurfaceOrbitLighting();
     }
@@ -2602,6 +2654,19 @@ private:
         planetComboBox_->setItemData(index, planet.hasSeaLevel, kRoleHasSeaLevel);
         planetComboBox_->setItemData(index, false, kRoleFlatHeight);
         planetComboBox_->setItemData(index, planet.starPresetId, kRoleStarPresetId);
+        planetComboBox_->setItemData(index, planet.hasBinaryOrbit, kRoleHasBinaryOrbit);
+        planetComboBox_->setItemData(index, planet.binarySemiMajorAxisAu, kRoleBinarySemiMajorAxis);
+        planetComboBox_->setItemData(index, planet.binaryPeriodDays, kRoleBinaryPeriodDays);
+        planetComboBox_->setItemData(index, planet.binaryEccentricity, kRoleBinaryEccentricity);
+        planetComboBox_->setItemData(index,
+                                     planet.binaryInclinationDegrees,
+                                     kRoleBinaryInclinationDegrees);
+        planetComboBox_->setItemData(index,
+                                     planet.binaryArgumentPericenterDegreesA,
+                                     kRoleBinaryArgumentPericenterA);
+        planetComboBox_->setItemData(index,
+                                     planet.binaryArgumentPericenterDegreesB,
+                                     kRoleBinaryArgumentPericenterB);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -2967,6 +3032,13 @@ private:
                                              planetComboBox_->itemData(existingIndex, kRoleFlatHeight),
                                              kRoleFlatHeight);
                 planetComboBox_->setItemData(existingIndex, preset.starPresetId, kRoleStarPresetId);
+                planetComboBox_->setItemData(existingIndex, false, kRoleHasBinaryOrbit);
+                planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinarySemiMajorAxis);
+                planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinaryPeriodDays);
+                planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinaryEccentricity);
+                planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinaryInclinationDegrees);
+                planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinaryArgumentPericenterA);
+                planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinaryArgumentPericenterB);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
