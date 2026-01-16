@@ -5066,12 +5066,31 @@ private:
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             const double advectedAtm = advectedPressures.at(i);
+            double airColumnTemperatureK = point.airTemperatureK;
+            if (airColumnTemperatureK <= 0.0 && radiationModelType == RadiationModelType::Layered) {
+                const auto radiationModel =
+                    makeRadiationModel(atmosphere,
+                                       point.pressureAtm,
+                                       point.state.temperatureKelvin(),
+                                       effectiveTemperatureKelvin,
+                                       gravity,
+                                       radiationModelType);
+                const auto *layeredModel =
+                    dynamic_cast<const LayeredRadiationModel *>(radiationModel.get());
+                if (layeredModel) {
+                    airColumnTemperatureK = layeredModel->bottomLayerTemperatureKelvin();
+                }
+            }
+            if (airColumnTemperatureK <= 0.0) {
+                airColumnTemperatureK = effectiveTemperatureKelvin;
+            }
             // Барометрическая релаксация возвращает поле давления к
-            // физически согласованному профилю P(z) при текущей температуре.
+            // физически согласованному профилю P(z) при температуре столба воздуха
+            // (а не поверхности), чтобы ночное охлаждение не схлопывало давление.
             const double barometricAtm =
                 AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
                                                               point.heightKm * 1000.0,
-                                                              point.temperatureK,
+                                                              airColumnTemperatureK,
                                                               atmosphere,
                                                               gravity);
             const double relaxedAtm =
