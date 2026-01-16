@@ -148,6 +148,7 @@ constexpr int kRoleBinaryInclinationDegrees = Qt::UserRole + 37;
 constexpr int kRoleBinaryArgumentPericenterA = Qt::UserRole + 38;
 constexpr int kRoleBinaryArgumentPericenterB = Qt::UserRole + 39;
 constexpr int kRoleHasBinaryOrbit = Qt::UserRole + 40;
+constexpr int kRoleAtmosphereDisabled = Qt::UserRole + 41;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -776,6 +777,10 @@ public:
         flatHeightButton_->setCheckable(true);
         flatHeightButton_->setEnabled(false);
         updateFlatHeightButtonText(false);
+        disableAtmosphereButton_ = new QPushButton(QStringLiteral("Отключить атмосферу"), this);
+        disableAtmosphereButton_->setCheckable(true);
+        disableAtmosphereButton_->setEnabled(false);
+        updateAtmosphereButtonText(false);
         cloudAlbedoSpinBox_ = new QDoubleSpinBox(this);
         cloudAlbedoSpinBox_->setRange(0.0, 1.0);
         cloudAlbedoSpinBox_->setDecimals(2);
@@ -843,7 +848,13 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
         planetControlsLayout->addRow(QStringLiteral("Резонанс вращения p:q:"), spinOrbitWidget);
         planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
-        planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), flatHeightButton_);
+        auto *heightAtmosphereButtons = new QWidget(this);
+        auto *heightAtmosphereLayout = new QHBoxLayout(heightAtmosphereButtons);
+        heightAtmosphereLayout->setContentsMargins(0, 0, 0, 0);
+        heightAtmosphereLayout->addWidget(flatHeightButton_);
+        heightAtmosphereLayout->addWidget(disableAtmosphereButton_);
+        heightAtmosphereLayout->addStretch();
+        planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), heightAtmosphereButtons);
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
         planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
         planetControlsLayout->addRow(QString(), advancedRadiationCheckBox_);
@@ -1168,6 +1179,7 @@ public:
             syncSpinOrbitWithPlanet();
             syncHeightSeedWithPlanet();
             syncFlatHeightWithPlanet();
+            syncAtmosphereDisableWithPlanet();
             syncCloudAlbedoWithPlanet();
             syncManualGreenhouseOnTopWithPlanet();
             syncAdvancedRadiationWithPlanet();
@@ -1258,6 +1270,16 @@ public:
                 return;
             }
             syncPlanetFlatHeightWithSelection(checked);
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
+        });
+
+        connect(disableAtmosphereButton_, &QPushButton::toggled, this, [this](bool checked) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetAtmosphereDisabledWithSelection(checked);
+            updateAtmosphereComposition();
             updateTemperaturePlot();
             updateSurfaceGridTemperatures();
         });
@@ -1547,6 +1569,7 @@ private:
     QSpinBox *spinOrbitQSpinBox_ = nullptr;
     QSpinBox *heightSeedSpinBox_ = nullptr;
     QPushButton *flatHeightButton_ = nullptr;
+    QPushButton *disableAtmosphereButton_ = nullptr;
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
     QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
     QCheckBox *advancedRadiationCheckBox_ = nullptr;
@@ -1797,6 +1820,15 @@ private:
         }
         flatHeightButton_->setText(useFlatHeight ? QStringLiteral("Вернуть высоту")
                                                  : QStringLiteral("Обнулить высоту"));
+    }
+
+    void updateAtmosphereButtonText(bool atmosphereDisabled) {
+        if (!disableAtmosphereButton_) {
+            return;
+        }
+        disableAtmosphereButton_->setText(atmosphereDisabled
+                                              ? QStringLiteral("Вернуть атмосферу")
+                                              : QStringLiteral("Отключить атмосферу"));
     }
 
     void updateTemperaturePauseUi(bool paused) {
@@ -2267,6 +2299,7 @@ private:
         syncRotationModeWithPlanet();
         syncHeightSeedWithPlanet();
         syncFlatHeightWithPlanet();
+        syncAtmosphereDisableWithPlanet();
         syncCloudAlbedoWithPlanet();
         syncManualGreenhouseOnTopWithPlanet();
         syncAdvancedRadiationWithPlanet();
@@ -2305,6 +2338,12 @@ private:
             flatHeightButton_->setChecked(false);
             flatHeightButton_->setEnabled(false);
             updateFlatHeightButtonText(false);
+        }
+        if (disableAtmosphereButton_) {
+            const QSignalBlocker atmosphereBlocker(disableAtmosphereButton_);
+            disableAtmosphereButton_->setChecked(false);
+            disableAtmosphereButton_->setEnabled(false);
+            updateAtmosphereButtonText(false);
         }
         if (cloudAlbedoSpinBox_) {
             const QSignalBlocker cloudBlocker(cloudAlbedoSpinBox_);
@@ -2588,12 +2627,40 @@ private:
         if (!atmosphereWidget_) {
             return;
         }
+        const int index = planetComboBox_ ? planetComboBox_->currentIndex() : -1;
+        const bool atmosphereDisabled = isAtmosphereDisabledForIndex(index);
         const QVariant compositionValue = planetComboBox_->currentData(kRoleAtmosphere);
         if (!compositionValue.isValid()) {
             atmosphereWidget_->setComposition(AtmosphereComposition{});
+            atmosphereWidget_->setEnabled(!atmosphereDisabled);
             return;
         }
         atmosphereWidget_->setComposition(compositionValue.value<AtmosphereComposition>());
+        atmosphereWidget_->setEnabled(!atmosphereDisabled);
+    }
+
+    bool isAtmosphereDisabledForIndex(int index) const {
+        if (!planetComboBox_ || index < 0) {
+            return false;
+        }
+        return planetComboBox_->itemData(index, kRoleAtmosphereDisabled).toBool();
+    }
+
+    AtmosphereComposition currentAtmosphereForCalculations() const {
+        AtmosphereComposition atmosphere;
+        if (!planetComboBox_) {
+            return atmosphere;
+        }
+        const int index = planetComboBox_->currentIndex();
+        if (isAtmosphereDisabledForIndex(index)) {
+            // Атмосфера может быть временно отключена кнопкой, не теряя заданный состав.
+            return atmosphere;
+        }
+        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
+        if (atmosphereValue.isValid()) {
+            atmosphere = atmosphereValue.value<AtmosphereComposition>();
+        }
+        return atmosphere;
     }
 
     int latitudeStepDegrees() const {
@@ -2733,6 +2800,7 @@ private:
         planetComboBox_->setItemData(index, planet.useContinentsHeight, kRoleUseContinentsHeight);
         planetComboBox_->setItemData(index, planet.hasSeaLevel, kRoleHasSeaLevel);
         planetComboBox_->setItemData(index, false, kRoleFlatHeight);
+        planetComboBox_->setItemData(index, false, kRoleAtmosphereDisabled);
         planetComboBox_->setItemData(index, planet.starPresetId, kRoleStarPresetId);
         planetComboBox_->setItemData(index, planet.hasBinaryOrbit, kRoleHasBinaryOrbit);
         planetComboBox_->setItemData(index, planet.binarySemiMajorAxisAu, kRoleBinarySemiMajorAxis);
@@ -3111,6 +3179,10 @@ private:
                 planetComboBox_->setItemData(existingIndex,
                                              planetComboBox_->itemData(existingIndex, kRoleFlatHeight),
                                              kRoleFlatHeight);
+                planetComboBox_->setItemData(
+                    existingIndex,
+                    planetComboBox_->itemData(existingIndex, kRoleAtmosphereDisabled),
+                    kRoleAtmosphereDisabled);
                 planetComboBox_->setItemData(existingIndex, preset.starPresetId, kRoleStarPresetId);
                 planetComboBox_->setItemData(existingIndex, false, kRoleHasBinaryOrbit);
                 planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinarySemiMajorAxis);
@@ -3233,6 +3305,31 @@ private:
         updateFlatHeightButtonText(useFlatHeight);
     }
 
+    void syncAtmosphereDisableWithPlanet() {
+        if (!disableAtmosphereButton_) {
+            return;
+        }
+
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            const QSignalBlocker blocker(disableAtmosphereButton_);
+            disableAtmosphereButton_->setChecked(false);
+            disableAtmosphereButton_->setEnabled(false);
+            updateAtmosphereButtonText(false);
+            return;
+        }
+
+        const bool atmosphereDisabled =
+            planetComboBox_->itemData(index, kRoleAtmosphereDisabled).toBool();
+        const QSignalBlocker blocker(disableAtmosphereButton_);
+        disableAtmosphereButton_->setChecked(atmosphereDisabled);
+        disableAtmosphereButton_->setEnabled(true);
+        updateAtmosphereButtonText(atmosphereDisabled);
+        if (atmosphereWidget_) {
+            atmosphereWidget_->setEnabled(!atmosphereDisabled);
+        }
+    }
+
     void syncCloudAlbedoWithPlanet() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0 || !cloudAlbedoSpinBox_) {
@@ -3302,6 +3399,18 @@ private:
         }
         planetComboBox_->setItemData(index, useFlatHeight, kRoleFlatHeight);
         updateFlatHeightButtonText(useFlatHeight);
+    }
+
+    void syncPlanetAtmosphereDisabledWithSelection(bool atmosphereDisabled) {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+        planetComboBox_->setItemData(index, atmosphereDisabled, kRoleAtmosphereDisabled);
+        updateAtmosphereButtonText(atmosphereDisabled);
+        if (atmosphereWidget_) {
+            atmosphereWidget_->setEnabled(!atmosphereDisabled);
+        }
     }
 
     void syncPlanetMaterialWithSelection() {
@@ -3459,11 +3568,7 @@ private:
         // чтобы при слабой инсоляции температура могла быть значительно ниже 200 K.
         const double minTemperatureKelvin = 3.0;
 
-        AtmosphereComposition atmosphere;
-        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
-        if (atmosphereValue.isValid()) {
-            atmosphere = atmosphereValue.value<AtmosphereComposition>();
-        }
+        const AtmosphereComposition atmosphere = currentAtmosphereForCalculations();
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         double atmospherePressureAtm = 0.0;
@@ -4594,11 +4699,7 @@ private:
             return;
         }
 
-        AtmosphereComposition atmosphere;
-        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
-        if (atmosphereValue.isValid()) {
-            atmosphere = atmosphereValue.value<AtmosphereComposition>();
-        }
+        const AtmosphereComposition atmosphere = currentAtmosphereForCalculations();
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         const double cloudAlbedo =
@@ -4757,11 +4858,7 @@ private:
             planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
         const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
         const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
-        AtmosphereComposition atmosphere;
-        const QVariant atmosphereValue = planetComboBox_->currentData(kRoleAtmosphere);
-        if (atmosphereValue.isValid()) {
-            atmosphere = atmosphereValue.value<AtmosphereComposition>();
-        }
+        const AtmosphereComposition atmosphere = currentAtmosphereForCalculations();
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         double atmospherePressureAtm = 0.0;
