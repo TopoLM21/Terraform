@@ -26,6 +26,7 @@ struct SurfaceTileTemperatureSettings {
     // Резонанс вращения p:q, безразмерный множитель спиновой фазы.
     int spinOrbitP = 1;
     int spinOrbitQ = 1;
+    bool isRetrograde = false;
     AtmosphereComposition atmosphere;
     double atmospherePressureAtm = 0.0;
     double surfaceGravity = 0.0;

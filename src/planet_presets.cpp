@@ -148,7 +148,9 @@ QVector<PlanetPreset> solarSystemPresets() {
     const double mercurySolarDayDays = 176.0;
     const double mercuryOrbitalPeriodDays = 87.97;
     const double mercurySiderealPeriodDays =
-        solarToSiderealPeriodDays(mercurySolarDayDays, mercuryOrbitalPeriodDays);
+        solarToSiderealPeriodDays(mercurySolarDayDays,
+                                  mercuryOrbitalPeriodDays,
+                                  isRetrogradeRotation(0.03));
     Q_ASSERT(mercurySiderealPeriodDays > 0.0);
 
     return {

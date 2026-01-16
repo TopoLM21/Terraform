@@ -288,10 +288,12 @@ RotationMode resolveRotationModeFromPeriods(double dayLengthDays,
     return isTidallyLocked ? RotationMode::TidalLocked : RotationMode::Normal;
 }
 
-double resolveSiderealDayLengthDays(double solarDayLengthDays, double yearLengthDays) {
+double resolveSiderealDayLengthDays(double solarDayLengthDays,
+                                    double yearLengthDays,
+                                    bool isRetrograde) {
     // Для расчёта часового угла нужна сидерическая длительность суток.
     const double siderealDays =
-        solarToSiderealPeriodDays(solarDayLengthDays, yearLengthDays);
+        solarToSiderealPeriodDays(solarDayLengthDays, yearLengthDays, isRetrograde);
     return (siderealDays > 0.0) ? siderealDays : solarDayLengthDays;
 }
 
@@ -300,7 +302,8 @@ double resolveSubstellarLongitudeRadians(int totalHourIndex,
                                          RotationMode rotationMode,
                                          double orbitalPhaseRadians,
                                          int spinOrbitP,
-                                         int spinOrbitQ) {
+                                         int spinOrbitQ,
+                                         bool isRetrograde) {
     if (rotationMode == RotationMode::TidalLocked) {
         return 0.0;
     }
@@ -317,7 +320,9 @@ double resolveSubstellarLongitudeRadians(int totalHourIndex,
     // Фаза вращения планеты (λ_spin) выражается через резонанс p:q:
     // λ_spin = 2π * (t / P_spin) * (p / q), где t и P_spin — время и период вращения
     // в одинаковых единицах (здесь шаги суток), а p/q — безразмерное отношение частот.
-    const double spinPhase = phase * resonanceRatio;
+    const double spinDirection = isRetrograde ? -1.0 : 1.0;
+    // Ретроградное вращение инвертирует направление изменения часового угла.
+    const double spinPhase = spinDirection * phase * resonanceRatio;
     const double hourAngle = spinPhase - M_PI;
     // Субзвёздная долгота λ* задаётся разностью орбитальной и спиновой фаз:
     // λ* = λ_orbit - λ_spin, где λ_orbit — истинная долгота звезды (фаза орбиты),
@@ -339,7 +344,8 @@ QVector3D resolveStarDirection(double declinationDegrees,
                                RotationMode rotationMode,
                                double orbitalPhaseRadians,
                                int spinOrbitP,
-                               int spinOrbitQ) {
+                               int spinOrbitQ,
+                               bool isRetrograde) {
     const double declinationRadians = qDegreesToRadians(declinationDegrees);
     const double substellarLongitude =
         resolveSubstellarLongitudeRadians(totalHourIndex,
@@ -347,7 +353,8 @@ QVector3D resolveStarDirection(double declinationDegrees,
                                           rotationMode,
                                           orbitalPhaseRadians,
                                           spinOrbitP,
-                                          spinOrbitQ);
+                                          spinOrbitQ,
+                                          isRetrograde);
     // Направление на звезду совпадает с нормалью подсолнечной точки.
     return directionFromLatLonRadians(declinationRadians, substellarLongitude);
 }
@@ -597,6 +604,7 @@ struct SurfaceGridComputationInput {
     double orbitalPhaseRadians = 0.0;
     int spinOrbitP = 1;
     int spinOrbitQ = 1;
+    bool isRetrograde = false;
     double segmentSolarConstant = 0.0;
     bool hasSolarConstant = false;
     int currentHourIndex = 0;
@@ -627,6 +635,7 @@ struct SurfaceGridComputationResult {
     RotationMode rotationMode = RotationMode::Normal;
     int spinOrbitP = 1;
     int spinOrbitQ = 1;
+    bool isRetrograde = false;
 };
 
 class SolarCalculatorWidget : public QWidget {
@@ -3944,6 +3953,7 @@ private:
                                     double orbitalPhaseRadians,
                                     int spinOrbitP,
                                     int spinOrbitQ,
+                                    bool isRetrograde,
                                     double distanceAu) {
         if (!surfaceGlobeWidget_) {
             return;
@@ -3957,7 +3967,8 @@ private:
                                  rotationMode,
                                  orbitalPhaseRadians,
                                  spinOrbitP,
-                                 spinOrbitQ);
+                                 spinOrbitQ,
+                                 isRetrograde);
         surfaceGlobeWidget_->setStarDirection(starDirection);
 
         StellarParameters primary{};
@@ -4154,8 +4165,10 @@ private:
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
         const double yearLengthDays =
             planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
+        const bool isRetrograde =
+            isRetrogradeRotation(planetComboBox_->currentData(kRoleObliquity).toDouble());
         const double siderealDayLengthDays =
-            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays);
+            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays, isRetrograde);
         const int siderealStepsPerDay = qMax(1, qRound(siderealDayLengthDays * 24.0));
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
@@ -4176,6 +4189,7 @@ private:
                                    orbitalPhaseRadians,
                                    spinOrbitP,
                                    spinOrbitQ,
+                                   isRetrograde,
                                    renderDistanceAu);
 
         updateSurfaceSolarConstantLabel(breakdown);
@@ -4312,6 +4326,7 @@ private:
         result.rotationMode = input.rotationMode;
         result.spinOrbitP = input.spinOrbitP;
         result.spinOrbitQ = input.spinOrbitQ;
+        result.isRetrograde = input.isRetrograde;
 
         const auto shouldCancel = [&cancelFlag, requestIdCounter, requestId]() {
             if (cancelFlag && cancelFlag->load()) {
@@ -4379,6 +4394,7 @@ private:
         tileSettings.orbitalPhaseRadians = input.orbitalPhaseRadians;
         tileSettings.spinOrbitP = input.spinOrbitP;
         tileSettings.spinOrbitQ = input.spinOrbitQ;
+        tileSettings.isRetrograde = input.isRetrograde;
         tileSettings.atmosphere = input.atmosphere;
         tileSettings.atmospherePressureAtm = atmospherePressureAtm;
         tileSettings.surfaceGravity = gravity;
@@ -4629,6 +4645,7 @@ private:
                                    result.orbitalPhaseRadians,
                                    result.spinOrbitP,
                                    result.spinOrbitQ,
+                                   result.isRetrograde,
                                    distanceAu);
         if (result.hasTemperatureRange && result.minTemperatureK <= result.maxTemperatureK) {
             applySurfaceTemperatureRangeToViews(result.minTemperatureK, result.maxTemperatureK);
@@ -4715,8 +4732,10 @@ private:
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
         const double yearLengthDays =
             planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
+        const bool isRetrograde =
+            isRetrogradeRotation(planetComboBox_->currentData(kRoleObliquity).toDouble());
         const double siderealDayLengthDays =
-            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays);
+            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays, isRetrograde);
         const int stepsPerDay = qMax(1, qRound(siderealDayLengthDays * 24.0));
         const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
         const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
@@ -4757,6 +4776,7 @@ private:
         input.stepsPerDay = stepsPerDay;
         input.spinOrbitP = spinOrbitP;
         input.spinOrbitQ = spinOrbitQ;
+        input.isRetrograde = isRetrograde;
         input.manualGreenhouseOpacity = stateDefaults->manualGreenhouseOpacity;
         input.manualGreenhouseOnTop = manualGreenhouseOnTop;
         input.radiationModelType = radiationModelType;
@@ -4854,6 +4874,8 @@ private:
             resolveRotationModeForPlanetIndex(planetComboBox_->currentIndex());
         const double yearLengthDays =
             planetComboBox_->currentData(kRoleYearLengthDays).toDouble();
+        const bool isRetrograde =
+            isRetrogradeRotation(planetComboBox_->currentData(kRoleObliquity).toDouble());
         const int spinOrbitP = planetComboBox_->currentData(kRoleSpinOrbitP).toInt();
         const int spinOrbitQ = planetComboBox_->currentData(kRoleSpinOrbitQ).toInt();
         const AtmosphereComposition atmosphere = currentAtmosphereForCalculations();
@@ -4896,7 +4918,7 @@ private:
 
         syncSurfaceOrbitAnimationToTime();
         const double siderealDayLengthDays =
-            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays);
+            resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays, isRetrograde);
         const int siderealStepsPerDay = qMax(1, qRound(siderealDayLengthDays * 24.0));
         const int solarStepsPerDay = surfaceTime_.stepsPerDay;
         // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
@@ -4925,7 +4947,8 @@ private:
                                               rotationMode,
                                               orbitalPhaseRadians,
                                               spinOrbitP,
-                                              spinOrbitQ);
+                                              spinOrbitQ,
+                                              isRetrograde);
         const double declinationRadians = qDegreesToRadians(declinationDegrees);
         const double sinDeclination = std::sin(declinationRadians);
         const double cosDeclination = std::cos(declinationRadians);
@@ -5167,6 +5190,7 @@ private:
                                    orbitalPhaseRadians,
                                    spinOrbitP,
                                    spinOrbitQ,
+                                   isRetrograde,
                                    distanceAU);
         if (minTemperature <= maxTemperature) {
             applySurfaceTemperatureRangeToViews(minTemperature, maxTemperature);

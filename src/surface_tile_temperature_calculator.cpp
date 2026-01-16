@@ -55,7 +55,9 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     }
     cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
     const double siderealDayLengthDays =
-        solarToSiderealPeriodDays(settings.dayLengthDays, settings.yearLengthDays);
+        solarToSiderealPeriodDays(settings.dayLengthDays,
+                                  settings.yearLengthDays,
+                                  settings.isRetrograde);
     // Используем сидерический период для вращения, сохраняя солнечные сутки в UI.
     const double rotationDayLengthDays =
         (siderealDayLengthDays > 0.0) ? siderealDayLengthDays : settings.dayLengthDays;
@@ -98,7 +100,10 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         // Фаза вращения λ_spin (рад) учитывает резонанс p:q и задаётся формулой
         // λ_spin = 2π * (t / P_spin) * (p / q). Здесь t и P_spin заданы шагами суток,
         // а p/q — безразмерное отношение частот.
-        const double spinPhase = phase * resonanceRatio;
+        const double spinDirection = settings.isRetrograde ? -1.0 : 1.0;
+        // Ретроградное вращение меняет знак спиновой фазы, что сдвигает подсолнечную точку
+        // в противоположном направлении по долготе.
+        const double spinPhase = spinDirection * phase * resonanceRatio;
         const double hourAngle = spinPhase - kPi;
         // Субзвёздная долгота — меридиан с нулевым часовым углом.
         return normalizeLongitudeRadians(orbitalPhaseRadians - hourAngle);
