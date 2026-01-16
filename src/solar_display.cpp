@@ -4447,6 +4447,15 @@ private:
             baselineAirTemperatures.resize(result.grid.points().size());
         }
 
+        // Радиационный профиль должен опираться на средний ТОА-поток, а не на локальную
+        // инсоляцию: вертикальная структура атмосферы задаётся глобальным балансом энергии
+        // (суточно-усреднённый приток), а локальная инсоляция влияет только на SW-поток внизу.
+        const double planetaryAlbedo = input.cloudAlbedo;
+        const double meanToaFlux =
+            input.segmentSolarConstant * qMax(0.0, 1.0 - planetaryAlbedo) / 4.0;
+        const double effectiveTemperatureKelvin =
+            std::pow(qMax(0.0, meanToaFlux) / kStefanBoltzmannConstant, 0.25);
+
         double minPressureAtm = std::numeric_limits<double>::max();
         double maxPressureAtm = std::numeric_limits<double>::lowest();
         const int logPointIndex = qBound(0, input.logPointIndex, result.grid.points().size() - 1);
@@ -4505,19 +4514,12 @@ private:
                     : ((i < baselineAirTemperatures.size())
                            ? baselineAirTemperatures.at(i)
                            : point.temperatureK);
-            // Используем локальную оценку ТОА-потока: это атмосферный
-            // баланс (эффективная температура), поэтому сознательно игнорируем альбедо поверхности.
-            const double planetaryAlbedo = input.cloudAlbedo;
-            const double effectiveFlux =
-                localInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
-            const double effectiveTemperatureKelvin =
-                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Radiation inputs (init)"
                                           << "index=" << i
                                           << "localInsolation=" << localInsolation
                                           << "planetaryAlbedo=" << planetaryAlbedo
-                                          << "effectiveFlux=" << effectiveFlux
+                                          << "meanToaFlux=" << meanToaFlux
                                           << "effectiveTemperatureKelvin="
                                           << effectiveTemperatureKelvin;
             }
@@ -4970,6 +4972,13 @@ private:
         const double declinationRadians = qDegreesToRadians(declinationDegrees);
         const double sinDeclination = std::sin(declinationRadians);
         const double cosDeclination = std::cos(declinationRadians);
+        // Радиационный профиль должен опираться на средний ТОА-поток, а не на локальную
+        // инсоляцию: вертикальная структура атмосферы задаётся глобальным балансом энергии,
+        // а локальная инсоляция влияет только на SW-поток у поверхности и в воздухе.
+        const double meanToaFlux =
+            segmentSolarConstant * qMax(0.0, 1.0 - cloudAlbedo) / 4.0;
+        const double effectiveTemperatureKelvin =
+            std::pow(qMax(0.0, meanToaFlux) / kStefanBoltzmannConstant, 0.25);
         // Фиксируем меридиан для агрегации: либо пользовательскую точку,
         // либо ближайший к подсолнечному меридиану, чтобы брать единый срез по широтам.
         const double targetLongitudeRadians =
@@ -4989,13 +4998,6 @@ private:
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
             localInsolations.push_back(localInsolation);
-            // Атмосферный баланс (ТОА/эффективная температура) считается только по облакам,
-            // альбедо поверхности здесь сознательно игнорируем.
-            const double planetaryAlbedo = cloudAlbedo;
-            const double effectiveFlux =
-                localInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
-            const double effectiveTemperatureKelvin =
-                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
@@ -5137,19 +5139,12 @@ private:
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const bool logDetails = shouldLogRadiationForPoint(i);
-            // Атмосферный баланс (ТОА/эффективная температура) считается только по облакам,
-            // альбедо поверхности здесь сознательно игнорируем.
-            const double planetaryAlbedo = cloudAlbedo;
-            const double effectiveFlux =
-                localInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
-            const double effectiveTemperatureKelvin =
-                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Radiation inputs (tick)"
                                           << "index=" << i
                                           << "localInsolation=" << localInsolation
-                                          << "planetaryAlbedo=" << planetaryAlbedo
-                                          << "effectiveFlux=" << effectiveFlux
+                                          << "planetaryAlbedo=" << cloudAlbedo
+                                          << "meanToaFlux=" << meanToaFlux
                                           << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
             }
             const auto radiationModel =
