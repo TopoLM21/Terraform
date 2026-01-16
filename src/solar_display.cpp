@@ -5201,6 +5201,7 @@ private:
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
         // Также обновляем виджеты, чтобы в них попали обновлённые поверхностные
         // температура и давление после шага переноса.
+        const int solarStepsPerDay = qMax(1, surfaceTime_.stepsPerDay);
         applySurfaceGridToViews();
         const double elapsedTimeDays =
             (surfaceTime_.surfaceElapsedDays() + 0.5 / static_cast<double>(solarStepsPerDay)) *
