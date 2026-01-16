@@ -297,8 +297,8 @@ double resolveSiderealDayLengthDays(double solarDayLengthDays,
     return (siderealDays > 0.0) ? siderealDays : solarDayLengthDays;
 }
 
-double resolveSubstellarLongitudeRadians(int totalHourIndex,
-                                         int stepsPerDay,
+double resolveSubstellarLongitudeRadians(double elapsedTimeDays,
+                                         double rotationDayLengthDays,
                                          RotationMode rotationMode,
                                          double orbitalPhaseRadians,
                                          int spinOrbitP,
@@ -307,19 +307,17 @@ double resolveSubstellarLongitudeRadians(int totalHourIndex,
     if (rotationMode == RotationMode::TidalLocked) {
         return 0.0;
     }
-    if (stepsPerDay <= 0) {
+    if (rotationDayLengthDays <= 0.0) {
         return 0.0;
     }
     const int safeSpinOrbitP = qMax(1, spinOrbitP);
     const int safeSpinOrbitQ = qMax(1, spinOrbitQ);
     const double resonanceRatio = static_cast<double>(safeSpinOrbitP) /
         static_cast<double>(safeSpinOrbitQ);
-    const double phase =
-        2.0 * M_PI * (static_cast<double>(totalHourIndex) + 0.5) /
-        static_cast<double>(stepsPerDay);
-    // Фаза вращения планеты (λ_spin) выражается через резонанс p:q:
-    // λ_spin = 2π * (t / P_spin) * (p / q), где t и P_spin — время и период вращения
-    // в одинаковых единицах (здесь шаги суток), а p/q — безразмерное отношение частот.
+    const double phase = 2.0 * M_PI * (elapsedTimeDays / rotationDayLengthDays);
+    // Фаза вращения планеты (λ_spin) выражается через непрерывное время:
+    // t берём в земных днях (elapsedDays * solarDayLength), а P_spin — сидерические сутки,
+    // чтобы фазу не определяла дискретизация шагов солнечного дня.
     const double spinDirection = isRetrograde ? -1.0 : 1.0;
     // Ретроградное вращение инвертирует направление изменения часового угла.
     const double spinPhase = spinDirection * phase * resonanceRatio;
@@ -339,8 +337,8 @@ QVector3D directionFromLatLonRadians(double latitudeRad, double longitudeRad) {
 }
 
 QVector3D resolveStarDirection(double declinationDegrees,
-                               int totalHourIndex,
-                               int stepsPerDay,
+                               double elapsedTimeDays,
+                               double rotationDayLengthDays,
                                RotationMode rotationMode,
                                double orbitalPhaseRadians,
                                int spinOrbitP,
@@ -348,8 +346,8 @@ QVector3D resolveStarDirection(double declinationDegrees,
                                bool isRetrograde) {
     const double declinationRadians = qDegreesToRadians(declinationDegrees);
     const double substellarLongitude =
-        resolveSubstellarLongitudeRadians(totalHourIndex,
-                                          stepsPerDay,
+        resolveSubstellarLongitudeRadians(elapsedTimeDays,
+                                          rotationDayLengthDays,
                                           rotationMode,
                                           orbitalPhaseRadians,
                                           spinOrbitP,
@@ -595,6 +593,7 @@ struct SurfaceGridComputationInput {
     double cloudAlbedo = 0.0;
     double dayLengthDays = 0.0;
     double yearLengthDays = 0.0;
+    double elapsedDays = 0.0;
     int stepsPerDay = 1;
     double manualGreenhouseOpacity = 0.0;
     bool manualGreenhouseOnTop = false;
@@ -617,6 +616,9 @@ struct SurfaceGridComputationResult {
     bool cancelled = false;
     PlanetSurfaceGrid grid;
     SubsurfaceModelSettings resolvedSubsurfaceSettings;
+    double dayLengthDays = 0.0;
+    double yearLengthDays = 0.0;
+    double elapsedDays = 0.0;
     bool hasTemperatureRange = false;
     double minTemperatureK = 0.0;
     double maxTemperatureK = 0.0;
@@ -3948,7 +3950,8 @@ private:
     }
 
     void updateSurfaceStarRendering(double declinationDegrees,
-                                    int stepsPerDay,
+                                    double elapsedTimeDays,
+                                    double rotationDayLengthDays,
                                     RotationMode rotationMode,
                                     double orbitalPhaseRadians,
                                     int spinOrbitP,
@@ -3959,11 +3962,10 @@ private:
             return;
         }
 
-        const int totalHourIndex = surfaceTime_.surfaceTotalHourIndex();
         const QVector3D starDirection =
             resolveStarDirection(declinationDegrees,
-                                 totalHourIndex,
-                                 stepsPerDay,
+                                 elapsedTimeDays,
+                                 rotationDayLengthDays,
                                  rotationMode,
                                  orbitalPhaseRadians,
                                  spinOrbitP,
@@ -4169,7 +4171,10 @@ private:
             isRetrogradeRotation(planetComboBox_->currentData(kRoleObliquity).toDouble());
         const double siderealDayLengthDays =
             resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays, isRetrograde);
-        const int siderealStepsPerDay = qMax(1, qRound(siderealDayLengthDays * 24.0));
+        const int solarStepsPerDay = qMax(1, surfaceTime_.stepsPerDay);
+        const double elapsedTimeDays =
+            (surfaceTime_.surfaceElapsedDays() + 0.5 / static_cast<double>(solarStepsPerDay)) *
+            dayLengthDays;
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
         const RotationMode rotationMode =
@@ -4184,7 +4189,8 @@ private:
                 : surfaceOrbitAnimation_.distanceAU();
         // Направление на звезду совпадает с нормалью подсолнечной точки.
         updateSurfaceStarRendering(declinationDegrees,
-                                   siderealStepsPerDay,
+                                   elapsedTimeDays,
+                                   siderealDayLengthDays,
                                    rotationMode,
                                    orbitalPhaseRadians,
                                    spinOrbitP,
@@ -4327,6 +4333,9 @@ private:
         result.spinOrbitP = input.spinOrbitP;
         result.spinOrbitQ = input.spinOrbitQ;
         result.isRetrograde = input.isRetrograde;
+        result.dayLengthDays = input.dayLengthDays;
+        result.yearLengthDays = input.yearLengthDays;
+        result.elapsedDays = input.elapsedDays;
 
         const auto shouldCancel = [&cancelFlag, requestIdCounter, requestId]() {
             if (cancelFlag && cancelFlag->load()) {
@@ -4392,6 +4401,7 @@ private:
         tileSettings.rotationMode = input.rotationMode;
         tileSettings.declinationDegrees = input.declinationDegrees;
         tileSettings.orbitalPhaseRadians = input.orbitalPhaseRadians;
+        tileSettings.elapsedDays = input.elapsedDays;
         tileSettings.spinOrbitP = input.spinOrbitP;
         tileSettings.spinOrbitQ = input.spinOrbitQ;
         tileSettings.isRetrograde = input.isRetrograde;
@@ -4639,8 +4649,13 @@ private:
         applySurfaceGridToViews();
         updateSurfaceHeightLegendFromGrid();
         const double distanceAu = surfaceOrbitAnimation_.distanceAU();
+        const double siderealDayLengthDays =
+            resolveSiderealDayLengthDays(result.dayLengthDays, result.yearLengthDays,
+                                         result.isRetrograde);
+        const double elapsedTimeDays = result.elapsedDays * result.dayLengthDays;
         updateSurfaceStarRendering(result.declinationDegrees,
-                                   result.stepsPerDay,
+                                   elapsedTimeDays,
+                                   siderealDayLengthDays,
                                    result.rotationMode,
                                    result.orbitalPhaseRadians,
                                    result.spinOrbitP,
@@ -4773,6 +4788,7 @@ private:
         input.cloudAlbedo = cloudAlbedo;
         input.dayLengthDays = dayLengthDays;
         input.yearLengthDays = yearLengthDays;
+        input.elapsedDays = surfaceTime_.surfaceElapsedDays();
         input.stepsPerDay = stepsPerDay;
         input.spinOrbitP = spinOrbitP;
         input.spinOrbitQ = spinOrbitQ;
@@ -4920,7 +4936,6 @@ private:
         const double siderealDayLengthDays =
             resolveSiderealDayLengthDays(dayLengthDays, yearLengthDays, isRetrograde);
         const int siderealStepsPerDay = qMax(1, qRound(siderealDayLengthDays * 24.0));
-        const int solarStepsPerDay = surfaceTime_.stepsPerDay;
         // Сезонная деклинация: δ = asin(sin(наклон оси) * sin(истинная долгота звезды)).
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
@@ -4940,10 +4955,13 @@ private:
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
-        const int totalHourIndex = surfaceTime_.surfaceTotalHourIndex();
+        const int solarStepsPerDay = qMax(1, surfaceTime_.stepsPerDay);
+        const double elapsedTimeDays =
+            (surfaceTime_.surfaceElapsedDays() + 0.5 / static_cast<double>(solarStepsPerDay)) *
+            dayLengthDays;
         const double substellarLongitudeRadians =
-            resolveSubstellarLongitudeRadians(totalHourIndex,
-                                              siderealStepsPerDay,
+            resolveSubstellarLongitudeRadians(elapsedTimeDays,
+                                              siderealDayLengthDays,
                                               rotationMode,
                                               orbitalPhaseRadians,
                                               spinOrbitP,
@@ -5184,8 +5202,12 @@ private:
         // Также обновляем виджеты, чтобы в них попали обновлённые поверхностные
         // температура и давление после шага переноса.
         applySurfaceGridToViews();
+        const double elapsedTimeDays =
+            (surfaceTime_.surfaceElapsedDays() + 0.5 / static_cast<double>(solarStepsPerDay)) *
+            dayLengthDays;
         updateSurfaceStarRendering(declinationDegrees,
-                                   siderealStepsPerDay,
+                                   elapsedTimeDays,
+                                   siderealDayLengthDays,
                                    rotationMode,
                                    orbitalPhaseRadians,
                                    spinOrbitP,

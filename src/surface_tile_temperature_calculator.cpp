@@ -62,9 +62,11 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const double rotationDayLengthDays =
         (siderealDayLengthDays > 0.0) ? siderealDayLengthDays : settings.dayLengthDays;
     const int stepsPerDay = qMax(1, qRound(rotationDayLengthDays * 24.0));
+    const int solarStepsPerDay = qMax(1, qRound(settings.dayLengthDays * 24.0));
     const double dayLengthSeconds = qMax(0.01, rotationDayLengthDays) * 86400.0;
     const double timeStepSeconds =
         (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
+    const double stepDurationDays = timeStepSeconds / 86400.0;
     const int spinUpDays = qMax(0, settings.spinUpDays);
     const bool allowInsolation =
         !settings.initializeWithMinTemperatureOnly &&
@@ -86,20 +88,30 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         (settings.currentAbsoluteHourIndex != 0)
             ? settings.currentAbsoluteHourIndex
             : settings.currentHourIndex;
+    double resolvedElapsedDays = settings.elapsedDays;
+    if (resolvedElapsedDays <= 0.0 &&
+        (settings.currentAbsoluteHourIndex != 0 || settings.currentHourIndex != 0)) {
+        resolvedElapsedDays =
+            static_cast<double>(absoluteHourIndex) / static_cast<double>(solarStepsPerDay);
+    }
+    const double elapsedTimeDays = resolvedElapsedDays * settings.dayLengthDays;
+    const double halfStepDays = 0.5 * stepDurationDays;
     const auto resolveSubstellarLongitude =
-        [isTidallyLocked, stepsPerDay, orbitalPhaseRadians, settings](int totalHourIndex) {
+        [isTidallyLocked, orbitalPhaseRadians, rotationDayLengthDays, settings](double timeDays) {
         if (isTidallyLocked) {
+            return 0.0;
+        }
+        if (rotationDayLengthDays <= 0.0) {
             return 0.0;
         }
         const int safeSpinOrbitP = qMax(1, settings.spinOrbitP);
         const int safeSpinOrbitQ = qMax(1, settings.spinOrbitQ);
         const double resonanceRatio = static_cast<double>(safeSpinOrbitP) /
             static_cast<double>(safeSpinOrbitQ);
-        const double phase = 2.0 * kPi * (static_cast<double>(totalHourIndex) + 0.5) /
-                             static_cast<double>(stepsPerDay);
-        // Фаза вращения λ_spin (рад) учитывает резонанс p:q и задаётся формулой
-        // λ_spin = 2π * (t / P_spin) * (p / q). Здесь t и P_spin заданы шагами суток,
-        // а p/q — безразмерное отношение частот.
+        const double phase = 2.0 * kPi * (timeDays / rotationDayLengthDays);
+        // Фаза вращения λ_spin выражается через непрерывное время в днях:
+        // t берётся в земных днях = elapsedDays * solarDayLength, а P_spin — сидерические сутки.
+        // Это отделяет фазу вращения от дискретизации (stepsPerDay) солнечного дня.
         const double spinDirection = settings.isRetrograde ? -1.0 : 1.0;
         // Ретроградное вращение меняет знак спиновой фазы, что сдвигает подсолнечную точку
         // в противоположном направлении по долготе.
@@ -128,8 +140,8 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
                                 material,
                                 defaults.subsurfaceSettings);
 
-        auto applyRadiativeStep = [&](int totalHourIndex) {
-            const double substellarLongitude = resolveSubstellarLongitude(totalHourIndex);
+        auto applyRadiativeStep = [&](double timeDays) {
+            const double substellarLongitude = resolveSubstellarLongitude(timeDays);
             const double localHourAngle = point.longitudeRadians - substellarLongitude;
             const double cosZenith =
                 point.sinLatitude * sinDeclination +
@@ -163,21 +175,22 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
 
         if (allowInsolation) {
             // Спин-ап прогревает точку до устойчивого цикла перед показом карты.
-            const int spinUpHours = spinUpDays * stepsPerDay;
             // Отматываем время назад, чтобы спин-ап использовал непрерывную долготу.
-            const int baseAbsoluteHourIndex = qMax(0, absoluteHourIndex - spinUpHours);
+            const double baseElapsedTimeDays =
+                qMax(0.0, elapsedTimeDays - static_cast<double>(spinUpDays) * rotationDayLengthDays);
             for (int day = 0; day < spinUpDays; ++day) {
                 for (int step = 0; step < stepsPerDay; ++step) {
-                    const int totalHourIndex =
-                        baseAbsoluteHourIndex + day * stepsPerDay + step;
-                    applyRadiativeStep(totalHourIndex);
+                    const double spinUpTimeDays =
+                        baseElapsedTimeDays +
+                        (static_cast<double>(day * stepsPerDay + step) + 0.5) * stepDurationDays;
+                    applyRadiativeStep(spinUpTimeDays);
                 }
             }
         }
 
         double blendedInsolation = 0.0;
         if (allowInsolation) {
-            blendedInsolation = applyRadiativeStep(qMax(0, absoluteHourIndex));
+            blendedInsolation = applyRadiativeStep(elapsedTimeDays + halfStepDays);
         }
 
         point.state = state;
