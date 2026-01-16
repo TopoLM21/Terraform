@@ -612,7 +612,7 @@ struct SurfaceGridComputationInput {
     int currentHourIndex = 0;
     int currentAbsoluteHourIndex = 0;
     int logPointIndex = 0;
-    bool initializeWithMinTemperatureOnly = false;
+    bool skipSpinUp = false;
 };
 
 struct SurfaceGridComputationResult {
@@ -1181,8 +1181,8 @@ public:
             updateSurfaceTemperatureAggregationHistoryDays();
             syncMaterialWithPlanet();
             syncGeothermalFluxWithPlanet();
-            // При смене планеты показываем «холодный старт» без спин-апа.
-            surfaceInitializeWithMinTemperatureOnly_ = true;
+            // При смене планеты пропускаем спин-ап, чтобы быстро показать оценку температуры.
+            surfaceSkipSpinUp_ = true;
             if (isSurfaceTabActive()) {
                 scheduleSurfaceGridTemperatureUpdate(true);
             } else {
@@ -1681,7 +1681,7 @@ private:
     bool surfaceSimRunning_ = false;
     bool surfaceSimResumeAfterGridUpdate_ = false;
     bool surfaceGridDirty_ = false;
-    bool surfaceInitializeWithMinTemperatureOnly_ = false;
+    bool surfaceSkipSpinUp_ = false;
     struct SurfaceTimeFlow {
         int dayIndex = 0;
         int hourIndex = 0;
@@ -4428,7 +4428,7 @@ private:
         tileSettings.currentHourIndex = input.currentHourIndex;
         tileSettings.currentAbsoluteHourIndex = input.currentAbsoluteHourIndex;
         tileSettings.hasSolarConstant = input.hasSolarConstant;
-        tileSettings.initializeWithMinTemperatureOnly = input.initializeWithMinTemperatureOnly;
+        tileSettings.skipSpinUp = input.skipSpinUp;
 
         SurfaceTileTemperatureCalculator tileCalculator;
         SurfaceTileTemperatureResult tileResult =
@@ -4793,8 +4793,8 @@ private:
         } else {
             updateSurfaceSolarConstantLabel(SurfaceFluxBreakdown{});
         }
-        const bool initializeWithMinTemperatureOnly = surfaceInitializeWithMinTemperatureOnly_;
-        surfaceInitializeWithMinTemperatureOnly_ = false;
+        const bool skipSpinUp = surfaceSkipSpinUp_;
+        surfaceSkipSpinUp_ = false;
 
         SurfaceGridComputationInput input;
         input.grid = surfaceGrid_;
@@ -4823,7 +4823,7 @@ private:
         input.currentHourIndex = surfaceTime_.hourIndex;
         input.currentAbsoluteHourIndex = surfaceTime_.surfaceTotalHourIndex();
         input.logPointIndex = selectedSurfacePointIndex_;
-        input.initializeWithMinTemperatureOnly = initializeWithMinTemperatureOnly;
+        input.skipSpinUp = skipSpinUp;
 
         surfaceGridCancelFlag_ = std::make_shared<std::atomic_bool>(false);
         if (!surfaceGridRequestId_) {

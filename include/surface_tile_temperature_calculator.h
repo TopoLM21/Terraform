@@ -38,8 +38,9 @@ struct SurfaceTileTemperatureSettings {
     // Абсолютный индекс времени в часах для непрерывной подсолнечной долготы.
     int currentAbsoluteHourIndex = 0;
     bool hasSolarConstant = false;
-    // Используется при смене планеты: показываем «холодный старт» без прогрева.
-    bool initializeWithMinTemperatureOnly = false;
+    // Используется при смене планеты: пропускаем спин-ап, но оставляем
+    // быструю оценку температуры по формуле.
+    bool skipSpinUp = false;
 };
 
 struct SurfaceTileTemperatureResult {
