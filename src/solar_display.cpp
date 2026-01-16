@@ -4791,7 +4791,15 @@ private:
                 std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
             updateSurfaceSolarConstantLabel(computeSurfaceFluxBreakdown());
         } else {
-            updateSurfaceSolarConstantLabel(SurfaceFluxBreakdown{});
+            const SurfaceFluxBreakdown breakdown = computeSurfaceFluxBreakdown();
+            if (!hasSolarConstant_ && breakdown.totalFluxWPerM2 > 0.0) {
+                // Допускаем оценку по пресету для первичной визуализации тайлов,
+                // чтобы не держать карту на фоне 3 K до ручного расчёта.
+                segmentSolarConstant = breakdown.totalFluxWPerM2;
+            }
+            updateSurfaceSolarConstantLabel(breakdown.totalFluxWPerM2 > 0.0
+                                                ? breakdown
+                                                : SurfaceFluxBreakdown{});
         }
         const bool skipSpinUp = surfaceSkipSpinUp_;
         surfaceSkipSpinUp_ = false;
@@ -4819,7 +4827,7 @@ private:
         input.declinationDegrees = declinationDegrees;
         input.orbitalPhaseRadians = orbitalPhaseRadians;
         input.segmentSolarConstant = segmentSolarConstant;
-        input.hasSolarConstant = hasSolarConstant_;
+        input.hasSolarConstant = segmentSolarConstant > 0.0;
         input.currentHourIndex = surfaceTime_.hourIndex;
         input.currentAbsoluteHourIndex = surfaceTime_.surfaceTotalHourIndex();
         input.logPointIndex = selectedSurfacePointIndex_;
