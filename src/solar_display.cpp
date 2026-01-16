@@ -4479,11 +4479,9 @@ private:
                     : ((i < baselineAirTemperatures.size())
                            ? baselineAirTemperatures.at(i)
                            : point.temperatureK);
-            // Используем локальную оценку ТОА-потока через blendedInsolation и планетарное
-            // альбедо (облака перекрывают поверхность), чтобы связать оптическую толщину
-            // с физически корректным источником излучения.
-            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
-            const double planetaryAlbedo = qMax(materialAlbedo, input.cloudAlbedo);
+            // Используем локальную оценку ТОА-потока через blendedInsolation: это атмосферный
+            // баланс (эффективная температура), поэтому сознательно игнорируем альбедо поверхности.
+            const double planetaryAlbedo = input.cloudAlbedo;
             const double effectiveFlux =
                 blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
@@ -4965,9 +4963,9 @@ private:
                 localInsolation * (1.0 - meridionalTransport) +
                 globalAverageInsolation * meridionalTransport;
             blendedInsolations.push_back(blendedInsolation);
-            const SurfaceMaterial material = materialForPoint(point.materialId);
-            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
-            const double planetaryAlbedo = qMax(materialAlbedo, cloudAlbedo);
+            // Атмосферный баланс (ТОА/эффективная температура) считается только по облакам,
+            // альбедо поверхности здесь сознательно игнорируем.
+            const double planetaryAlbedo = cloudAlbedo;
             const double effectiveFlux =
                 blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
@@ -5111,10 +5109,10 @@ private:
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const double blendedInsolation =
                 (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
-            const SurfaceMaterial material = materialForPoint(point.materialId);
             const bool logDetails = shouldLogRadiationForPoint(i);
-            const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
-            const double planetaryAlbedo = qMax(materialAlbedo, cloudAlbedo);
+            // Атмосферный баланс (ТОА/эффективная температура) считается только по облакам,
+            // альбедо поверхности здесь сознательно игнорируем.
+            const double planetaryAlbedo = cloudAlbedo;
             const double effectiveFlux =
                 blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
