@@ -957,6 +957,7 @@ public:
         surfaceSimSpeedComboBox_ = new QComboBox(this);
         surfaceSimSpeedComboBox_->addItem(QStringLiteral("1x"), 1.0);
         surfaceSimSpeedComboBox_->addItem(QStringLiteral("10x"), 10.0);
+        surfaceSimSpeedComboBox_->addItem(QStringLiteral("Без ограничений"), 0.0);
         surfaceSimTimeLabel_ = new QLabel(QStringLiteral("t = —"), this);
         surfaceMapModeComboBox_ = new QComboBox(this);
         surfaceMapModeComboBox_->addItem(QStringLiteral("Температура поверхности"),
@@ -1344,8 +1345,14 @@ public:
 
         connect(surfaceSimSpeedComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [this](int) {
-                    surfaceSimSpeedMultiplier_ =
+                    const double speedValue =
                         surfaceSimSpeedComboBox_->currentData().toDouble();
+                    if (speedValue > 0.0) {
+                        surfaceSimSpeedMultiplier_ = speedValue;
+                        surfaceSimUnlimited_ = false;
+                    } else {
+                        surfaceSimUnlimited_ = true;
+                    }
                     updateSurfaceSimulationTimerInterval();
                     updateSurfaceSimulationUi();
                 });
@@ -1669,6 +1676,7 @@ private:
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
+    bool surfaceSimUnlimited_ = false;
     std::optional<StellarCacheKey> lastStellarKey_;
     bool surfaceSimRunning_ = false;
     bool surfaceSimResumeAfterGridUpdate_ = false;
@@ -1868,8 +1876,10 @@ private:
                     : QStringLiteral("Течение времени"));
         }
         if (surfaceSimTimeLabel_) {
-            const QString speedLabel =
-                QStringLiteral("%1x").arg(surfaceSimSpeedMultiplier_, 0, 'g', 3);
+            const QString speedLabel = surfaceSimUnlimited_
+                                           ? QStringLiteral("∞")
+                                           : QStringLiteral("%1x")
+                                                 .arg(surfaceSimSpeedMultiplier_, 0, 'g', 3);
             if (!surfaceSimRunning_ && surfaceTime_.dayIndex == 0 &&
                 surfaceTime_.hourIndex == 0) {
                 surfaceSimTimeLabel_->setText(
@@ -1888,7 +1898,10 @@ private:
         if (!surfaceSimTimer_) {
             return;
         }
-        const int intervalMs = qMax(1, qRound(1000.0 / surfaceSimSpeedMultiplier_));
+        // Интервал 0 мс в QTimer означает максимально возможную частоту событий.
+        const int intervalMs = surfaceSimUnlimited_
+                                   ? 0
+                                   : qMax(1, qRound(1000.0 / surfaceSimSpeedMultiplier_));
         surfaceSimTimer_->setInterval(intervalMs);
     }
 
