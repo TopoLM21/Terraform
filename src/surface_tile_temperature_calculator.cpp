@@ -85,9 +85,8 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const double timeStepSeconds =
         (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
     const double stepDurationDays = timeStepSeconds / 86400.0;
-    const int spinUpDays = qMax(0, settings.spinUpDays);
+    const int spinUpDays = settings.skipSpinUp ? 0 : qMax(0, settings.spinUpDays);
     const bool allowInsolation =
-        !settings.initializeWithMinTemperatureOnly &&
         settings.hasSolarConstant && settings.segmentSolarConstant > 0.0 && timeStepSeconds > 0.0;
 
     const double declinationRadians = qDegreesToRadians(settings.declinationDegrees);
@@ -147,7 +146,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         // Облака перекрывают поверхность, поэтому берём максимум отражения.
         const double albedo = qMax(materialAlbedo, clampedCloudAlbedo);
         const double visualizationStartTemperature =
-            (!settings.initializeWithMinTemperatureOnly && settings.hasSolarConstant)
+            settings.hasSolarConstant
                 ? estimateMeanEquilibriumTemperature(settings.segmentSolarConstant,
                                                      albedo,
                                                      defaults.minTemperatureKelvin)
@@ -194,7 +193,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
             return blendedInsolation;
         };
 
-        if (allowInsolation) {
+        if (allowInsolation && spinUpDays > 0) {
             // Спин-ап прогревает точку до устойчивого цикла перед показом карты.
             // Отматываем время назад, чтобы спин-ап использовал непрерывную долготу.
             const double baseElapsedTimeDays =
