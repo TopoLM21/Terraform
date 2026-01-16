@@ -4402,7 +4402,7 @@ private:
         result.maxTemperatureK = tileResult.maxSurfaceTemperatureK;
         double minAirTemperature = std::numeric_limits<double>::max();
         double maxAirTemperature = std::numeric_limits<double>::lowest();
-        QVector<double> blendedInsolations = tileResult.blendedInsolations;
+        QVector<double> localInsolations = tileResult.blendedInsolations;
         QVector<double> baselineAirTemperatures = tileResult.baselineAirTemperatures;
         const double timeStepSeconds = 3600.0;
         // Коэффициент прохождения коротковолнового излучения через облака.
@@ -4412,9 +4412,9 @@ private:
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
-        if (blendedInsolations.size() != result.grid.points().size()) {
-            blendedInsolations.clear();
-            blendedInsolations.resize(result.grid.points().size());
+        if (localInsolations.size() != result.grid.points().size()) {
+            localInsolations.clear();
+            localInsolations.resize(result.grid.points().size());
         }
         if (baselineAirTemperatures.size() != result.grid.points().size()) {
             baselineAirTemperatures.clear();
@@ -4444,8 +4444,8 @@ private:
             point.pressureAtm = qMax(0.0, pressureAtm);
             minPressureAtm = qMin(minPressureAtm, point.pressureAtm);
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
-            const double blendedInsolation =
-                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const double localInsolation =
+                (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const auto materialIt = input.materialsById.constFind(point.materialId);
             const SurfaceMaterial material =
                 materialIt != input.materialsById.cend()
@@ -4463,7 +4463,7 @@ private:
                                               point.pressureAtm,
                                               input.radiusKm,
                                               gravity,
-                                              blendedInsolation,
+                                              localInsolation,
                                               greenhouseBaseTemperature,
                                               input.manualGreenhouseOpacity,
                                               useAtmosphericModel,
@@ -4479,17 +4479,17 @@ private:
                     : ((i < baselineAirTemperatures.size())
                            ? baselineAirTemperatures.at(i)
                            : point.temperatureK);
-            // Используем локальную оценку ТОА-потока через blendedInsolation: это атмосферный
+            // Используем локальную оценку ТОА-потока: это атмосферный
             // баланс (эффективная температура), поэтому сознательно игнорируем альбедо поверхности.
             const double planetaryAlbedo = input.cloudAlbedo;
             const double effectiveFlux =
-                blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
+                localInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
                 std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Radiation inputs (init)"
                                           << "index=" << i
-                                          << "blendedInsolation=" << blendedInsolation
+                                          << "localInsolation=" << localInsolation
                                           << "planetaryAlbedo=" << planetaryAlbedo
                                           << "effectiveFlux=" << effectiveFlux
                                           << "effectiveTemperatureKelvin="
@@ -4502,9 +4502,9 @@ private:
                                    effectiveTemperatureKelvin,
                                    gravity,
                                    input.radiationModelType);
-            // Поток у поверхности: S_surf = S_blend * T_cloud * T_atm.
+            // Поток у поверхности: S_surf = S_local * T_cloud * T_atm.
             const double surfaceShortwaveFlux =
-                blendedInsolation * cloudShortwaveTransmission *
+                localInsolation * cloudShortwaveTransmission *
                 radiationModel->incomingTransmission();
             // Храним текущий солнечный поток у поверхности в точке для подсказки тайла.
             point.solarFluxWPerM2 = surfaceShortwaveFlux;
@@ -4513,7 +4513,7 @@ private:
                                             point.pressureAtm,
                                             gravity,
                                             initialAirTemperature,
-                                            blendedInsolation,
+                                            localInsolation,
                                             cloudShortwaveTransmission,
                                             input.radiationModelType,
                                             *radiationModel,
@@ -4909,18 +4909,6 @@ private:
             lastSolarConstant_ *
             std::pow(lastSolarConstantDistanceAU_ / distanceAU, 2.0);
         updateSurfaceSolarConstantLabel(computeSurfaceFluxBreakdown());
-        const double transport =
-            (atmospherePressureAtm > 50.0)
-                ? 0.99
-                : (atmospherePressureAtm > 0.001
-                       ? qMin(1.0, 0.15 * std::log(atmospherePressureAtm * 100.0 + 1.0))
-                       : 0.0);
-        const double rotBlock =
-            (dayLengthDays < 2.0 && atmospherePressureAtm < 10.0) ? 0.65 : 1.0;
-        const double meridionalTransport = transport * rotBlock;
-        // Глобальный средний поток перед альбедо для учёта меридионального переноса.
-        const double globalAverageInsolation = segmentSolarConstant / 4.0;
-
         // Один тик = 1 час планетарных суток, ускорение реализовано уменьшением интервала таймера.
         const double timeStepSeconds = 3600.0;
         // Коэффициент прохождения коротковолнового излучения через облака.
@@ -4949,8 +4937,8 @@ private:
                 : selectSurfaceAggregationLongitude(substellarLongitudeRadians);
         ensureSurfaceTemperatureAggregationTargets(targetLongitudeRadians);
 
-        QVector<double> blendedInsolations;
-        blendedInsolations.reserve(surfaceGrid_.points().size());
+        QVector<double> localInsolations;
+        localInsolations.reserve(surfaceGrid_.points().size());
         for (auto &point : surfaceGrid_.points()) {
             const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
             const double cosZenith =
@@ -4959,15 +4947,12 @@ private:
             // S_inst = S0 * cos(zenith) при освещении, иначе 0.
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
-            const double blendedInsolation =
-                localInsolation * (1.0 - meridionalTransport) +
-                globalAverageInsolation * meridionalTransport;
-            blendedInsolations.push_back(blendedInsolation);
+            localInsolations.push_back(localInsolation);
             // Атмосферный баланс (ТОА/эффективная температура) считается только по облакам,
             // альбедо поверхности здесь сознательно игнорируем.
             const double planetaryAlbedo = cloudAlbedo;
             const double effectiveFlux =
-                blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
+                localInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
                 std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
             const auto radiationModel =
@@ -4977,9 +4962,9 @@ private:
                                    effectiveTemperatureKelvin,
                                    gravity,
                                    radiationModelType);
-            // Поток у поверхности: S_surf = S_blend * T_cloud * T_atm.
+            // Поток у поверхности: S_surf = S_local * T_cloud * T_atm.
             const double surfaceShortwaveFlux =
-                blendedInsolation * cloudShortwaveTransmission *
+                localInsolation * cloudShortwaveTransmission *
                 radiationModel->incomingTransmission();
             // Запоминаем солнечный поток у поверхности для UI и логов.
             point.solarFluxWPerM2 = surfaceShortwaveFlux;
@@ -5002,6 +4987,7 @@ private:
         }
 
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
+        // Перенос тепла теперь полностью зависит от расчёта ветра/адвекции без радиационного смешивания.
 
         QVector<double> temperatures;
         QVector<double> pressuresAtm;
@@ -5051,8 +5037,8 @@ private:
             point.pressureAtm = qMax(0.0, relaxedAtm);
             minPressureAtm = qMin(minPressureAtm, point.pressureAtm);
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
-            const double blendedInsolation =
-                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const double localInsolation =
+                (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point.materialId);
             const bool logDetails = shouldLogRadiationForPoint(i);
             const double greenhouseBaseTemperature =
@@ -5065,7 +5051,7 @@ private:
                                               point.pressureAtm,
                                               radiusKm,
                                               gravity,
-                                              blendedInsolation,
+                                              localInsolation,
                                               greenhouseBaseTemperature,
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
@@ -5107,20 +5093,20 @@ private:
             point.temperatureK = point.state.temperatureKelvin();
             const double initialAirTemperature =
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
-            const double blendedInsolation =
-                (i < blendedInsolations.size()) ? blendedInsolations.at(i) : 0.0;
+            const double localInsolation =
+                (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const bool logDetails = shouldLogRadiationForPoint(i);
             // Атмосферный баланс (ТОА/эффективная температура) считается только по облакам,
             // альбедо поверхности здесь сознательно игнорируем.
             const double planetaryAlbedo = cloudAlbedo;
             const double effectiveFlux =
-                blendedInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
+                localInsolation * qMax(0.0, 1.0 - planetaryAlbedo);
             const double effectiveTemperatureKelvin =
                 std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Radiation inputs (tick)"
                                           << "index=" << i
-                                          << "blendedInsolation=" << blendedInsolation
+                                          << "localInsolation=" << localInsolation
                                           << "planetaryAlbedo=" << planetaryAlbedo
                                           << "effectiveFlux=" << effectiveFlux
                                           << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
@@ -5137,7 +5123,7 @@ private:
                                             point.pressureAtm,
                                             gravity,
                                             initialAirTemperature,
-                                            blendedInsolation,
+                                            localInsolation,
                                             cloudShortwaveTransmission,
                                             radiationModelType,
                                             *radiationModel,

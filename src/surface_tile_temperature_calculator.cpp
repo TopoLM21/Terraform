@@ -146,7 +146,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
                                    effectiveTemperatureKelvin,
                                    surfaceGravity,
                                    defaults.radiationModelType);
-            // Поток у поверхности: S_surf = S_blend * T_cloud * T_atm.
+            // Поток у поверхности: S_surf = S_local * T_cloud * T_atm.
             const double surfaceShortwaveFlux =
                 blendedInsolation * cloudShortwaveTransmission *
                 radiationModel->incomingTransmission();
