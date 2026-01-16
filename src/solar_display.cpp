@@ -5202,9 +5202,6 @@ private:
         // Также обновляем виджеты, чтобы в них попали обновлённые поверхностные
         // температура и давление после шага переноса.
         applySurfaceGridToViews();
-        const double elapsedTimeDays =
-            (surfaceTime_.surfaceElapsedDays() + 0.5 / static_cast<double>(solarStepsPerDay)) *
-            dayLengthDays;
         updateSurfaceStarRendering(declinationDegrees,
                                    elapsedTimeDays,
                                    siderealDayLengthDays,
