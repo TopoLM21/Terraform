@@ -10,6 +10,7 @@
 namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
+constexpr double kMeanInsolationFactor = 0.25;
 
 double normalizeLongitudeRadians(double radians) {
     double wrapped = std::fmod(radians + kPi, 2.0 * kPi);
@@ -17,6 +18,23 @@ double normalizeLongitudeRadians(double radians) {
         wrapped += 2.0 * kPi;
     }
     return wrapped - kPi;
+}
+
+double estimateMeanEquilibriumTemperature(double solarConstant,
+                                          double albedo,
+                                          double minTemperatureKelvin) {
+    if (solarConstant <= 0.0) {
+        return minTemperatureKelvin;
+    }
+    // Средняя инсоляция по сфере: <S> = S0 / 4. Температура равновесия:
+    // T_eq = ((S0 * (1 - A) / 4) / sigma)^(1/4).
+    const double meanAbsorbedFlux =
+        solarConstant * kMeanInsolationFactor * qMax(0.0, 1.0 - albedo);
+    if (meanAbsorbedFlux <= 0.0) {
+        return minTemperatureKelvin;
+    }
+    return qMax(minTemperatureKelvin,
+                std::pow(meanAbsorbedFlux / kStefanBoltzmannConstant, 0.25));
 }
 }
 
@@ -71,9 +89,6 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const bool allowInsolation =
         !settings.initializeWithMinTemperatureOnly &&
         settings.hasSolarConstant && settings.segmentSolarConstant > 0.0 && timeStepSeconds > 0.0;
-    // Если инсоляции нет, не поднимаем стартовый уровень искусственно: температура должна
-    // остывать естественно, оставаясь ограниченной только физическим минимумом модели.
-    const double visualizationStartTemperature = defaults.minTemperatureKelvin;
 
     const double declinationRadians = qDegreesToRadians(settings.declinationDegrees);
     const double sinDeclination = std::sin(declinationRadians);
@@ -131,12 +146,18 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
         // Облака перекрывают поверхность, поэтому берём максимум отражения.
         const double albedo = qMax(materialAlbedo, clampedCloudAlbedo);
+        const double visualizationStartTemperature =
+            (!settings.initializeWithMinTemperatureOnly && settings.hasSolarConstant)
+                ? estimateMeanEquilibriumTemperature(settings.segmentSolarConstant,
+                                                     albedo,
+                                                     defaults.minTemperatureKelvin)
+                : defaults.minTemperatureKelvin;
 
         SurfacePointState state(visualizationStartTemperature,
                                 albedo,
                                 defaults.greenhouseOpacity,
                                 defaults.radiationModelType,
-                                visualizationStartTemperature,
+                                defaults.minTemperatureKelvin,
                                 material,
                                 defaults.subsurfaceSettings);
 
