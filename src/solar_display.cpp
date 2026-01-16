@@ -462,6 +462,7 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      double planetRadiusKm,
                                      double surfaceGravity,
                                      double blendedInsolation,
+                                     double meanToaFlux,
                                      double baseTemperatureKelvin,
                                      double manualGreenhouseOpacity,
                                      bool useAtmosphericModel,
@@ -487,10 +488,12 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     const double albedo = qBound(0.0, material.albedo, 1.0);
     const double surfAlbedoPre =
         (1.0 - potentialCoverage) * albedo + potentialCoverage * 0.06;
-    const double tEffPre =
-        std::pow((blendedInsolation * (1.0 - qMax(surfAlbedoPre, pressureClouds))) /
-                     (4.0 * kStefanBoltzmannConstant),
-                 0.25);
+    // Для плотных атмосфер профиль нельзя привязывать к локальной инсоляции:
+    // ночью она обнуляется, а радиативный профиль должен оставаться заданным
+    // глобальным средним ТОА-потоком.
+    const double absorbedMeanFlux =
+        meanToaFlux * (1.0 - qMax(surfAlbedoPre, pressureClouds));
+    const double tEffPre = std::pow(qMax(0.0, absorbedMeanFlux) / kStefanBoltzmannConstant, 0.25);
     const double denseAtmosphereThresholdAtm = 0.1;
     double profileBaseTemperatureKelvin = baseTemperatureKelvin;
     if (pressureAtm >= denseAtmosphereThresholdAtm) {
@@ -4499,6 +4502,7 @@ private:
                                               input.radiusKm,
                                               gravity,
                                               localInsolation,
+                                              meanToaFlux,
                                               greenhouseBaseTemperature,
                                               input.manualGreenhouseOpacity,
                                               useAtmosphericModel,
@@ -5114,6 +5118,7 @@ private:
                                               radiusKm,
                                               gravity,
                                               localInsolation,
+                                              meanToaFlux,
                                               greenhouseBaseTemperature,
                                               manualGreenhouseOpacity,
                                               useAtmosphericModel,
