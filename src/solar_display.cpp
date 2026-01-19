@@ -107,6 +107,22 @@ void enableSolarRadiationLogging() {
     QLoggingCategory::setFilterRules(rules);
 }
 
+double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
+                                           double pressureAtm,
+                                           double greenhouseOpacity,
+                                           double co2Share) {
+    if (effectiveTemperatureKelvin <= 0.0) {
+        return 0.0;
+    }
+    // Коэффициенты подобраны так, чтобы при 1 атм поправка была минимальной,
+    // а при многократном давлении давала ощутимый подъём базовой температуры.
+    const double safePressureAtm = qMax(0.0, pressureAtm);
+    const double pressureBoost = 1.0 + 0.03 * std::log1p(safePressureAtm);
+    const double greenhouseBoost = 1.0 + 0.15 * qBound(0.0, greenhouseOpacity, 1.0);
+    const double compositionBoost = 1.0 + 0.5 * qMax(0.0, co2Share);
+    return effectiveTemperatureKelvin * pressureBoost * greenhouseBoost * compositionBoost;
+}
+
 constexpr int kRoleSemiMajorAxis = Qt::UserRole;
 constexpr int kRoleIsCustom = Qt::UserRole + 1;
 constexpr int kRolePlanetName = Qt::UserRole + 2;
@@ -521,14 +537,19 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     // на облака, поэтому повторно не умножаем на (1 - max(альбедо поверхности, облаков)).
     const double absorbedMeanFlux = meanToaFlux;
     const double tEffPre = std::pow(qMax(0.0, absorbedMeanFlux) / kStefanBoltzmannConstant, 0.25);
+    const double atmosphereMassGt = atmosphere.totalMassGigatons();
+    const double co2MassGt = atmosphere.massGigatons(QStringLiteral("co2"));
+    const double co2Share = atmosphereMassGt > 0.0 ? co2MassGt / atmosphereMassGt : 0.0;
     const double denseAtmosphereThresholdAtm = 0.1;
     double profileBaseTemperatureKelvin = baseTemperatureKelvin;
     if (pressureAtm >= denseAtmosphereThresholdAtm) {
-        // Для плотных атмосфер (например, Венера) профиль нельзя строить от
-        // экстремально холодной поверхности: модель «схлопывается» в холодный
-        // режим и не выходит из него. Поднимаем базовую температуру хотя бы до
-        // эффективной.
-        profileBaseTemperatureKelvin = qMax(baseTemperatureKelvin, tEffPre);
+        // Для плотных атмосфер (например, Венера) t_eff не отражает сильный парник:
+        // эффективная температура задаётся балансом излучения на верхней границе,
+        // но при больших давлениях и непрозрачности нижние слои остаются тёплыми.
+        // Поэтому минимальная база зависит от давления и состава.
+        const double tMinDense =
+            denseAtmosphereMinTemperatureKelvin(tEffPre, pressureAtm, manualGreenhouseOpacity, co2Share);
+        profileBaseTemperatureKelvin = qMax(baseTemperatureKelvin, tMinDense);
     }
     // В разреженных атмосферах (Марс/Луна) оставляем прежнюю базу, чтобы не
     // искажать локальные условия.
@@ -557,9 +578,6 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     constexpr double kCloudLongwaveTau = 0.3;
     const double tauCloudLW = kCloudLongwaveTau * cloudLongwaveFactor;
     extraTau += tauCloudLW;
-    const double atmosphereMassGt = atmosphere.totalMassGigatons();
-    const double co2MassGt = atmosphere.massGigatons(QStringLiteral("co2"));
-    const double co2Share = atmosphereMassGt > 0.0 ? co2MassGt / atmosphereMassGt : 0.0;
     const double co2PartialPressureAtm = pressureAtm * co2Share;
     if (co2PartialPressureAtm > 0.0) {
         // Серый парник от CO₂: растущее поглощение ограничиваем логарифмом,
@@ -4453,6 +4471,9 @@ private:
             surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
         const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+        const double atmosphereMassGt = input.atmosphere.totalMassGigatons();
+        const double co2MassGt = input.atmosphere.massGigatons(QStringLiteral("co2"));
+        const double co2Share = atmosphereMassGt > 0.0 ? co2MassGt / atmosphereMassGt : 0.0;
 
         SurfaceTileTemperatureDefaults tileDefaults;
         tileDefaults.minTemperatureKelvin = input.stateDefaults.minTemperatureKelvin;
@@ -4569,10 +4590,17 @@ private:
                            : point.temperatureK);
             double resolvedInitialAirTemperature = initialAirTemperature;
             if (point.pressureAtm >= 0.1) {
-                // Для плотных атмосфер не опускаем старт ниже t_eff,
-                // чтобы избежать холодного «схлопывания» на запуске модели.
+                // Для плотных атмосфер t_eff недостаточна (пример: Венера) —
+                // верхняя граница излучает холодно, но нижние слои остаются
+                // тёплыми из-за давления и состава. Поэтому используем базу,
+                // зависящую от давления и оптической плотности.
+                const double tMinDense = denseAtmosphereMinTemperatureKelvin(
+                    effectiveTemperatureKelvin,
+                    point.pressureAtm,
+                    localGreenhouseOpacity,
+                    co2Share);
                 resolvedInitialAirTemperature =
-                    qMax(resolvedInitialAirTemperature, effectiveTemperatureKelvin);
+                    qMax(resolvedInitialAirTemperature, tMinDense);
             }
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Radiation inputs (init)"
@@ -4584,10 +4612,15 @@ private:
                                           << effectiveTemperatureKelvin;
             }
             // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
-            // не даём профилю остыть ниже t_eff, чтобы избежать холодного «схлопывания».
+            // t_eff не даёт реалистичной нижней границы при больших давлениях (Венера),
+            // поэтому минимальная база зависит от давления и состава.
             const double profileBaseTemperatureKelvin =
                 (point.pressureAtm >= 0.1)
-                    ? qMax(point.state.temperatureKelvin(), effectiveTemperatureKelvin)
+                    ? qMax(point.state.temperatureKelvin(),
+                           denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                               point.pressureAtm,
+                                                               localGreenhouseOpacity,
+                                                               co2Share))
                     : point.state.temperatureKelvin();
             const auto radiationModel =
                 makeRadiationModel(input.atmosphere,
@@ -5026,6 +5059,9 @@ private:
             surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
         }
         const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+        const double atmosphereMassGt = atmosphere.totalMassGigatons();
+        const double co2MassGt = atmosphere.massGigatons(QStringLiteral("co2"));
+        const double co2Share = atmosphereMassGt > 0.0 ? co2MassGt / atmosphereMassGt : 0.0;
         const double localSeaLevelPressureAtm =
             calculateCellPressureAtmFromKg(atmosphere.totalMassKg(),
                                            massEarths,
@@ -5117,10 +5153,15 @@ private:
                 segmentSolarConstant * qMax(0.0, cosZenith);
             localInsolations.push_back(localInsolation);
             // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
-            // не даём профилю остыть ниже t_eff, чтобы избежать холодного «схлопывания».
+            // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
+            // поэтому минимальная база зависит от давления и состава.
             const double profileBaseTemperatureKelvin =
                 (point.pressureAtm >= 0.1)
-                    ? qMax(point.state.temperatureKelvin(), effectiveTemperatureKelvin)
+                    ? qMax(point.state.temperatureKelvin(),
+                           denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                               point.pressureAtm,
+                                                               point.state.greenhouseOpacity(),
+                                                               co2Share))
                     : point.state.temperatureKelvin();
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
@@ -5197,10 +5238,15 @@ private:
             double airColumnTemperatureK = point.airTemperatureK;
             if (airColumnTemperatureK <= 0.0 && radiationModelType == RadiationModelType::Layered) {
                 // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
-                // не даём профилю остыть ниже t_eff, чтобы избежать холодного «схлопывания».
+                // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
+                // поэтому минимальная база зависит от давления и состава.
                 const double profileBaseTemperatureKelvin =
                     (point.pressureAtm >= 0.1)
-                        ? qMax(point.state.temperatureKelvin(), effectiveTemperatureKelvin)
+                        ? qMax(point.state.temperatureKelvin(),
+                               denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                                   point.pressureAtm,
+                                                                   point.state.greenhouseOpacity(),
+                                                                   co2Share))
                         : point.state.temperatureKelvin();
                 const auto radiationModel =
                     makeRadiationModel(atmosphere,
@@ -5303,10 +5349,15 @@ private:
                                           << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
             }
             // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
-            // не даём профилю остыть ниже t_eff, чтобы избежать холодного «схлопывания».
+            // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
+            // поэтому минимальная база зависит от давления и состава.
             const double profileBaseTemperatureKelvin =
                 (point.pressureAtm >= 0.1)
-                    ? qMax(point.state.temperatureKelvin(), effectiveTemperatureKelvin)
+                    ? qMax(point.state.temperatureKelvin(),
+                           denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                               point.pressureAtm,
+                                                               point.state.greenhouseOpacity(),
+                                                               co2Share))
                     : point.state.temperatureKelvin();
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
