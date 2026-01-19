@@ -22,7 +22,8 @@ public:
     const SubsurfaceTemperatureSolver &solver() const;
 
     double absorbedFlux(double solarIrradiance) const;
-    double emittedFlux() const;
+    double surfaceEmittedFlux() const;
+    double toaEmittedFlux() const;
     double topLayerHeatCapacityJPerM2K() const;
 
     void updateTemperature(double absorbedFlux, double emittedFlux, double dtSeconds);
