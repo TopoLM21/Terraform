@@ -46,6 +46,10 @@ double SurfacePointState::greenhouseOpacity() const {
     return greenhouseOpacity_;
 }
 
+double SurfacePointState::emissivity() const {
+    return emissivity_;
+}
+
 void SurfacePointState::setTemperatureKelvin(double temperatureKelvin) {
     solver_.setInitialTemperature(qMax(minTemperatureKelvin_, temperatureKelvin));
 }

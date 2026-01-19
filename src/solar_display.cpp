@@ -5349,6 +5349,7 @@ private:
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
+            const SurfaceMaterial material = materialForPoint(point.materialId);
             const bool logDetails = shouldLogRadiationForPoint(i);
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Radiation inputs (tick)"
@@ -5360,7 +5361,6 @@ private:
             }
             if (useLayeredAtmosphere && i < atmosphereGrid.columns().size()) {
                 AtmosphericColumn &column = atmosphereGrid.columns()[i];
-                const SurfaceMaterial material = materialForPoint(point.materialId);
                 const double surfaceAlbedo = qBound(0.0, material.albedo, 1.0);
                 const QVector<double> layerDeltas =
                     layeredRadiationSolver.solve(column,
@@ -5416,27 +5416,43 @@ private:
                                           << "index=" << i
                                           << "airTemperatureK=" << point.airTemperatureK;
             }
-            const double safePressureAtm = qMax(0.0, point.pressureAtm);
-            if (safePressureAtm > 0.0 && gravity > 0.0) {
-                const double columnMassKgPerM2 =
-                    (safePressureAtm * kStandardPressurePa) / gravity;
-                const double airHeatCapacity =
-                    columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
-                if (airHeatCapacity > 0.0) {
-                    AtmosphericCellState airState(point.airTemperatureK, airHeatCapacity);
-                    // Чувствительный теплообмен: Q = h_c * (T_surface - T_air).
-                    // Устойчивость явного шага: dt < C / h_c.
-                    const double heatTransfer =
-                        kDefaultHeatTransferWPerM2K * safePressureAtm;
-                    SurfaceAtmosphereCoupler coupler(heatTransfer);
-                    coupler.exchangeSensibleHeat(point.state, airState, timeStepSeconds);
-                    point.airTemperatureK = airState.airTemperatureKelvin();
+            const double roughnessLengthMeters = material.roughnessLengthMeters;
+            if (useLayeredAtmosphere && i < atmosphereGrid.columns().size()) {
+                auto &layers = atmosphereGrid.columns()[i].layers();
+                if (!layers.isEmpty()) {
+                    SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K);
+                    coupler.exchangeHeat(point.state,
+                                         layers[0],
+                                         roughnessLengthMeters,
+                                         timeStepSeconds);
+                    point.airTemperatureK = layers[0].temperatureKelvin();
                     point.temperatureK = point.state.temperatureKelvin();
-                    if (useLayeredAtmosphere && i < atmosphereGrid.columns().size()) {
-                        auto &layers = atmosphereGrid.columns()[i].layers();
-                        if (!layers.isEmpty()) {
-                            layers[0].setTemperatureKelvin(point.airTemperatureK);
-                        }
+                }
+            } else {
+                const double safePressureAtm = qMax(0.0, point.pressureAtm);
+                if (safePressureAtm > 0.0 && gravity > 0.0) {
+                    const double columnMassKgPerM2 =
+                        (safePressureAtm * kStandardPressurePa) / gravity;
+                    const double airHeatCapacity =
+                        columnMassKgPerM2 * kDryAirSpecificHeatJPerKgK;
+                    if (airHeatCapacity > 0.0) {
+                        AtmosphericCellState airState(point.airTemperatureK, airHeatCapacity);
+                        const double windSpeed =
+                            std::hypot(point.windEastMps, point.windNorthMps);
+                        const double opticalDepth =
+                            opticalDepthFromGreenhouseOpacity(point.state.greenhouseOpacity(),
+                                                              radiationModelType);
+                        const double longwaveEmissivity =
+                            qBound(0.0, 1.0 - std::exp(-opticalDepth), 1.0);
+                        SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K);
+                        coupler.exchangeHeat(point.state,
+                                             airState,
+                                             windSpeed,
+                                             longwaveEmissivity,
+                                             roughnessLengthMeters,
+                                             timeStepSeconds);
+                        point.airTemperatureK = airState.airTemperatureKelvin();
+                        point.temperatureK = point.state.temperatureKelvin();
                     }
                 }
             }
