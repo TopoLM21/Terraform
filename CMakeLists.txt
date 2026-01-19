@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.110 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.111 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,6 +26,7 @@ add_executable(solar_constant
     include/radiative_convective_profile.h
     include/atmosphere_widget.h
     include/co2_convective_adjustment.h
+    include/convective_adjustment_solver.h
     include/emission_layer_model.h
     include/equal_area_projection.h
     include/geothermal_flux_model.h
@@ -84,6 +85,7 @@ add_executable(solar_constant
     src/atmospheric_thermodynamics.cpp
     src/atmosphere_widget.cpp
     src/co2_convective_adjustment.cpp
+    src/convective_adjustment_solver.cpp
     src/emission_layer_model.cpp
     src/mollweide_projection.cpp
     src/mode_illustration_widget.cpp
