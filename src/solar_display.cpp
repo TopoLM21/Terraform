@@ -491,8 +491,9 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     // Для плотных атмосфер профиль нельзя привязывать к локальной инсоляции:
     // ночью она обнуляется, а радиативный профиль должен оставаться заданным
     // глобальным средним ТОА-потоком.
-    const double absorbedMeanFlux =
-        meanToaFlux * (1.0 - qMax(surfAlbedoPre, pressureClouds));
+    // Планетарное альбедо учитываем ровно один раз: meanToaFlux уже скорректирован
+    // на облака, поэтому повторно не умножаем на (1 - max(альбедо поверхности, облаков)).
+    const double absorbedMeanFlux = meanToaFlux;
     const double tEffPre = std::pow(qMax(0.0, absorbedMeanFlux) / kStefanBoltzmannConstant, 0.25);
     const double denseAtmosphereThresholdAtm = 0.1;
     double profileBaseTemperatureKelvin = baseTemperatureKelvin;
