@@ -1,24 +1,14 @@
 #include "surface_tile_temperature_calculator.h"
 
-#include "rotation_period_utils.h"
-
+#include "radiation_model_utils.h"
 #include <QtCore/QtMath>
 
 #include <cmath>
-#include <limits>
 
 namespace {
-constexpr double kPi = 3.14159265358979323846;
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kMeanInsolationFactor = 0.25;
-
-double normalizeLongitudeRadians(double radians) {
-    double wrapped = std::fmod(radians + kPi, 2.0 * kPi);
-    if (wrapped < 0.0) {
-        wrapped += 2.0 * kPi;
-    }
-    return wrapped - kPi;
-}
+constexpr double kTwoThirds = 2.0 / 3.0;
 
 double estimateMeanEquilibriumTemperature(double solarConstant,
                                           double albedo,
@@ -66,77 +56,42 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     result.baselineAirTemperatures.reserve(pointCount);
 
     const double clampedCloudAlbedo = qBound(0.0, settings.cloudAlbedo, 1.0);
-    double cloudShortwaveTransmission = 1.0 - clampedCloudAlbedo;
-    if (clampedCloudAlbedo > 0.7) {
-        // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
-        cloudShortwaveTransmission *= 0.2;
+    double materialAlbedoSum = 0.0;
+    for (const auto &point : grid.points()) {
+        const auto materialIt = materialsById.constFind(point.materialId);
+        const SurfaceMaterial material =
+            (materialIt != materialsById.cend()) ? *materialIt : fallbackMaterial;
+        materialAlbedoSum += qBound(0.0, material.albedo, 1.0);
     }
-    cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
-    const double siderealDayLengthDays =
-        solarToSiderealPeriodDays(settings.dayLengthDays,
-                                  settings.yearLengthDays,
-                                  settings.isRetrograde);
-    // Используем сидерический период для вращения, сохраняя солнечные сутки в UI.
-    const double rotationDayLengthDays =
-        (siderealDayLengthDays > 0.0) ? siderealDayLengthDays : settings.dayLengthDays;
-    const int stepsPerDay = qMax(1, qRound(rotationDayLengthDays * 24.0));
-    const int solarStepsPerDay = qMax(1, qRound(settings.dayLengthDays * 24.0));
-    const double dayLengthSeconds = qMax(0.01, rotationDayLengthDays) * 86400.0;
-    const double timeStepSeconds =
-        (stepsPerDay > 0) ? (dayLengthSeconds / static_cast<double>(stepsPerDay)) : 0.0;
-    const double stepDurationDays = timeStepSeconds / 86400.0;
-    const int spinUpDays = settings.skipSpinUp ? 0 : qMax(0, settings.spinUpDays);
-    const bool allowInsolation =
-        settings.hasSolarConstant && settings.segmentSolarConstant > 0.0 && timeStepSeconds > 0.0;
+    const double meanMaterialAlbedo = materialAlbedoSum /
+        qMax(1, grid.points().size());
+    // Облака перекрывают поверхность, поэтому берём максимум отражения.
+    const double globalAlbedo = qMax(meanMaterialAlbedo, clampedCloudAlbedo);
 
-    const double declinationRadians = qDegreesToRadians(settings.declinationDegrees);
-    const double sinDeclination = std::sin(declinationRadians);
-    const double cosDeclination = std::cos(declinationRadians);
-    const double surfaceGravity = (settings.surfaceGravity > 0.0)
-        ? settings.surfaceGravity
-        : 9.80665;
+    const double baseEquilibriumTemperature =
+        settings.hasSolarConstant
+            ? estimateMeanEquilibriumTemperature(settings.segmentSolarConstant,
+                                                 globalAlbedo,
+                                                 defaults.minTemperatureKelvin)
+            : defaults.minTemperatureKelvin;
+    const double tauSurface =
+        opticalDepthFromGreenhouseOpacity(defaults.greenhouseOpacity,
+                                          defaults.radiationModelType);
+    const double tauEmission = qMin(1.0, qMax(0.0, tauSurface));
+    const double greenhouseFactor = (tauEmission + kTwoThirds > 0.0)
+        // Инвертируем серую формулу эмиссионного слоя:
+        // T_em^4 = T_surface^4 * (τ_em + 2/3) / (τ_surface + 2/3),
+        // поэтому T_surface = T_eq * ((τ_surface + 2/3)/(τ_em + 2/3))^(1/4).
+        ? std::pow((tauSurface + kTwoThirds) / (tauEmission + kTwoThirds), 0.25)
+        : 1.0;
+    const double globalTemperature =
+        qMax(defaults.minTemperatureKelvin,
+             baseEquilibriumTemperature * greenhouseFactor);
+    const double meanInsolation =
+        settings.hasSolarConstant ? settings.segmentSolarConstant * kMeanInsolationFactor : 0.0;
 
-    const bool isTidallyLocked = settings.rotationMode == RotationMode::TidalLocked;
-    const double orbitalPhaseRadians = settings.orbitalPhaseRadians;
-    const int absoluteHourIndex =
-        (settings.currentAbsoluteHourIndex != 0)
-            ? settings.currentAbsoluteHourIndex
-            : settings.currentHourIndex;
-    double resolvedElapsedDays = settings.elapsedDays;
-    if (resolvedElapsedDays <= 0.0 &&
-        (settings.currentAbsoluteHourIndex != 0 || settings.currentHourIndex != 0)) {
-        resolvedElapsedDays =
-            static_cast<double>(absoluteHourIndex) / static_cast<double>(solarStepsPerDay);
-    }
-    const double elapsedTimeDays = resolvedElapsedDays * settings.dayLengthDays;
-    const double halfStepDays = 0.5 * stepDurationDays;
-    const auto resolveSubstellarLongitude =
-        [isTidallyLocked, orbitalPhaseRadians, rotationDayLengthDays, settings](double timeDays) {
-        if (isTidallyLocked) {
-            return 0.0;
-        }
-        if (rotationDayLengthDays <= 0.0) {
-            return 0.0;
-        }
-        const int safeSpinOrbitP = qMax(1, settings.spinOrbitP);
-        const int safeSpinOrbitQ = qMax(1, settings.spinOrbitQ);
-        const double resonanceRatio = static_cast<double>(safeSpinOrbitP) /
-            static_cast<double>(safeSpinOrbitQ);
-        const double phase = 2.0 * kPi * (timeDays / rotationDayLengthDays);
-        // Фаза вращения λ_spin выражается через непрерывное время в днях:
-        // t берётся в земных днях = elapsedDays * solarDayLength, а P_spin — сидерические сутки.
-        // Это отделяет фазу вращения от дискретизации (stepsPerDay) солнечного дня.
-        const double spinDirection = settings.isRetrograde ? -1.0 : 1.0;
-        // Ретроградное вращение меняет знак спиновой фазы, что сдвигает подсолнечную точку
-        // в противоположном направлении по долготе.
-        const double spinPhase = spinDirection * phase * resonanceRatio;
-        const double hourAngle = spinPhase - kPi;
-        // Субзвёздная долгота — меридиан с нулевым часовым углом.
-        return normalizeLongitudeRadians(orbitalPhaseRadians - hourAngle);
-    };
-
-    double minTemperature = std::numeric_limits<double>::max();
-    double maxTemperature = std::numeric_limits<double>::lowest();
+    double minTemperature = globalTemperature;
+    double maxTemperature = globalTemperature;
 
     for (auto &point : grid.points()) {
         const auto materialIt = materialsById.constFind(point.materialId);
@@ -145,82 +100,19 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
         // Облака перекрывают поверхность, поэтому берём максимум отражения.
         const double albedo = qMax(materialAlbedo, clampedCloudAlbedo);
-        const double visualizationStartTemperature =
-            settings.hasSolarConstant
-                ? estimateMeanEquilibriumTemperature(settings.segmentSolarConstant,
-                                                     albedo,
-                                                     defaults.minTemperatureKelvin)
-                : defaults.minTemperatureKelvin;
-
-        SurfacePointState state(visualizationStartTemperature,
+        SurfacePointState state(globalTemperature,
                                 albedo,
                                 defaults.greenhouseOpacity,
                                 defaults.radiationModelType,
                                 defaults.minTemperatureKelvin,
                                 material,
                                 defaults.subsurfaceSettings);
-
-        auto applyRadiativeStep = [&](double timeDays) {
-            const double substellarLongitude = resolveSubstellarLongitude(timeDays);
-            const double localHourAngle = point.longitudeRadians - substellarLongitude;
-            const double cosZenith =
-                point.sinLatitude * sinDeclination +
-                point.cosLatitude * cosDeclination * std::cos(localHourAngle);
-            // S_inst = S0 * cos(zenith) при освещении, иначе 0.
-            const double localInsolation =
-                settings.segmentSolarConstant * qMax(0.0, cosZenith);
-            // Перенос тепла через глобальную инсоляцию отключён как нефизичный костыль;
-            // допускается только атмосферный механизм переноса.
-            const double blendedInsolation = localInsolation;
-            const double effectiveFlux =
-                blendedInsolation * qMax(0.0, 1.0 - albedo);
-            const double effectiveTemperatureKelvin =
-                std::pow(qMax(0.0, effectiveFlux) / kStefanBoltzmannConstant, 0.25);
-            const auto radiationModel =
-                makeRadiationModel(settings.atmosphere,
-                                   settings.atmospherePressureAtm,
-                                   state.temperatureKelvin(),
-                                   effectiveTemperatureKelvin,
-                                   surfaceGravity,
-                                   defaults.radiationModelType);
-            // Поток у поверхности: S_surf = S_local * T_cloud * T_atm.
-            const double surfaceShortwaveFlux =
-                blendedInsolation * cloudShortwaveTransmission *
-                radiationModel->incomingTransmission();
-            const double absorbedFlux = state.absorbedFlux(surfaceShortwaveFlux);
-            const double emittedFlux = state.emittedFlux();
-            state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
-            return blendedInsolation;
-        };
-
-        if (allowInsolation && spinUpDays > 0) {
-            // Спин-ап прогревает точку до устойчивого цикла перед показом карты.
-            // Отматываем время назад, чтобы спин-ап использовал непрерывную долготу.
-            const double baseElapsedTimeDays =
-                qMax(0.0, elapsedTimeDays - static_cast<double>(spinUpDays) * rotationDayLengthDays);
-            for (int day = 0; day < spinUpDays; ++day) {
-                for (int step = 0; step < stepsPerDay; ++step) {
-                    const double spinUpTimeDays =
-                        baseElapsedTimeDays +
-                        (static_cast<double>(day * stepsPerDay + step) + 0.5) * stepDurationDays;
-                    applyRadiativeStep(spinUpTimeDays);
-                }
-            }
-        }
-
-        double blendedInsolation = 0.0;
-        if (allowInsolation) {
-            blendedInsolation = applyRadiativeStep(elapsedTimeDays + halfStepDays);
-        }
-
         point.state = state;
-        point.temperatureK = state.temperatureKelvin();
-        point.airTemperatureK = point.temperatureK;
-        result.blendedInsolations.push_back(blendedInsolation);
-        result.baselineAirTemperatures.push_back(point.temperatureK);
-
-        minTemperature = qMin(minTemperature, point.temperatureK);
-        maxTemperature = qMax(maxTemperature, point.temperatureK);
+        point.state.setTemperatureKelvin(globalTemperature);
+        point.temperatureK = globalTemperature;
+        point.airTemperatureK = globalTemperature;
+        result.blendedInsolations.push_back(meanInsolation);
+        result.baselineAirTemperatures.push_back(globalTemperature);
     }
 
     result.hasTemperatureRange = settings.hasSolarConstant && minTemperature <= maxTemperature;
