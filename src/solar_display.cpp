@@ -27,6 +27,7 @@
 #include "orbit_segment_calculator.h"
 #include "radiation_model.h"
 #include "layered_radiation_model.h"
+#include "layered_radiation_solver.h"
 #include "radiation_model_utils.h"
 #include "atmospheric_pressure_model.h"
 #include "atmospheric_cell_state.h"
@@ -5112,6 +5113,12 @@ private:
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+        const LayeredRadiationSolver layeredRadiationSolver(timeStepSeconds);
+        auto &atmosphereGrid = surfaceGrid_.atmosphericGrid();
+        const bool useLayeredAtmosphere =
+            useAtmosphericModel && radiationModelType == RadiationModelType::Layered &&
+            atmosphereGrid.columnCount() == surfaceGrid_.points().size() &&
+            atmosphereGrid.layerCount() > 0;
         const int solarStepsPerDay = qMax(1, surfaceTime_.stepsPerDay);
         const double elapsedTimeDays =
             (surfaceTime_.surfaceElapsedDays() + 0.5 / static_cast<double>(solarStepsPerDay)) *
@@ -5349,36 +5356,57 @@ private:
                                           << "meanToaFlux=" << meanToaFlux
                                           << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
             }
-            // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
-            // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
-            // поэтому минимальная база зависит от давления и состава.
-            const double profileBaseTemperatureKelvin =
-                (point.pressureAtm >= 0.1)
-                    ? qMax(point.state.temperatureKelvin(),
-                           denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
-                                                               point.pressureAtm,
-                                                               point.state.greenhouseOpacity(),
-                                                               co2Share))
-                    : point.state.temperatureKelvin();
-            const auto radiationModel =
-                makeRadiationModel(atmosphere,
-                                   point.pressureAtm,
-                                   profileBaseTemperatureKelvin,
-                                   effectiveTemperatureKelvin,
-                                   gravity,
-                                   radiationModelType);
-            point.airTemperatureK =
-                resolveAirTemperatureKelvin(point.state,
-                                            point.pressureAtm,
-                                            gravity,
-                                            initialAirTemperature,
-                                            localInsolation,
-                                            cloudShortwaveTransmission,
-                                            radiationModelType,
-                                            *radiationModel,
-                                            useAtmosphericModel,
-                                            manualGreenhouseOnTop,
-                                            timeStepSeconds);
+            if (useLayeredAtmosphere && i < atmosphereGrid.columns().size()) {
+                AtmosphericColumn &column = atmosphereGrid.columns()[i];
+                const SurfaceMaterial material = materialForPoint(point.materialId);
+                const double surfaceAlbedo = qBound(0.0, material.albedo, 1.0);
+                const QVector<double> layerDeltas =
+                    layeredRadiationSolver.solve(column,
+                                                 localInsolation,
+                                                 surfaceAlbedo,
+                                                 cloudShortwaveTransmission);
+                auto &layers = column.layers();
+                const int layerCount = qMin(layers.size(), layerDeltas.size());
+                for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
+                    const double updatedTemperature =
+                        qMax(0.0, layers.at(layerIndex).temperatureKelvin() +
+                                       layerDeltas.at(layerIndex));
+                    layers[layerIndex].setTemperatureKelvin(updatedTemperature);
+                }
+                point.airTemperatureK =
+                    layers.isEmpty() ? initialAirTemperature : layers.first().temperatureKelvin();
+            } else {
+                // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
+                // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
+                // поэтому минимальная база зависит от давления и состава.
+                const double profileBaseTemperatureKelvin =
+                    (point.pressureAtm >= 0.1)
+                        ? qMax(point.state.temperatureKelvin(),
+                               denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                                   point.pressureAtm,
+                                                                   point.state.greenhouseOpacity(),
+                                                                   co2Share))
+                        : point.state.temperatureKelvin();
+                const auto radiationModel =
+                    makeRadiationModel(atmosphere,
+                                       point.pressureAtm,
+                                       profileBaseTemperatureKelvin,
+                                       effectiveTemperatureKelvin,
+                                       gravity,
+                                       radiationModelType);
+                point.airTemperatureK =
+                    resolveAirTemperatureKelvin(point.state,
+                                                point.pressureAtm,
+                                                gravity,
+                                                initialAirTemperature,
+                                                localInsolation,
+                                                cloudShortwaveTransmission,
+                                                radiationModelType,
+                                                *radiationModel,
+                                                useAtmosphericModel,
+                                                manualGreenhouseOnTop,
+                                                timeStepSeconds);
+            }
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Resolved air temperature (tick)"
                                           << "index=" << i
@@ -5400,6 +5428,12 @@ private:
                     coupler.exchangeSensibleHeat(point.state, airState, timeStepSeconds);
                     point.airTemperatureK = airState.airTemperatureKelvin();
                     point.temperatureK = point.state.temperatureKelvin();
+                    if (useLayeredAtmosphere && i < atmosphereGrid.columns().size()) {
+                        auto &layers = atmosphereGrid.columns()[i].layers();
+                        if (!layers.isEmpty()) {
+                            layers[0].setTemperatureKelvin(point.airTemperatureK);
+                        }
+                    }
                 }
             }
             minTemperature = qMin(minTemperature, point.temperatureK);
