@@ -17,6 +17,7 @@ public:
     void initialize(const AtmosphereComposition &composition,
                     double planetMassEarths,
                     double radiusKm,
+                    double baseTemperatureKelvin,
                     int columnCount,
                     int layerCount);
 
