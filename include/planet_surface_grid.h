@@ -1,5 +1,6 @@
 #pragma once
 
+#include "atmospheric_grid_3d.h"
 #include "planet_surface_point.h"
 #include "surface_cell.h"
 #include "planet_presets.h"
@@ -26,6 +27,12 @@ public:
     const QVector<SurfaceCell> &cells() const;
     const SurfaceCell *cellAt(int index) const;
 
+    AtmosphericGrid3D &atmosphericGrid();
+    const AtmosphericGrid3D &atmosphericGrid() const;
+    void initializeAtmosphericGrid(const AtmosphereComposition &composition,
+                                   double planetMassEarths,
+                                   int layerCount = 0);
+
     void setHeightSource(HeightSourceType sourceType,
                          const QString &heightmapPath,
                          double heightmapScaleKm,
@@ -47,4 +54,5 @@ private:
     bool hasSeaLevel_ = true;
     QVector<SurfacePoint> points_;
     QVector<SurfaceCell> cells_;
+    AtmosphericGrid3D atmosphericGrid_;
 };

@@ -4835,6 +4835,7 @@ private:
         const AtmosphereComposition atmosphere = currentAtmosphereForCalculations();
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
+        surfaceGrid_.initializeAtmosphericGrid(atmosphere, massEarths);
         const double cloudAlbedo =
             qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
         const QString baseMaterialId =
