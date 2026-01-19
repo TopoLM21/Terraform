@@ -548,6 +548,20 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     }
     const double waterTau = qMin(8.0, evaporation * 1.5);
     double extraTau = waterTau;
+    const double atmosphereMassGt = atmosphere.totalMassGigatons();
+    const double co2MassGt = atmosphere.massGigatons(QStringLiteral("co2"));
+    const double co2Share = atmosphereMassGt > 0.0 ? co2MassGt / atmosphereMassGt : 0.0;
+    const double co2PartialPressureAtm = pressureAtm * co2Share;
+    if (co2PartialPressureAtm > 0.0) {
+        // Серый парник от CO₂: растущее поглощение ограничиваем логарифмом,
+        // чтобы имитировать насыщение линий при больших давлениях.
+        // k и P0 подобраны эмпирически для мягкого вклада в общий τ.
+        constexpr double kTauCo2 = 0.35;
+        constexpr double kReferencePressureAtm = 0.1;
+        const double tauCo2 =
+            kTauCo2 * std::log(1.0 + co2PartialPressureAtm / kReferencePressureAtm);
+        extraTau += tauCo2;
+    }
     if (manualGreenhouseOpacity > 0.0 &&
         (!useAtmosphericModel || manualGreenhouseOnTopOfAtmosphere)) {
         // Дополнительная непрозрачность: либо без атмосферной модели,
