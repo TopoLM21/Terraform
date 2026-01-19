@@ -45,6 +45,8 @@ public:
     void setTemperatures(const QVector<double> &temperatures);
 
     const QVector<double> &temperatures() const;
+    const QVector<double> &layerThicknessesMeters() const;
+    const QVector<double> &layerDepthsMeters() const;
     double surfaceTemperatureKelvin() const;
     double topLayerHeatCapacity() const;
 
