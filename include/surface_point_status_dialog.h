@@ -18,6 +18,7 @@ public:
     void setAtmosphereProfile(const AtmosphericColumn *column);
     void clearPoint();
     void clearAtmosphereProfile();
+    void clearSubsurfaceProfile();
 
 private:
     QLabel *latitudeValueLabel_ = nullptr;
@@ -32,4 +33,5 @@ private:
     QLabel *tileAreaValueLabel_ = nullptr;
     QLabel *tileEdgeLengthValueLabel_ = nullptr;
     QTableWidget *profileTable_ = nullptr;
+    QTableWidget *subsurfaceTable_ = nullptr;
 };

@@ -3,9 +3,13 @@
 #include "atmospheric_column.h"
 
 #include <QtWidgets/QFormLayout>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QHeaderView>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QTableWidget>
+#include <QtWidgets/QVBoxLayout>
+
+#include <algorithm>
 
 namespace {
 QString formatNumber(double value, int precision = 2) {
@@ -44,6 +48,35 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     profileTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     profileTable_->verticalHeader()->setVisible(false);
 
+    subsurfaceTable_ = new QTableWidget(this);
+    subsurfaceTable_->setColumnCount(3);
+    subsurfaceTable_->setHorizontalHeaderLabels({
+        QStringLiteral("Слой"),
+        QStringLiteral("Глубина/толщина (м)"),
+        QStringLiteral("Температура (K)")
+    });
+    subsurfaceTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    subsurfaceTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    subsurfaceTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    subsurfaceTable_->verticalHeader()->setVisible(false);
+
+    auto *profilesWidget = new QWidget(this);
+    auto *profilesLayout = new QHBoxLayout(profilesWidget);
+    profilesLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *atmosphereLayout = new QVBoxLayout();
+    atmosphereLayout->setContentsMargins(0, 0, 0, 0);
+    atmosphereLayout->addWidget(new QLabel(QStringLiteral("Профиль атмосферы по слоям:"), this));
+    atmosphereLayout->addWidget(profileTable_);
+
+    auto *subsurfaceLayout = new QVBoxLayout();
+    subsurfaceLayout->setContentsMargins(0, 0, 0, 0);
+    subsurfaceLayout->addWidget(new QLabel(QStringLiteral("Подповерхностный профиль:"), this));
+    subsurfaceLayout->addWidget(subsurfaceTable_);
+
+    profilesLayout->addLayout(atmosphereLayout);
+    profilesLayout->addLayout(subsurfaceLayout);
+
     layout->addRow(QStringLiteral("Широта (°):"), latitudeValueLabel_);
     layout->addRow(QStringLiteral("Долгота (°):"), longitudeValueLabel_);
     layout->addRow(QStringLiteral("Температура поверхности (K):"), temperatureValueLabel_);
@@ -55,7 +88,7 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Материал:"), materialValueLabel_);
     layout->addRow(QStringLiteral("Площадь тайла (км²):"), tileAreaValueLabel_);
     layout->addRow(QStringLiteral("Средняя длина ребра (км):"), tileEdgeLengthValueLabel_);
-    layout->addRow(QStringLiteral("Профиль атмосферы по слоям:"), profileTable_);
+    layout->addRow(profilesWidget);
 }
 
 void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
@@ -72,6 +105,40 @@ void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
     materialValueLabel_->setText(point.materialId.isEmpty() ? QStringLiteral("—") : point.materialId);
     tileAreaValueLabel_->setText(formatNumber(tileAreaKm2));
     tileEdgeLengthValueLabel_->setText(formatNumber(tileEdgeLengthKm));
+
+    if (!subsurfaceTable_) {
+        return;
+    }
+
+    const auto &solver = point.state.solver();
+    // Используем solver() у SurfacePointState, потому что он хранит локальную
+    // тепловую инерцию и «грунтовые» слои для конкретной точки поверхности.
+    const auto &temperatures = solver.temperatures();
+    const auto &layerDepths = solver.layerDepthsMeters();
+    const auto &layerThicknesses = solver.layerThicknessesMeters();
+    const int rows = std::min({temperatures.size(), layerDepths.size(), layerThicknesses.size()});
+    if (rows == 0) {
+        clearSubsurfaceProfile();
+        return;
+    }
+
+    subsurfaceTable_->setRowCount(rows);
+    for (int i = 0; i < rows; ++i) {
+        auto *layerItem = new QTableWidgetItem(QString::number(i));
+        layerItem->setFlags(layerItem->flags() & ~Qt::ItemIsEditable);
+        subsurfaceTable_->setItem(i, 0, layerItem);
+
+        const QString depthThickness = QStringLiteral("%1 / %2")
+                                           .arg(formatNumber(layerDepths.at(i), 3))
+                                           .arg(formatNumber(layerThicknesses.at(i), 3));
+        auto *depthItem = new QTableWidgetItem(depthThickness);
+        depthItem->setFlags(depthItem->flags() & ~Qt::ItemIsEditable);
+        subsurfaceTable_->setItem(i, 1, depthItem);
+
+        auto *temperatureItem = new QTableWidgetItem(formatNumber(temperatures.at(i), 2));
+        temperatureItem->setFlags(temperatureItem->flags() & ~Qt::ItemIsEditable);
+        subsurfaceTable_->setItem(i, 2, temperatureItem);
+    }
 }
 
 void SurfacePointStatusDialog::setAtmosphereProfile(const AtmosphericColumn *column) {
@@ -120,6 +187,7 @@ void SurfacePointStatusDialog::clearPoint() {
     tileAreaValueLabel_->setText(QStringLiteral("—"));
     tileEdgeLengthValueLabel_->setText(QStringLiteral("—"));
     clearAtmosphereProfile();
+    clearSubsurfaceProfile();
 }
 
 void SurfacePointStatusDialog::clearAtmosphereProfile() {
@@ -128,4 +196,12 @@ void SurfacePointStatusDialog::clearAtmosphereProfile() {
     }
     profileTable_->clearContents();
     profileTable_->setRowCount(0);
+}
+
+void SurfacePointStatusDialog::clearSubsurfaceProfile() {
+    if (!subsurfaceTable_) {
+        return;
+    }
+    subsurfaceTable_->clearContents();
+    subsurfaceTable_->setRowCount(0);
 }

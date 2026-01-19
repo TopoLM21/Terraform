@@ -75,6 +75,14 @@ const QVector<double> &SubsurfaceTemperatureSolver::temperatures() const {
     return temperatures_;
 }
 
+const QVector<double> &SubsurfaceTemperatureSolver::layerThicknessesMeters() const {
+    return grid_.layerThicknessesMeters();
+}
+
+const QVector<double> &SubsurfaceTemperatureSolver::layerDepthsMeters() const {
+    return grid_.layerDepthsMeters();
+}
+
 double SubsurfaceTemperatureSolver::surfaceTemperatureKelvin() const {
     if (temperatures_.isEmpty()) {
         return 0.0;
