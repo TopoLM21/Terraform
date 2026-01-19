@@ -42,6 +42,10 @@ double SurfacePointState::temperatureKelvin() const {
     return solver_.surfaceTemperatureKelvin();
 }
 
+double SurfacePointState::greenhouseOpacity() const {
+    return greenhouseOpacity_;
+}
+
 void SurfacePointState::setTemperatureKelvin(double temperatureKelvin) {
     solver_.setInitialTemperature(qMax(minTemperatureKelvin_, temperatureKelvin));
 }

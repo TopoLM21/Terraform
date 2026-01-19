@@ -175,7 +175,10 @@ struct LongwaveFluxes {
 LongwaveFluxes computeLongwaveFluxes(const RadiationModel &radiationModel,
                                      RadiationModelType radiationModelType,
                                      double surfaceEmittedFluxWPerM2,
-                                     double airTemperatureKelvin) {
+                                     double airTemperatureKelvin,
+                                     double greenhouseOpacity,
+                                     bool useAtmosphericModel,
+                                     bool manualGreenhouseOnTop) {
     LongwaveFluxes fluxes;
     if (radiationModelType == RadiationModelType::Layered) {
         const auto *layeredModel = dynamic_cast<const LayeredRadiationModel *>(&radiationModel);
@@ -191,7 +194,20 @@ LongwaveFluxes computeLongwaveFluxes(const RadiationModel &radiationModel,
         }
     }
 
-    const double transmission = qBound(0.0, radiationModel.outgoingTransmission(), 1.0);
+    const double baseTransmission = qBound(0.0, radiationModel.outgoingTransmission(), 1.0);
+    const double greenhouseTransmission = qBound(0.0, 1.0 - greenhouseOpacity, 1.0);
+    double transmission = baseTransmission;
+    if (!useAtmosphericModel) {
+        transmission = greenhouseTransmission;
+    } else if (manualGreenhouseOnTop) {
+        // Добавляем дополнительную оптическую толщину τ_gh к атмосферной τ_atm:
+        // T_lw = exp(-(τ_atm + τ_gh)) ≈ T_atm * T_gh. Это серый двухпотоковый подход,
+        // где излучение атмосферы задаётся ε(τ) = 1 - T_lw.
+        const double extraTransmission = (baseTransmission > 0.0)
+            ? qBound(0.0, greenhouseTransmission / baseTransmission, 1.0)
+            : greenhouseTransmission;
+        transmission = qBound(0.0, baseTransmission * extraTransmission, 1.0);
+    }
     const double emissivity = 1.0 - transmission;
     // Серый двухпотоковый баланс: атмосфера излучает вверх и вниз как σ T_air^4 * ε(τ).
     const double atmosphericEmission =
@@ -374,6 +390,8 @@ double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
                                     double cloudShortwaveTransmission,
                                     RadiationModelType radiationModelType,
                                     const RadiationModel &radiationModel,
+                                    bool useAtmosphericModel,
+                                    bool manualGreenhouseOnTop,
                                     double timeStepSeconds) {
     if (pressureAtm <= 0.0 || gravity <= 0.0) {
         return surfaceState.temperatureKelvin();
@@ -406,7 +424,10 @@ double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
         computeLongwaveFluxes(radiationModel,
                               radiationModelType,
                               emittedFlux,
-                              airState.airTemperatureKelvin());
+                              airState.airTemperatureKelvin(),
+                              surfaceState.greenhouseOpacity(),
+                              useAtmosphericModel,
+                              manualGreenhouseOnTop);
     const double longwaveNetAir =
         emittedFlux - (longwaveFluxes.upwardFluxWPerM2 + longwaveFluxes.downwardFluxWPerM2);
     const double airRadiativeHeatingFlux = shortwaveAbsorbedByAir + longwaveNetAir;
@@ -438,6 +459,8 @@ double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
                                    double cloudShortwaveTransmission,
                                    RadiationModelType radiationModelType,
                                    const RadiationModel &radiationModel,
+                                   bool useAtmosphericModel,
+                                   bool manualGreenhouseOnTop,
                                    double timeStepSeconds) {
     if (radiationModelType == RadiationModelType::Layered) {
         const auto *layeredModel = dynamic_cast<const LayeredRadiationModel *>(&radiationModel);
@@ -453,6 +476,8 @@ double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
                                         cloudShortwaveTransmission,
                                         radiationModelType,
                                         radiationModel,
+                                        useAtmosphericModel,
+                                        manualGreenhouseOnTop,
                                         timeStepSeconds);
 }
 
@@ -4561,6 +4586,8 @@ private:
                                             cloudShortwaveTransmission,
                                             input.radiationModelType,
                                             *radiationModel,
+                                            useAtmosphericModel,
+                                            input.manualGreenhouseOnTop,
                                             timeStepSeconds);
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Resolved air temperature (init)"
@@ -5086,11 +5113,15 @@ private:
             const double emittedFlux = point.state.surfaceEmittedFlux();
             const double airTemperatureForFlux =
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
+            const double greenhouseOpacity = point.state.greenhouseOpacity();
             const LongwaveFluxes longwaveFluxes =
                 computeLongwaveFluxes(*radiationModel,
                                       radiationModelType,
                                       emittedFlux,
-                                      airTemperatureForFlux);
+                                      airTemperatureForFlux,
+                                      greenhouseOpacity,
+                                      useAtmosphericModel,
+                                      manualGreenhouseOnTop);
             // Баланс поверхности: учитываем нисходящее LW излучение атмосферы.
             const double absorbedFlux =
                 point.state.absorbedFlux(surfaceShortwaveFlux) + longwaveFluxes.downwardFluxWPerM2;
@@ -5266,6 +5297,8 @@ private:
                                             cloudShortwaveTransmission,
                                             radiationModelType,
                                             *radiationModel,
+                                            useAtmosphericModel,
+                                            manualGreenhouseOnTop,
                                             timeStepSeconds);
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Resolved air temperature (tick)"
