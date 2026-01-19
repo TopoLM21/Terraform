@@ -31,6 +31,7 @@ public:
     const AtmosphericGrid3D &atmosphericGrid() const;
     void initializeAtmosphericGrid(const AtmosphereComposition &composition,
                                    double planetMassEarths,
+                                   double baseTemperatureKelvin,
                                    int layerCount = 0);
 
     void setHeightSource(HeightSourceType sourceType,

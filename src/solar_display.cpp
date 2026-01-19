@@ -4843,7 +4843,6 @@ private:
         const AtmosphereComposition atmosphere = currentAtmosphereForCalculations();
         const double massEarths = planetComboBox_->currentData(kRoleMassEarths).toDouble();
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
-        surfaceGrid_.initializeAtmosphericGrid(atmosphere, massEarths);
         const double cloudAlbedo =
             qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
         const QString baseMaterialId =
@@ -4938,6 +4937,25 @@ private:
         } else {
             stateDefaults->greenhouseOpacity = stateDefaults->manualGreenhouseOpacity;
         }
+
+        double meanSurfaceTemperatureKelvin = 0.0;
+        int meanSurfaceSamples = 0;
+        for (const auto &point : surfaceGrid_.points()) {
+            if (point.temperatureK > 0.0) {
+                meanSurfaceTemperatureKelvin += point.temperatureK;
+                ++meanSurfaceSamples;
+            }
+        }
+        if (meanSurfaceSamples > 0) {
+            meanSurfaceTemperatureKelvin /= static_cast<double>(meanSurfaceSamples);
+        }
+
+        // Базу берём из t_eff (или текущей средней поверхности), чтобы старт атмосферы
+        // был синхронизирован с картой поверхности и не давал скачка при первом тике.
+        const double baseTemperatureKelvin =
+            (effectiveTemperatureKelvin > 0.0) ? effectiveTemperatureKelvin
+                                               : meanSurfaceTemperatureKelvin;
+        surfaceGrid_.initializeAtmosphericGrid(atmosphere, massEarths, baseTemperatureKelvin);
 
         SurfaceGridComputationInput input;
         input.grid = surfaceGrid_;

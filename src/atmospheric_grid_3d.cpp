@@ -75,6 +75,7 @@ const QVector<AtmosphericColumn> &AtmosphericGrid3D::columns() const {
 void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
                                   double planetMassEarths,
                                   double radiusKm,
+                                  double baseTemperatureKelvin,
                                   int columnCount,
                                   int layerCount) {
     const int resolvedLayerCount = (layerCount > 0) ? layerCount : kDefaultLayerCount;
@@ -89,11 +90,12 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
     const double specificHeat = AtmosphericThermodynamics::specificHeatCp(composition);
 
     // Простейшее допущение: заданная температура на поверхности.
-    const double baseTemperatureKelvin = (surfacePressureAtm > 0.0) ? 288.0 : 0.0;
+    const double resolvedBaseTemperatureKelvin =
+        (surfacePressureAtm > 0.0) ? qMax(0.0, baseTemperatureKelvin) : 0.0;
 
     AtmosphericProfileInitializer initializer(composition);
     AtmosphericProfileInitializer::Settings profileSettings;
-    profileSettings.surfaceTemperatureKelvin = baseTemperatureKelvin;
+    profileSettings.surfaceTemperatureKelvin = resolvedBaseTemperatureKelvin;
     profileSettings.surfacePressureAtm = surfacePressureAtm;
     profileSettings.gravityMps2 = gravity;
     profileSettings.layerCount = resolvedLayerCount;
