@@ -2,7 +2,10 @@
 
 #include "surface_atmosphere_coupler.h"
 
+#include <QtCore/QLoggingCategory>
 #include <QtCore/QtMath>
+
+Q_LOGGING_CATEGORY(atmosphereProfileLog, "solar.atmosphere.profile")
 
 AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composition,
                                            double gravityMps2,
@@ -29,6 +32,11 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
     const int processedCount = qMin(pointCount, columnCount);
     if (processedCount <= 0) {
         return;
+    }
+    int logPointIndex = input.logPointIndex;
+    if (logPointIndex < 0 || logPointIndex >= processedCount) {
+        // Если индекс не задан, пишем лог для первой ячейки: так проще сравнивать шаги.
+        logPointIndex = 0;
     }
 
     // Последовательность шага атмосферы:
@@ -74,6 +82,20 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                              timeStepSeconds_);
         point.airTemperatureK = layers[0].temperatureKelvin();
         point.temperatureK = point.state.temperatureKelvin();
+
+        if (i == logPointIndex) {
+            qCInfo(atmosphereProfileLog) << "Atmosphere profile (layered step)"
+                                         << "index=" << i
+                                         << "layerCount=" << layers.size();
+            for (int layerIndex = 0; layerIndex < layers.size(); ++layerIndex) {
+                const AtmosphericLayerState &layer = layers.at(layerIndex);
+                qCInfo(atmosphereProfileLog) << "Layer"
+                                             << layerIndex
+                                             << "heightKm=" << layer.heightMeters() / 1000.0
+                                             << "temperatureK=" << layer.temperatureKelvin()
+                                             << "pressureAtm=" << layer.pressureAtm();
+            }
+        }
     }
 
     dynamicsSolver_.updateLayerWinds(input.surfaceGrid,

@@ -21,6 +21,7 @@ public:
         const SurfaceMaterial &defaultMaterial;
         double cloudShortwaveTransmission = 1.0;
         double heatTransferCoefficientWPerM2K = 0.0;
+        int logPointIndex = 0;
     };
 
     AtmosphereStepSolver(const AtmosphereComposition &composition,

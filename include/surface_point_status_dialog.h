@@ -4,7 +4,9 @@
 
 #include <QDialog>
 
+class AtmosphericColumn;
 class QLabel;
+class QTableWidget;
 
 class SurfacePointStatusDialog : public QDialog {
     Q_OBJECT
@@ -13,7 +15,9 @@ public:
     explicit SurfacePointStatusDialog(QWidget *parent = nullptr);
 
     void setPoint(const SurfacePoint &point, double tileAreaKm2, double tileEdgeLengthKm);
+    void setAtmosphereProfile(const AtmosphericColumn *column);
     void clearPoint();
+    void clearAtmosphereProfile();
 
 private:
     QLabel *latitudeValueLabel_ = nullptr;
@@ -27,4 +31,5 @@ private:
     QLabel *materialValueLabel_ = nullptr;
     QLabel *tileAreaValueLabel_ = nullptr;
     QLabel *tileEdgeLengthValueLabel_ = nullptr;
+    QTableWidget *profileTable_ = nullptr;
 };
