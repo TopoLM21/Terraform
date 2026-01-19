@@ -21,6 +21,7 @@
 #include "surface_advection_model.h"
 #include "surface_pressure_transport_model.h"
 #include "atmospheric_advection_solver.h"
+#include "atmospheric_dynamics_solver.h"
 #include "wind_field_model.h"
 #include "rotation_period_utils.h"
 #include "planet_surface_grid.h"
@@ -5464,6 +5465,15 @@ private:
         }
 
         if (useLayeredAtmosphere) {
+            // Динамический шаг: давление + Кориолис + вязкость обновляют ветер,
+            // затем выполняем адвекцию уже обновлёнными скоростями.
+            AtmosphericDynamicsSolver dynamicsSolver;
+            dynamicsSolver.updateLayerWinds(surfaceGrid_,
+                                            atmosphereGrid,
+                                            qMax(0.0, dayLengthDays) * 86400.0,
+                                            isRetrograde,
+                                            timeStepSeconds,
+                                            1);
             // Перенос ветра выполняем после радиации и конвекции во всех слоях.
             AtmosphericAdvectionSolver atmosphericAdvectionSolver;
             atmosphericAdvectionSolver.advectLayerWinds(surfaceGrid_,
