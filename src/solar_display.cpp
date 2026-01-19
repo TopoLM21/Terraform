@@ -4516,6 +4516,13 @@ private:
                     : ((i < baselineAirTemperatures.size())
                            ? baselineAirTemperatures.at(i)
                            : point.temperatureK);
+            double resolvedInitialAirTemperature = initialAirTemperature;
+            if (point.pressureAtm >= 0.1) {
+                // Для плотных атмосфер не опускаем старт ниже t_eff,
+                // чтобы избежать холодного «схлопывания» на запуске модели.
+                resolvedInitialAirTemperature =
+                    qMax(resolvedInitialAirTemperature, effectiveTemperatureKelvin);
+            }
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Radiation inputs (init)"
                                           << "index=" << i
@@ -4542,7 +4549,7 @@ private:
                 resolveAirTemperatureKelvin(point.state,
                                             point.pressureAtm,
                                             gravity,
-                                            initialAirTemperature,
+                                            resolvedInitialAirTemperature,
                                             localInsolation,
                                             cloudShortwaveTransmission,
                                             input.radiationModelType,
@@ -4788,6 +4795,47 @@ private:
         }
         const bool skipSpinUp = surfaceSkipSpinUp_;
         surfaceSkipSpinUp_ = false;
+
+        double atmospherePressureAtm = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
+        }
+        const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
+        const bool hasAtmospherePressure = atmospherePressureAtm > 0.0;
+        const bool atmosphereEnabled = useAtmosphericModel || hasAtmospherePressure;
+
+        double surfaceGravity = 0.0;
+        if (massEarths > 0.0 && radiusKm > 0.0) {
+            const double radiusMeters = radiusKm * 1000.0;
+            const double planetMassKg = massEarths * kEarthMassKg;
+            surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
+        }
+        const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
+
+        const double meanToaFlux =
+            segmentSolarConstant * qMax(0.0, 1.0 - cloudAlbedo) / 4.0;
+        const double effectiveTemperatureKelvin =
+            std::pow(qMax(0.0, meanToaFlux) / kStefanBoltzmannConstant, 0.25);
+        if (atmosphereEnabled && meanToaFlux > 0.0) {
+            // Учитываем атмосферный парник уже в инициализации:
+            // без этого плотные атмосферы могут «схлопнуться» в холодный режим на старте.
+            stateDefaults->greenhouseOpacity =
+                computeLocalGreenhouseOpacity(atmosphere,
+                                              stateDefaults->material,
+                                              qMax(0.0, atmospherePressureAtm),
+                                              radiusKm,
+                                              gravity,
+                                              meanToaFlux,
+                                              meanToaFlux,
+                                              effectiveTemperatureKelvin,
+                                              stateDefaults->manualGreenhouseOpacity,
+                                              useAtmosphericModel,
+                                              radiationModelType,
+                                              manualGreenhouseOnTop,
+                                              false);
+        } else {
+            stateDefaults->greenhouseOpacity = stateDefaults->manualGreenhouseOpacity;
+        }
 
         SurfaceGridComputationInput input;
         input.grid = surfaceGrid_;
