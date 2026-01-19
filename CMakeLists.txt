@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.114 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.115 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,6 +11,7 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent Charts)
 add_executable(solar_constant
     include/atmosphere_chart_widget.h
     include/atmosphere_model.h
+    include/atmosphere_step_solver.h
     include/atmospheric_cell_state.h
     include/atmospheric_column.h
     include/atmospheric_advection_solver.h
@@ -76,6 +77,7 @@ add_executable(solar_constant
     src/atmospheric_profile_initializer.cpp
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
+    src/atmosphere_step_solver.cpp
     src/atmospheric_pressure_model.cpp
     src/atmospheric_radiation_model.cpp
     src/geothermal_flux_model.cpp

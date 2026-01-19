@@ -20,8 +20,7 @@
 #include "StarSystemTopView.h"
 #include "surface_advection_model.h"
 #include "surface_pressure_transport_model.h"
-#include "atmospheric_advection_solver.h"
-#include "atmospheric_dynamics_solver.h"
+#include "atmosphere_step_solver.h"
 #include "wind_field_model.h"
 #include "rotation_period_utils.h"
 #include "planet_surface_grid.h"
@@ -29,8 +28,6 @@
 #include "orbit_segment_calculator.h"
 #include "radiation_model.h"
 #include "layered_radiation_model.h"
-#include "layered_radiation_solver.h"
-#include "convective_adjustment_solver.h"
 #include "radiation_model_utils.h"
 #include "atmospheric_pressure_model.h"
 #include "atmospheric_cell_state.h"
@@ -5116,8 +5113,6 @@ private:
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
-        const LayeredRadiationSolver layeredRadiationSolver(timeStepSeconds);
-        const ConvectiveAdjustmentSolver convectiveAdjustmentSolver(atmosphere, gravity);
         auto &atmosphereGrid = surfaceGrid_.atmosphericGrid();
         const bool useLayeredAtmosphere =
             useAtmosphericModel && radiationModelType == RadiationModelType::Layered &&
@@ -5338,15 +5333,36 @@ private:
             advectedTemperatures = temperatures;
         }
 
+        for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+            auto &point = surfaceGrid_.points()[i];
+            point.state.setTemperatureKelvin(advectedTemperatures.at(i));
+            // Температура после переноса хранится как поверхностная величина.
+            point.temperatureK = point.state.temperatureKelvin();
+        }
+
+        if (useLayeredAtmosphere) {
+            const double dayLengthSeconds = qMax(0.0, dayLengthDays) * 86400.0;
+            AtmosphereStepSolver stepSolver(atmosphere,
+                                            gravity,
+                                            timeStepSeconds,
+                                            dayLengthSeconds,
+                                            isRetrograde);
+            AtmosphereStepSolver::LayeredStepInput stepInput{surfaceGrid_,
+                                                            atmosphereGrid,
+                                                            localInsolations,
+                                                            materialsById,
+                                                            *defaultMaterial,
+                                                            cloudShortwaveTransmission,
+                                                            kDefaultHeatTransferWPerM2K};
+            stepSolver.runLayeredStep(stepInput);
+        }
+
         double minTemperature = std::numeric_limits<double>::max();
         double maxTemperature = std::numeric_limits<double>::lowest();
         double minAirTemperature = std::numeric_limits<double>::max();
         double maxAirTemperature = std::numeric_limits<double>::lowest();
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
-            point.state.setTemperatureKelvin(advectedTemperatures.at(i));
-            // Температура после переноса хранится как поверхностная величина.
-            point.temperatureK = point.state.temperatureKelvin();
             const double initialAirTemperature =
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const double localInsolation =
@@ -5361,27 +5377,7 @@ private:
                                           << "meanToaFlux=" << meanToaFlux
                                           << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
             }
-            if (useLayeredAtmosphere && i < atmosphereGrid.columns().size()) {
-                AtmosphericColumn &column = atmosphereGrid.columns()[i];
-                const double surfaceAlbedo = qBound(0.0, material.albedo, 1.0);
-                const QVector<double> layerDeltas =
-                    layeredRadiationSolver.solve(column,
-                                                 localInsolation,
-                                                 surfaceAlbedo,
-                                                 cloudShortwaveTransmission);
-                auto &layers = column.layers();
-                const int layerCount = qMin(layers.size(), layerDeltas.size());
-                for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
-                    const double updatedTemperature =
-                        qMax(0.0, layers.at(layerIndex).temperatureKelvin() +
-                                       layerDeltas.at(layerIndex));
-                    layers[layerIndex].setTemperatureKelvin(updatedTemperature);
-                }
-                // Конвективная регулировка сразу после радиационного шага.
-                convectiveAdjustmentSolver.adjust(column);
-                point.airTemperatureK =
-                    layers.isEmpty() ? initialAirTemperature : layers.first().temperatureKelvin();
-            } else {
+            if (!useLayeredAtmosphere) {
                 // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
                 // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
                 // поэтому минимальная база зависит от давления и состава.
@@ -5418,19 +5414,8 @@ private:
                                           << "index=" << i
                                           << "airTemperatureK=" << point.airTemperatureK;
             }
-            const double roughnessLengthMeters = material.roughnessLengthMeters;
-            if (useLayeredAtmosphere && i < atmosphereGrid.columns().size()) {
-                auto &layers = atmosphereGrid.columns()[i].layers();
-                if (!layers.isEmpty()) {
-                    SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K);
-                    coupler.exchangeHeat(point.state,
-                                         layers[0],
-                                         roughnessLengthMeters,
-                                         timeStepSeconds);
-                    point.airTemperatureK = layers[0].temperatureKelvin();
-                    point.temperatureK = point.state.temperatureKelvin();
-                }
-            } else {
+            if (!useLayeredAtmosphere) {
+                const double roughnessLengthMeters = material.roughnessLengthMeters;
                 const double safePressureAtm = qMax(0.0, point.pressureAtm);
                 if (safePressureAtm > 0.0 && gravity > 0.0) {
                     const double columnMassKgPerM2 =
@@ -5462,25 +5447,6 @@ private:
             maxTemperature = qMax(maxTemperature, point.temperatureK);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
-        }
-
-        if (useLayeredAtmosphere) {
-            // Динамический шаг: давление + Кориолис + вязкость обновляют ветер,
-            // затем выполняем адвекцию уже обновлёнными скоростями.
-            AtmosphericDynamicsSolver dynamicsSolver;
-            dynamicsSolver.updateLayerWinds(surfaceGrid_,
-                                            atmosphereGrid,
-                                            qMax(0.0, dayLengthDays) * 86400.0,
-                                            isRetrograde,
-                                            timeStepSeconds,
-                                            1);
-            // Перенос ветра выполняем после радиации и конвекции во всех слоях.
-            AtmosphericAdvectionSolver atmosphericAdvectionSolver;
-            atmosphericAdvectionSolver.advectLayerWinds(surfaceGrid_,
-                                                        atmosphereGrid,
-                                                        qMax(0.0, dayLengthDays) * 86400.0,
-                                                        timeStepSeconds,
-                                                        1);
         }
 
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
