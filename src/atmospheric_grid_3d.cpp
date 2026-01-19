@@ -1,5 +1,6 @@
 #include "atmospheric_grid_3d.h"
 
+#include "atmospheric_profile_initializer.h"
 #include "atmospheric_thermodynamics.h"
 
 #include <QHash>
@@ -8,8 +9,6 @@
 namespace {
 constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
-constexpr double kStandardPressurePa = 101325.0;
-
 constexpr int kDefaultLayerCount = 12;
 
 double greenhouseMassFraction(const AtmosphereComposition &composition) {
@@ -84,75 +83,63 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
         return;
     }
 
-    const double surfacePressureAtm = composition.totalPressureAtm(planetMassEarths, radiusKm);
+    const double surfacePressureAtm =
+        composition.totalPressureAtm(planetMassEarths, radiusKm);
     const double gravity = surfaceGravityMps2(planetMassEarths, radiusKm);
-    const double rSpecific = AtmosphericThermodynamics::specificGasConstant(composition);
     const double specificHeat = AtmosphericThermodynamics::specificHeatCp(composition);
 
-    // Простейшее допущение: изотермическая атмосфера у поверхности.
+    // Простейшее допущение: заданная температура на поверхности.
     const double baseTemperatureKelvin = (surfacePressureAtm > 0.0) ? 288.0 : 0.0;
 
-    // Масштабная высота H = R * T / g.
-    const double scaleHeightMeters =
-        (rSpecific > 0.0 && gravity > 0.0 && baseTemperatureKelvin > 0.0)
-            ? (rSpecific * baseTemperatureKelvin) / gravity
-            : 0.0;
+    AtmosphericProfileInitializer initializer(composition);
+    AtmosphericProfileInitializer::Settings profileSettings;
+    profileSettings.surfaceTemperatureKelvin = baseTemperatureKelvin;
+    profileSettings.surfacePressureAtm = surfacePressureAtm;
+    profileSettings.gravityMps2 = gravity;
+    profileSettings.layerCount = resolvedLayerCount;
+    profileSettings.useDryAdiabatic = true;
 
-    // Высоту атмосферы берем как ~6 масштабных высот, где давление падает до ~0.2%.
-    const double topHeightMeters = (scaleHeightMeters > 0.0)
-        ? qMax(1000.0, scaleHeightMeters * 6.0)
-        : 0.0;
-    const double layerThicknessMeters = (resolvedLayerCount > 0)
-        ? topHeightMeters / static_cast<double>(resolvedLayerCount)
-        : 0.0;
-
-    // Сухой адиабатический градиент: dT/dz = g / Cp.
-    const double lapseRateKPerM = AtmosphericThermodynamics::dryAdiabaticLapseRate(
-        composition, gravity);
+    const QVector<AtmosphericProfileLayer> profileLayers =
+        initializer.buildProfile(profileSettings);
 
     // Оптическая толщина: увеличивается с долей парниковых газов и распределяется по слоям.
     const double greenhouseShare = greenhouseMassFraction(composition);
     const double baseTauSw = 0.02 + 0.3 * greenhouseShare;
     const double baseTauLw = 0.05 + 1.2 * greenhouseShare;
-    const double tauScale = (topHeightMeters > 0.0) ? (layerThicknessMeters / topHeightMeters) : 0.0;
+    const double dryLapseRateKPerM = AtmosphericThermodynamics::dryAdiabaticLapseRate(
+        composition, gravity);
+    const double layerThicknessMeters =
+        profileLayers.isEmpty() ? 0.0 : profileLayers.first().thicknessMeters;
+    const double topHeightMeters = layerThicknessMeters * resolvedLayerCount;
+    const double tauScale =
+        (topHeightMeters > 0.0) ? (layerThicknessMeters / topHeightMeters) : 0.0;
 
     for (auto &column : columns_) {
         column.resize(resolvedLayerCount);
         auto &layers = column.layers();
         for (int i = 0; i < layers.size(); ++i) {
-            const double heightMidMeters = (static_cast<double>(i) + 0.5) * layerThicknessMeters;
-            const double temperatureKelvin = (baseTemperatureKelvin > 0.0)
-                ? qMax(1.0, baseTemperatureKelvin - lapseRateKPerM * heightMidMeters)
-                : 0.0;
-            const double pressureAtm =
-                (surfacePressureAtm > 0.0 && scaleHeightMeters > 0.0)
-                    ? surfacePressureAtm * qExp(-heightMidMeters / scaleHeightMeters)
-                    : 0.0;
-            const double pressurePa = pressureAtm * kStandardPressurePa;
-            // Плотность по уравнению идеального газа: rho = P / (R * T).
-            const double densityKgPerM3 =
-                (rSpecific > 0.0 && temperatureKelvin > 0.0)
-                    ? (pressurePa / (rSpecific * temperatureKelvin))
-                    : 0.0;
+            const AtmosphericProfileLayer profileLayer =
+                (i < profileLayers.size()) ? profileLayers[i] : AtmosphericProfileLayer{};
             // Теплоёмкость слоя на единицу площади: C = rho * Cp * dz.
             const double heatCapacityJPerM2K =
                 (specificHeat > 0.0)
-                    ? densityKgPerM3 * specificHeat * layerThicknessMeters
+                    ? profileLayer.densityKgPerM3 * specificHeat * layerThicknessMeters
                     : 0.0;
 
-            const bool convectionEnabled = lapseRateKPerM > 0.0 && temperatureKelvin > 0.0;
+            const bool convectionEnabled =
+                profileLayer.temperatureKelvin > 0.0 && layerThicknessMeters > 0.0;
             const double convectionMixingCoefficient = convectionEnabled
                 ? qBound(0.0,
-                         (lapseRateKPerM * layerThicknessMeters) /
-                             qMax(1.0, baseTemperatureKelvin),
+                         (dryLapseRateKPerM * layerThicknessMeters) /
+                             qMax(1.0, profileLayer.temperatureKelvin),
                          1.0)
                 : 0.0;
 
-            layers[i].setTemperatureKelvin(temperatureKelvin);
-            layers[i].setPressureAtm(pressureAtm);
-            layers[i].setDensityKgPerM3(densityKgPerM3);
-            layers[i].setHeightMeters(heightMidMeters);
-            layers[i].setThicknessMeters(layerThicknessMeters);
+            layers[i].setTemperatureKelvin(profileLayer.temperatureKelvin);
+            layers[i].setPressureAtm(profileLayer.pressureAtm);
+            layers[i].setDensityKgPerM3(profileLayer.densityKgPerM3);
+            layers[i].setHeightMeters(profileLayer.heightMeters);
+            layers[i].setThicknessMeters(profileLayer.thicknessMeters);
             layers[i].setHeatCapacityJPerM2K(heatCapacityJPerM2K);
             layers[i].setWindUMps(0.0);
             layers[i].setWindVMps(0.0);
