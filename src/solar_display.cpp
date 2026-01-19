@@ -2361,6 +2361,13 @@ private:
         const double tileAreaKm2 = surfaceGrid_.tileAreaKm2(selectedSurfacePointIndex_);
         const double tileEdgeLengthKm = surfaceGrid_.tileEdgeLengthKm(selectedSurfacePointIndex_);
         surfacePointStatusDialog_->setPoint(*point, tileAreaKm2, tileEdgeLengthKm);
+        const auto &atmosphereGrid = surfaceGrid_.atmosphericGrid();
+        const AtmosphericColumn *column = nullptr;
+        if (selectedSurfacePointIndex_ >= 0 &&
+            selectedSurfacePointIndex_ < atmosphereGrid.columnCount()) {
+            column = &atmosphereGrid.columns().at(selectedSurfacePointIndex_);
+        }
+        surfacePointStatusDialog_->setAtmosphereProfile(column);
     }
 
     void setInputValue(QLineEdit *input, double value) {
@@ -5354,6 +5361,7 @@ private:
                                                             *defaultMaterial,
                                                             cloudShortwaveTransmission,
                                                             kDefaultHeatTransferWPerM2K};
+            stepInput.logPointIndex = selectedSurfacePointIndex_;
             stepSolver.runLayeredStep(stepInput);
         }
 
