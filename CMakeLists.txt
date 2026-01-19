@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.107 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.108 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,6 +12,9 @@ add_executable(solar_constant
     include/atmosphere_chart_widget.h
     include/atmosphere_model.h
     include/atmospheric_cell_state.h
+    include/atmospheric_column.h
+    include/atmospheric_grid_3d.h
+    include/atmospheric_layer_state.h
     include/atmospheric_radiation_model.h
     include/layered_radiation_model.h
     include/radiation_model.h
@@ -60,6 +63,9 @@ add_executable(solar_constant
     include/temperature_color_scale.h
     src/atmospheric_pressure_model.h
     src/atmospheric_cell_state.cpp
+    src/atmospheric_column.cpp
+    src/atmospheric_grid_3d.cpp
+    src/atmospheric_layer_state.cpp
     src/atmosphere_chart_widget.cpp
     src/atmosphere_model.cpp
     src/atmospheric_pressure_model.cpp

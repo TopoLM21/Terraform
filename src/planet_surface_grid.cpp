@@ -167,6 +167,7 @@ double PlanetSurfaceGrid::radiusKm() const {
 void PlanetSurfaceGrid::generateFibonacciPoints(int pointCount) {
     points_.clear();
     cells_.clear();
+    atmosphericGrid_.resizeColumns(0);
     if (pointCount <= 0 || radiusKm_ <= 0.0) {
         pointAreaKm2_ = 0.0;
         return;
@@ -188,12 +189,14 @@ void PlanetSurfaceGrid::generateFibonacciPoints(int pointCount) {
 
     const double surfaceAreaKm2 = 4.0 * kPi * radiusKm_ * radiusKm_;
     pointAreaKm2_ = surfaceAreaKm2 / static_cast<double>(points_.size());
+    atmosphericGrid_.resizeColumns(points_.size());
     applyHeightModel();
 }
 
 void PlanetSurfaceGrid::generateIcosahedronGrid(int subdivisionLevel) {
     points_.clear();
     cells_.clear();
+    atmosphericGrid_.resizeColumns(0);
     if (radiusKm_ <= 0.0 || subdivisionLevel < 0) {
         pointAreaKm2_ = 0.0;
         return;
@@ -207,6 +210,7 @@ void PlanetSurfaceGrid::generateIcosahedronGrid(int subdivisionLevel) {
 
     const double surfaceAreaKm2 = 4.0 * kPi * radiusKm_ * radiusKm_;
     pointAreaKm2_ = surfaceAreaKm2 / static_cast<double>(points_.size());
+    atmosphericGrid_.resizeColumns(points_.size());
     applyHeightModel();
 }
 
@@ -275,9 +279,24 @@ const SurfaceCell *PlanetSurfaceGrid::cellAt(int index) const {
     return &cells_[index];
 }
 
+AtmosphericGrid3D &PlanetSurfaceGrid::atmosphericGrid() {
+    return atmosphericGrid_;
+}
+
+const AtmosphericGrid3D &PlanetSurfaceGrid::atmosphericGrid() const {
+    return atmosphericGrid_;
+}
+
+void PlanetSurfaceGrid::initializeAtmosphericGrid(const AtmosphereComposition &composition,
+                                                  double planetMassEarths,
+                                                  int layerCount) {
+    atmosphericGrid_.initialize(composition, planetMassEarths, radiusKm_, points_.size(),
+                                layerCount);
+}
+
 void PlanetSurfaceGrid::setHeightSource(HeightSourceType sourceType,
-                                        const QString &heightmapPath,
-                                        double heightmapScaleKm,
+                         const QString &heightmapPath,
+                         double heightmapScaleKm,
                                         quint32 heightSeed,
                                         bool useContinentsHeight,
                                         bool hasSeaLevel) {
