@@ -18,6 +18,7 @@ public:
 
     double temperatureKelvin() const;
     double greenhouseOpacity() const;
+    double emissivity() const;
     void setTemperatureKelvin(double temperatureKelvin);
     void setGreenhouseOpacity(double greenhouseOpacity);
     const SubsurfaceTemperatureSolver &solver() const;

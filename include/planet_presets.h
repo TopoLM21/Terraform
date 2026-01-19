@@ -17,6 +17,8 @@ struct SurfaceMaterial {
     QColor baseColor;
     double albedo;
     double emissivity;
+    // Характерная шероховатость поверхности (м), влияет на турбулентный обмен с атмосферой.
+    double roughnessLengthMeters;
     // Базовая теплопроводность (Вт/м·К) при referenceTemperatureKelvin.
     double thermalConductivity;
     double density;
