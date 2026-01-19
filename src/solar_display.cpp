@@ -4533,10 +4533,16 @@ private:
                                           << "effectiveTemperatureKelvin="
                                           << effectiveTemperatureKelvin;
             }
+            // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
+            // не даём профилю остыть ниже t_eff, чтобы избежать холодного «схлопывания».
+            const double profileBaseTemperatureKelvin =
+                (point.pressureAtm >= 0.1)
+                    ? qMax(point.state.temperatureKelvin(), effectiveTemperatureKelvin)
+                    : point.state.temperatureKelvin();
             const auto radiationModel =
                 makeRadiationModel(input.atmosphere,
                                    point.pressureAtm,
-                                   point.state.temperatureKelvin(),
+                                   profileBaseTemperatureKelvin,
                                    effectiveTemperatureKelvin,
                                    gravity,
                                    input.radiationModelType);
@@ -5057,10 +5063,16 @@ private:
             const double localInsolation =
                 segmentSolarConstant * qMax(0.0, cosZenith);
             localInsolations.push_back(localInsolation);
+            // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
+            // не даём профилю остыть ниже t_eff, чтобы избежать холодного «схлопывания».
+            const double profileBaseTemperatureKelvin =
+                (point.pressureAtm >= 0.1)
+                    ? qMax(point.state.temperatureKelvin(), effectiveTemperatureKelvin)
+                    : point.state.temperatureKelvin();
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
-                                   point.state.temperatureKelvin(),
+                                   profileBaseTemperatureKelvin,
                                    effectiveTemperatureKelvin,
                                    gravity,
                                    radiationModelType);
@@ -5127,10 +5139,16 @@ private:
             const double advectedAtm = advectedPressures.at(i);
             double airColumnTemperatureK = point.airTemperatureK;
             if (airColumnTemperatureK <= 0.0 && radiationModelType == RadiationModelType::Layered) {
+                // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
+                // не даём профилю остыть ниже t_eff, чтобы избежать холодного «схлопывания».
+                const double profileBaseTemperatureKelvin =
+                    (point.pressureAtm >= 0.1)
+                        ? qMax(point.state.temperatureKelvin(), effectiveTemperatureKelvin)
+                        : point.state.temperatureKelvin();
                 const auto radiationModel =
                     makeRadiationModel(atmosphere,
                                        point.pressureAtm,
-                                       point.state.temperatureKelvin(),
+                                       profileBaseTemperatureKelvin,
                                        effectiveTemperatureKelvin,
                                        gravity,
                                        radiationModelType);
@@ -5226,10 +5244,16 @@ private:
                                           << "meanToaFlux=" << meanToaFlux
                                           << "effectiveTemperatureKelvin=" << effectiveTemperatureKelvin;
             }
+            // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
+            // не даём профилю остыть ниже t_eff, чтобы избежать холодного «схлопывания».
+            const double profileBaseTemperatureKelvin =
+                (point.pressureAtm >= 0.1)
+                    ? qMax(point.state.temperatureKelvin(), effectiveTemperatureKelvin)
+                    : point.state.temperatureKelvin();
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
-                                   point.state.temperatureKelvin(),
+                                   profileBaseTemperatureKelvin,
                                    effectiveTemperatureKelvin,
                                    gravity,
                                    radiationModelType);
