@@ -483,6 +483,7 @@ double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
 
 double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      const SurfaceMaterial &material,
+                                     double cloudAlbedo,
                                      double pressureAtm,
                                      double planetRadiusKm,
                                      double surfaceGravity,
@@ -548,6 +549,14 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     }
     const double waterTau = qMin(8.0, evaporation * 1.5);
     double extraTau = waterTau;
+    // Облака повышают альбедо, но также усиливают ИК-поглощение.
+    // Держим вклад умеренным и связываем его с облачным альбедо и давлением.
+    const double clampedCloudAlbedo = qBound(0.0, cloudAlbedo, 1.0);
+    const double cloudLongwaveFactor =
+        qBound(0.0, clampedCloudAlbedo + pressureClouds, 1.0);
+    constexpr double kCloudLongwaveTau = 0.3;
+    const double tauCloudLW = kCloudLongwaveTau * cloudLongwaveFactor;
+    extraTau += tauCloudLW;
     const double atmosphereMassGt = atmosphere.totalMassGigatons();
     const double co2MassGt = atmosphere.massGigatons(QStringLiteral("co2"));
     const double co2Share = atmosphereMassGt > 0.0 ? co2MassGt / atmosphereMassGt : 0.0;
@@ -588,6 +597,7 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                  << "tBasePre=" << tBasePre
                                  << "evaporation=" << evaporation
                                  << "waterTau=" << waterTau
+                                 << "tauCloudLW=" << tauCloudLW
                                  << "extraTau=" << extraTau
                                  << "totalLongwaveTransmission=" << totalLongwaveTransmission
                                  << "greenhouseOpacity=" << greenhouseOpacity;
@@ -4536,6 +4546,7 @@ private:
             const double localGreenhouseOpacity =
                 computeLocalGreenhouseOpacity(input.atmosphere,
                                               material,
+                                              input.cloudAlbedo,
                                               point.pressureAtm,
                                               input.radiusKm,
                                               gravity,
@@ -4870,6 +4881,7 @@ private:
             stateDefaults->greenhouseOpacity =
                 computeLocalGreenhouseOpacity(atmosphere,
                                               stateDefaults->material,
+                                              cloudAlbedo,
                                               qMax(0.0, atmospherePressureAtm),
                                               radiusKm,
                                               gravity,
@@ -5232,6 +5244,7 @@ private:
             const double localGreenhouseOpacity =
                 computeLocalGreenhouseOpacity(atmosphere,
                                               material,
+                                              cloudAlbedo,
                                               point.pressureAtm,
                                               radiusKm,
                                               gravity,
