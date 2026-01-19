@@ -20,6 +20,7 @@
 #include "StarSystemTopView.h"
 #include "surface_advection_model.h"
 #include "surface_pressure_transport_model.h"
+#include "atmospheric_advection_solver.h"
 #include "wind_field_model.h"
 #include "rotation_period_utils.h"
 #include "planet_surface_grid.h"
@@ -5460,6 +5461,16 @@ private:
             maxTemperature = qMax(maxTemperature, point.temperatureK);
             minAirTemperature = qMin(minAirTemperature, point.airTemperatureK);
             maxAirTemperature = qMax(maxAirTemperature, point.airTemperatureK);
+        }
+
+        if (useLayeredAtmosphere) {
+            // Перенос ветра выполняем после радиации и конвекции во всех слоях.
+            AtmosphericAdvectionSolver atmosphericAdvectionSolver;
+            atmosphericAdvectionSolver.advectLayerWinds(surfaceGrid_,
+                                                        atmosphereGrid,
+                                                        qMax(0.0, dayLengthDays) * 86400.0,
+                                                        timeStepSeconds,
+                                                        1);
         }
 
         // Обновляем карту после каждого тика таймера, чтобы сразу отражать новую температуру.
