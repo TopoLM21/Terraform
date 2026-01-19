@@ -28,6 +28,7 @@
 #include "radiation_model.h"
 #include "layered_radiation_model.h"
 #include "layered_radiation_solver.h"
+#include "convective_adjustment_solver.h"
 #include "radiation_model_utils.h"
 #include "atmospheric_pressure_model.h"
 #include "atmospheric_cell_state.h"
@@ -5114,6 +5115,7 @@ private:
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
         const LayeredRadiationSolver layeredRadiationSolver(timeStepSeconds);
+        const ConvectiveAdjustmentSolver convectiveAdjustmentSolver(atmosphere, gravity);
         auto &atmosphereGrid = surfaceGrid_.atmosphericGrid();
         const bool useLayeredAtmosphere =
             useAtmosphericModel && radiationModelType == RadiationModelType::Layered &&
@@ -5373,6 +5375,8 @@ private:
                                        layerDeltas.at(layerIndex));
                     layers[layerIndex].setTemperatureKelvin(updatedTemperature);
                 }
+                // Конвективная регулировка сразу после радиационного шага.
+                convectiveAdjustmentSolver.adjust(column);
                 point.airTemperatureK =
                     layers.isEmpty() ? initialAirTemperature : layers.first().temperatureKelvin();
             } else {
