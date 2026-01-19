@@ -58,13 +58,19 @@ double SurfacePointState::absorbedFlux(double solarIrradiance) const {
     return solarIrradiance * (1.0 - albedo_);
 }
 
-double SurfacePointState::emittedFlux() const {
-    // Длинноволновое излучение идёт от слоя τ≈1 — он «видим космосу».
+double SurfacePointState::surfaceEmittedFlux() const {
+    const double surfaceTemperature = temperatureKelvin();
+    // Локальный баланс поверхности: поток излучения задаётся T_surface.
+    return emissivity_ * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 4.0);
+}
+
+double SurfacePointState::toaEmittedFlux() const {
+    // emissionLayerTemperature применяется только для оценки потока на ТОА,
+    // а не для локального баланса поверхности.
     const double tauSurface =
         opticalDepthFromGreenhouseOpacity(greenhouseOpacity_, radiationModelType_);
     const double emissionTemperature =
         emissionLayerTemperature(temperatureKelvin(), tauSurface);
-    // Физически корректный множитель ε в законе Стефана–Больцмана.
     return emissivity_ * kStefanBoltzmannConstant * std::pow(emissionTemperature, 4.0);
 }
 
@@ -77,26 +83,19 @@ void SurfacePointState::updateTemperature(double absorbedFlux,
                                           double dtSeconds) {
     Q_UNUSED(emittedFlux)
     const double surfaceTemperature = temperatureKelvin();
-    const double tauSurface =
-        opticalDepthFromGreenhouseOpacity(greenhouseOpacity_, radiationModelType_);
-    const double emissionTemperature =
-        emissionLayerTemperature(surfaceTemperature, tauSurface);
     const double emittedNow =
-        emissivity_ * kStefanBoltzmannConstant * std::pow(emissionTemperature, 4.0);
+        emissivity_ * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 4.0);
     // Линеаризованный радиационный поток:
     // F_rad(T) ≈ F_rad(T_n) + (dF/dT)|_{T_n} (T - T_n),
-    // dF/dT = 4 * sigma * T_em^3 * (T_em / T_n)^3, так как T_em ∝ T_n.
+    // dF/dT = 4 * sigma * T_surface^3.
     // Тогда неявная стабилизация даёт
     // F_eff = (F_in - F_rad(T_n)) / (1 + alpha), alpha = (dF/dT) * dt / C,
     // где C = rho * c * dz0 - теплоёмкость верхнего слоя.
     // При alpha > 1 подавляется смена знака потока между шагами и исчезают
     // осцилляции температуры из-за слишком сильной радиации.
     const double heatCapacity = solver_.topLayerHeatCapacity();
-    const double emissionFactor =
-        (surfaceTemperature > 0.0) ? (emissionTemperature / surfaceTemperature) : 0.0;
     const double radiativeDerivative =
-        4.0 * emissivity_ * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 3.0) *
-        std::pow(emissionFactor, 4.0);
+        4.0 * emissivity_ * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 3.0);
     const double alpha = (heatCapacity > 0.0)
         ? (radiativeDerivative * dtSeconds / heatCapacity)
         : 0.0;

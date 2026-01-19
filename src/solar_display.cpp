@@ -398,7 +398,7 @@ double estimateAirTemperatureKelvin(const SurfacePointState &surfaceState,
     // Q_sw_air = S_blend * T_cloud * (1 - T_atm), где T_atm = incomingTransmission().
     // Длинноволновый баланс берём в двухпотоковой серой аппроксимации:
     // атмосферный слой излучает вверх/вниз как σ T_air^4 * ε(τ).
-    const double emittedFlux = surfaceState.emittedFlux();
+    const double emittedFlux = surfaceState.surfaceEmittedFlux();
     const double shortwaveAbsorbedByAir =
         blendedInsolation * cloudShortwaveTransmission *
         (1.0 - radiationModel.incomingTransmission());
@@ -5022,7 +5022,7 @@ private:
             // Запоминаем солнечный поток у поверхности для UI и логов.
             point.solarFluxWPerM2 = surfaceShortwaveFlux;
 
-            const double emittedFlux = point.state.emittedFlux();
+            const double emittedFlux = point.state.surfaceEmittedFlux();
             const double airTemperatureForFlux =
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const LongwaveFluxes longwaveFluxes =
