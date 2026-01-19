@@ -4412,23 +4412,8 @@ private:
 
         SurfaceTileTemperatureSettings tileSettings;
         tileSettings.segmentSolarConstant = input.segmentSolarConstant;
-        tileSettings.dayLengthDays = dayLengthDays;
-        tileSettings.yearLengthDays = input.yearLengthDays;
-        tileSettings.rotationMode = input.rotationMode;
-        tileSettings.declinationDegrees = input.declinationDegrees;
-        tileSettings.orbitalPhaseRadians = input.orbitalPhaseRadians;
-        tileSettings.elapsedDays = input.elapsedDays;
-        tileSettings.spinOrbitP = input.spinOrbitP;
-        tileSettings.spinOrbitQ = input.spinOrbitQ;
-        tileSettings.isRetrograde = input.isRetrograde;
-        tileSettings.atmosphere = input.atmosphere;
-        tileSettings.atmospherePressureAtm = atmospherePressureAtm;
-        tileSettings.surfaceGravity = gravity;
         tileSettings.cloudAlbedo = input.cloudAlbedo;
-        tileSettings.currentHourIndex = input.currentHourIndex;
-        tileSettings.currentAbsoluteHourIndex = input.currentAbsoluteHourIndex;
         tileSettings.hasSolarConstant = input.hasSolarConstant;
-        tileSettings.skipSpinUp = input.skipSpinUp;
 
         SurfaceTileTemperatureCalculator tileCalculator;
         SurfaceTileTemperatureResult tileResult =
