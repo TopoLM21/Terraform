@@ -17,6 +17,7 @@ public:
                       const SubsurfaceModelSettings &subsurfaceSettings);
 
     double temperatureKelvin() const;
+    double greenhouseOpacity() const;
     void setTemperatureKelvin(double temperatureKelvin);
     void setGreenhouseOpacity(double greenhouseOpacity);
     const SubsurfaceTemperatureSolver &solver() const;
