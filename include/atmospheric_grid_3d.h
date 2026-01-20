@@ -19,7 +19,8 @@ public:
                     double radiusKm,
                     double baseTemperatureKelvin,
                     int columnCount,
-                    int layerCount);
+                    int layerCount,
+                    double minBottomLayerThicknessMeters);
 
 private:
     QVector<AtmosphericColumn> columns_;

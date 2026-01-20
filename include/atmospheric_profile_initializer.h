@@ -26,6 +26,8 @@ public:
         bool useDryAdiabatic = true;
         // Можно указать вручную; если 0, высота берётся как ~6 масштабных высот.
         double topHeightMeters = 0.0;
+        // Минимальная толщина нижнего слоя (м). Используется для уплотнения сетки у поверхности.
+        double minBottomLayerThicknessMeters = 0.0;
     };
 
     explicit AtmosphericProfileInitializer(const AtmosphereComposition &composition);

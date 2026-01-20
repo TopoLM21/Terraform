@@ -290,13 +290,15 @@ const AtmosphericGrid3D &PlanetSurfaceGrid::atmosphericGrid() const {
 void PlanetSurfaceGrid::initializeAtmosphericGrid(const AtmosphereComposition &composition,
                                                   double planetMassEarths,
                                                   double baseTemperatureKelvin,
-                                                  int layerCount) {
+                                                  int layerCount,
+                                                  double minBottomLayerThicknessMeters) {
     atmosphericGrid_.initialize(composition,
                                 planetMassEarths,
                                 radiusKm_,
                                 baseTemperatureKelvin,
                                 points_.size(),
-                                layerCount);
+                                layerCount,
+                                minBottomLayerThicknessMeters);
 }
 
 void PlanetSurfaceGrid::setHeightSource(HeightSourceType sourceType,

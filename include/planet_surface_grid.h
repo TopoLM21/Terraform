@@ -32,7 +32,8 @@ public:
     void initializeAtmosphericGrid(const AtmosphereComposition &composition,
                                    double planetMassEarths,
                                    double baseTemperatureKelvin,
-                                   int layerCount = 0);
+                                   int layerCount = 0,
+                                   double minBottomLayerThicknessMeters = 0.0);
 
     void setHeightSource(HeightSourceType sourceType,
                          const QString &heightmapPath,
