@@ -92,7 +92,7 @@ QVector<QPair<QString, double>> normalizeAtmosphereShares(
 QVector<SurfaceMaterial> surfaceMaterials() {
     // Базовые цвета взяты как характерные видимые оттенки материала, чтобы визуально
     // различать типы поверхности без строгой фотометрии.
-    return {
+    QVector<SurfaceMaterial> materials = {
         {QStringLiteral("rocky"), QStringLiteral("Каменная поверхность"), QColor(150, 120, 90), 0.15,
          0.95, 0.03, 2.5, 2600.0, 800.0, 2080000.0},
         {QStringLiteral("ice"), QStringLiteral("Ледяная поверхность"), QColor(220, 235, 245), 0.6, 0.98,
@@ -114,6 +114,7 @@ QVector<SurfaceMaterial> surfaceMaterials() {
          // между зернами реголита и уплотнение контактов при нагреве.
          {ThermalConductivityModelType::Linear, 250.0, 2.5e-4}},
     };
+    return materials;
 }
 
 QVector<PlanetPreset> solarSystemPresets() {
@@ -153,7 +154,7 @@ QVector<PlanetPreset> solarSystemPresets() {
                                   isRetrogradeRotation(0.03));
     Q_ASSERT(mercurySiderealPeriodDays > 0.0);
 
-    return {
+    QVector<PlanetPreset> presets = {
         // dayLengthDays: солнечные сутки (длительность солнечного дня), не сидерический период.
         // Например, у Венеры солнечные сутки ~116.75, а 243 дня — сидерическое вращение.
         {QStringLiteral("Меркурий"), 0.39, mercurySolarDayDays, mercuryOrbitalPeriodDays, 0.2056, 0.03,
@@ -243,6 +244,12 @@ QVector<PlanetPreset> solarSystemPresets() {
          HeightSourceType::Procedural,
          QString(), 0.0, 1006u, false, true},
     };
+    for (auto &preset : presets) {
+        if (preset.name == QStringLiteral("Венера")) {
+            preset.minDenseAtmosphereTemperatureK = 700.0;
+        }
+    }
+    return presets;
 }
 
 QVector<PlanetPreset> sweetSkyPresets() {

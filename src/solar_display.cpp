@@ -111,17 +111,31 @@ void enableSolarRadiationLogging() {
 double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
                                            double pressureAtm,
                                            double greenhouseOpacity,
-                                           double co2Share) {
+                                           double co2Share,
+                                           double minDenseAtmosphereTemperatureK) {
     if (effectiveTemperatureKelvin <= 0.0) {
         return 0.0;
     }
-    // Коэффициенты подобраны так, чтобы при 1 атм поправка была минимальной,
-    // а при многократном давлении давала ощутимый подъём базовой температуры.
+    // t_eff отражает баланс излучения на ВГБ (TOA), но в плотных атмосферах
+    // излучающий слой поднимается вверх, а нижние слои дополнительно греются
+    // из-за оптической толщины, давления и уширения линий (особенно CO₂).
+    // Поэтому для базовой температуры берём повышающую поправку по давлению,
+    // составу и (для сверхплотных атмосфер) отдельный коэффициент.
     const double safePressureAtm = qMax(0.0, pressureAtm);
-    const double pressureBoost = 1.0 + 0.03 * std::log1p(safePressureAtm);
-    const double greenhouseBoost = 1.0 + 0.15 * qBound(0.0, greenhouseOpacity, 1.0);
-    const double compositionBoost = 1.0 + 0.5 * qMax(0.0, co2Share);
-    return effectiveTemperatureKelvin * pressureBoost * greenhouseBoost * compositionBoost;
+    const double co2Fraction = qBound(0.0, co2Share, 1.0);
+    const double pressureBoost = 1.0 + 0.035 * std::log1p(safePressureAtm);
+    const double greenhouseBoost = 1.0 + 0.2 * qBound(0.0, greenhouseOpacity, 1.0);
+    const double compositionBoost = 1.0 + 0.8 * co2Fraction;
+    const double superDenseBoost =
+        (safePressureAtm > 10.0)
+            ? (1.0 + 0.25 * std::log1p(safePressureAtm / 10.0))
+            : 1.0;
+    double minTemperature =
+        effectiveTemperatureKelvin * pressureBoost * greenhouseBoost * compositionBoost * superDenseBoost;
+    if (minDenseAtmosphereTemperatureK > 0.0) {
+        minTemperature = qMax(minTemperature, minDenseAtmosphereTemperatureK);
+    }
+    return minTemperature;
 }
 
 constexpr int kRoleSemiMajorAxis = Qt::UserRole;
@@ -167,6 +181,7 @@ constexpr int kRoleBinaryArgumentPericenterB = Qt::UserRole + 39;
 constexpr int kRoleHasBinaryOrbit = Qt::UserRole + 40;
 constexpr int kRoleAtmosphereDisabled = Qt::UserRole + 41;
 constexpr int kRoleAtmosphereBottomLayerThickness = Qt::UserRole + 42;
+constexpr int kRoleMinDenseAtmosphereTemperature = Qt::UserRole + 43;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -510,6 +525,7 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      double meanToaFlux,
                                      double baseTemperatureKelvin,
                                      double manualGreenhouseOpacity,
+                                     double minDenseAtmosphereTemperatureK,
                                      bool useAtmosphericModel,
                                      RadiationModelType radiationModelType,
                                      bool manualGreenhouseOnTopOfAtmosphere,
@@ -551,7 +567,11 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
         // но при больших давлениях и непрозрачности нижние слои остаются тёплыми.
         // Поэтому минимальная база зависит от давления и состава.
         const double tMinDense =
-            denseAtmosphereMinTemperatureKelvin(tEffPre, pressureAtm, manualGreenhouseOpacity, co2Share);
+            denseAtmosphereMinTemperatureKelvin(tEffPre,
+                                                pressureAtm,
+                                                manualGreenhouseOpacity,
+                                                co2Share,
+                                                minDenseAtmosphereTemperatureK);
         profileBaseTemperatureKelvin = qMax(baseTemperatureKelvin, tMinDense);
     }
     // В разреженных атмосферах (Марс/Луна) оставляем прежнюю базу, чтобы не
@@ -672,6 +692,7 @@ struct SurfaceGridComputationInput {
     double manualGreenhouseOpacity = 0.0;
     bool manualGreenhouseOnTop = false;
     RadiationModelType radiationModelType = RadiationModelType::Fast;
+    double minDenseAtmosphereTemperatureK = 0.0;
     RotationMode rotationMode = RotationMode::Normal;
     double declinationDegrees = 0.0;
     double orbitalPhaseRadians = 0.0;
@@ -2806,6 +2827,18 @@ private:
         return qMax(0.0, thicknessValue.toDouble());
     }
 
+    double currentMinDenseAtmosphereTemperatureKelvin() const {
+        if (!planetComboBox_) {
+            return 0.0;
+        }
+        const QVariant temperatureValue =
+            planetComboBox_->currentData(kRoleMinDenseAtmosphereTemperature);
+        if (!temperatureValue.isValid()) {
+            return 0.0;
+        }
+        return qMax(0.0, temperatureValue.toDouble());
+    }
+
     int latitudeStepDegrees() const {
         return 1;
     }
@@ -2961,6 +2994,9 @@ private:
         planetComboBox_->setItemData(index,
                                      planet.minBottomLayerThicknessMeters,
                                      kRoleAtmosphereBottomLayerThickness);
+        planetComboBox_->setItemData(index,
+                                     planet.minDenseAtmosphereTemperatureK,
+                                     kRoleMinDenseAtmosphereTemperature);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -3240,6 +3276,11 @@ private:
                 existingIndex >= 0
                     ? planetComboBox_->itemData(existingIndex, kRoleHasSeaLevel).toBool()
                     : false;
+            const double minDenseAtmosphereTemperatureK =
+                existingIndex >= 0
+                    ? planetComboBox_->itemData(existingIndex,
+                                                kRoleMinDenseAtmosphereTemperature).toDouble()
+                    : 0.0;
             PlanetPreset preset{name, axis, dayLength, yearLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
                                 composition, QStringLiteral("custom"), primaryStar, secondaryStar,
@@ -3249,6 +3290,7 @@ private:
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
             preset.minBottomLayerThicknessMeters = minBottomLayerThickness;
+            preset.minDenseAtmosphereTemperatureK = minDenseAtmosphereTemperatureK;
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -3343,6 +3385,9 @@ private:
                 planetComboBox_->setItemData(existingIndex,
                                              preset.minBottomLayerThicknessMeters,
                                              kRoleAtmosphereBottomLayerThickness);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.minDenseAtmosphereTemperatureK,
+                                             kRoleMinDenseAtmosphereTemperature);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
@@ -4632,6 +4677,7 @@ private:
                                               meanToaFlux,
                                               greenhouseBaseTemperature,
                                               input.manualGreenhouseOpacity,
+                                              input.minDenseAtmosphereTemperatureK,
                                               useAtmosphericModel,
                                               input.radiationModelType,
                                               input.manualGreenhouseOnTop,
@@ -4655,7 +4701,8 @@ private:
                     effectiveTemperatureKelvin,
                     point.pressureAtm,
                     localGreenhouseOpacity,
-                    co2Share);
+                    co2Share,
+                    input.minDenseAtmosphereTemperatureK);
                 resolvedInitialAirTemperature =
                     qMax(resolvedInitialAirTemperature, tMinDense);
             }
@@ -4677,7 +4724,8 @@ private:
                            denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
                                                                point.pressureAtm,
                                                                localGreenhouseOpacity,
-                                                               co2Share))
+                                                               co2Share,
+                                                               input.minDenseAtmosphereTemperatureK))
                     : point.state.temperatureKelvin();
             const auto radiationModel =
                 makeRadiationModel(input.atmosphere,
@@ -4968,6 +5016,8 @@ private:
         if (atmosphereEnabled && meanToaFlux > 0.0) {
             // Учитываем атмосферный парник уже в инициализации:
             // без этого плотные атмосферы могут «схлопнуться» в холодный режим на старте.
+            const double minDenseAtmosphereTemperatureK =
+                currentMinDenseAtmosphereTemperatureKelvin();
             stateDefaults->greenhouseOpacity =
                 computeLocalGreenhouseOpacity(atmosphere,
                                               stateDefaults->material,
@@ -4979,6 +5029,7 @@ private:
                                               meanToaFlux,
                                               effectiveTemperatureKelvin,
                                               stateDefaults->manualGreenhouseOpacity,
+                                              minDenseAtmosphereTemperatureK,
                                               useAtmosphericModel,
                                               radiationModelType,
                                               manualGreenhouseOnTop,
@@ -5029,6 +5080,7 @@ private:
         input.manualGreenhouseOpacity = stateDefaults->manualGreenhouseOpacity;
         input.manualGreenhouseOnTop = manualGreenhouseOnTop;
         input.radiationModelType = radiationModelType;
+        input.minDenseAtmosphereTemperatureK = currentMinDenseAtmosphereTemperatureKelvin();
         input.rotationMode = rotationMode;
         input.declinationDegrees = declinationDegrees;
         input.orbitalPhaseRadians = orbitalPhaseRadians;
@@ -5246,8 +5298,9 @@ private:
                            denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
                                                                point.pressureAtm,
                                                                point.state.greenhouseOpacity(),
-                                                               co2Share))
-                    : point.state.temperatureKelvin();
+                                                               co2Share,
+                                                               currentMinDenseAtmosphereTemperatureKelvin()))
+                        : point.state.temperatureKelvin();
             const auto radiationModel =
                 makeRadiationModel(atmosphere,
                                    point.pressureAtm,
@@ -5331,7 +5384,8 @@ private:
                                denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
                                                                    point.pressureAtm,
                                                                    point.state.greenhouseOpacity(),
-                                                                   co2Share))
+                                                                   co2Share,
+                                                                   currentMinDenseAtmosphereTemperatureKelvin()))
                         : point.state.temperatureKelvin();
                 const auto radiationModel =
                     makeRadiationModel(atmosphere,
@@ -5383,6 +5437,7 @@ private:
                                               meanToaFlux,
                                               greenhouseBaseTemperature,
                                               manualGreenhouseOpacity,
+                                              currentMinDenseAtmosphereTemperatureKelvin(),
                                               useAtmosphericModel,
                                               radiationModelType,
                                               manualGreenhouseOnTop,
@@ -5466,7 +5521,8 @@ private:
                                denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
                                                                    point.pressureAtm,
                                                                    point.state.greenhouseOpacity(),
-                                                                   co2Share))
+                                                                   co2Share,
+                                                                   currentMinDenseAtmosphereTemperatureKelvin()))
                         : point.state.temperatureKelvin();
                 const auto radiationModel =
                     makeRadiationModel(atmosphere,
