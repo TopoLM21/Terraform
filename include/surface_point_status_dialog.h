@@ -29,6 +29,12 @@ private:
     QLabel *pressureValueLabel_ = nullptr;
     QLabel *windValueLabel_ = nullptr;
     QLabel *insolationValueLabel_ = nullptr;
+    QLabel *shortwaveSurfaceValueLabel_ = nullptr;
+    QLabel *longwaveUpValueLabel_ = nullptr;
+    QLabel *longwaveDownValueLabel_ = nullptr;
+    QLabel *surfaceAirFluxValueLabel_ = nullptr;
+    QLabel *subsurfaceFluxInValueLabel_ = nullptr;
+    QLabel *subsurfaceFluxOutValueLabel_ = nullptr;
     QLabel *materialValueLabel_ = nullptr;
     QLabel *tileAreaValueLabel_ = nullptr;
     QLabel *tileEdgeLengthValueLabel_ = nullptr;

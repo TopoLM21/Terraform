@@ -16,6 +16,15 @@ struct SurfacePoint {
     double temperatureK = 0.0;
     double airTemperatureK = 0.0;
     double solarFluxWPerM2 = 0.0;
+    // Потоки в W/м²: shortwaveSurface — SW у поверхности,
+    // longwaveUp/Down — LW вверх/вниз на границе поверхность↔атмосфера.
+    // surfaceAirFlux положителен при переносе энергии от поверхности в воздух.
+    // subsurfaceFlux положителен при уходе энергии в грунт (вниз).
+    double shortwaveSurfaceWPerM2 = 0.0;
+    double longwaveUpWPerM2 = 0.0;
+    double longwaveDownWPerM2 = 0.0;
+    double surfaceAirFluxWPerM2 = 0.0;
+    double subsurfaceFluxWPerM2 = 0.0;
     // Состояние хранится отдельно для каждой точки, чтобы учитывать локальную
     // тепловую инерцию и парниковую поправку без глобального пересчёта.
     SurfacePointState state;

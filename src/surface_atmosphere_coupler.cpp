@@ -29,8 +29,12 @@ double SurfaceAtmosphereCoupler::heatTransferCoefficientWPerM2K() const {
 void SurfaceAtmosphereCoupler::exchangeHeat(SurfacePointState &surface,
                                             AtmosphericLayerState &lowestLayer,
                                             double roughnessLengthMeters,
-                                            double dtSeconds) const {
+                                            double dtSeconds,
+                                            double *surfaceAirFluxWPerM2) const {
     if (dtSeconds <= 0.0) {
+        if (surfaceAirFluxWPerM2) {
+            *surfaceAirFluxWPerM2 = 0.0;
+        }
         return;
     }
 
@@ -48,7 +52,8 @@ void SurfaceAtmosphereCoupler::exchangeHeat(SurfacePointState &surface,
                          roughnessLengthMeters,
                          lowestLayer.thicknessMeters(),
                          dtSeconds,
-                         updatedAirTemperature);
+                         updatedAirTemperature,
+                         surfaceAirFluxWPerM2);
     lowestLayer.setTemperatureKelvin(updatedAirTemperature);
 }
 
@@ -57,8 +62,12 @@ void SurfaceAtmosphereCoupler::exchangeHeat(SurfacePointState &surface,
                                             double windSpeedMps,
                                             double longwaveEmissivity,
                                             double roughnessLengthMeters,
-                                            double dtSeconds) const {
+                                            double dtSeconds,
+                                            double *surfaceAirFluxWPerM2) const {
     if (dtSeconds <= 0.0) {
+        if (surfaceAirFluxWPerM2) {
+            *surfaceAirFluxWPerM2 = 0.0;
+        }
         return;
     }
 
@@ -71,7 +80,8 @@ void SurfaceAtmosphereCoupler::exchangeHeat(SurfacePointState &surface,
                          roughnessLengthMeters,
                          kMinLayerThicknessMeters,
                          dtSeconds,
-                         updatedAirTemperature);
+                         updatedAirTemperature,
+                         surfaceAirFluxWPerM2);
     atmosphere.setAirTemperatureKelvin(updatedAirTemperature);
 }
 
@@ -117,14 +127,21 @@ void SurfaceAtmosphereCoupler::exchangeHeatInternal(SurfacePointState &surface,
                                                     double roughnessLengthMeters,
                                                     double layerThicknessMeters,
                                                     double dtSeconds,
-                                                    double &updatedAirTemperature) const {
+                                                    double &updatedAirTemperature,
+                                                    double *surfaceAirFluxWPerM2) const {
     if (dtSeconds <= 0.0) {
+        if (surfaceAirFluxWPerM2) {
+            *surfaceAirFluxWPerM2 = 0.0;
+        }
         return;
     }
 
     const double surfaceTemperature = surface.temperatureKelvin();
     const double surfaceHeatCapacity = surface.topLayerHeatCapacityJPerM2K();
     if (surfaceHeatCapacity <= 0.0 || airHeatCapacityJPerM2K <= 0.0) {
+        if (surfaceAirFluxWPerM2) {
+            *surfaceAirFluxWPerM2 = 0.0;
+        }
         return;
     }
 
@@ -156,9 +173,14 @@ void SurfaceAtmosphereCoupler::exchangeHeatInternal(SurfacePointState &surface,
         : dtSeconds;
     const double stableDt = qMin(dtSeconds, maxStableDt);
 
+    // Итоговый поток (W/м²) считаем положительным при переносе энергии
+    // от поверхности к воздуху.
     const double totalFluxWPerM2 = sensibleFluxWPerM2 + longwaveFluxWPerM2;
     const double airDelta = totalFluxWPerM2 * stableDt / airHeatCapacityJPerM2K;
 
     surface.applySurfaceFlux(-totalFluxWPerM2, stableDt);
     updatedAirTemperature = airTemperatureKelvin + airDelta;
+    if (surfaceAirFluxWPerM2) {
+        *surfaceAirFluxWPerM2 = totalFluxWPerM2;
+    }
 }

@@ -8,6 +8,7 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QTableWidget>
 #include <QtWidgets/QVBoxLayout>
+#include <QtGlobal>
 
 #include <algorithm>
 
@@ -31,6 +32,12 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     pressureValueLabel_ = new QLabel(QStringLiteral("—"), this);
     windValueLabel_ = new QLabel(QStringLiteral("—"), this);
     insolationValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    shortwaveSurfaceValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    longwaveUpValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    longwaveDownValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    surfaceAirFluxValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    subsurfaceFluxInValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    subsurfaceFluxOutValueLabel_ = new QLabel(QStringLiteral("—"), this);
     materialValueLabel_ = new QLabel(QStringLiteral("—"), this);
     tileAreaValueLabel_ = new QLabel(QStringLiteral("—"), this);
     tileEdgeLengthValueLabel_ = new QLabel(QStringLiteral("—"), this);
@@ -85,6 +92,12 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Поверхностное давление (атм):"), pressureValueLabel_);
     layout->addRow(QStringLiteral("Скорость ветра (м/с):"), windValueLabel_);
     layout->addRow(QStringLiteral("Солнечная инсоляция (Вт/м²):"), insolationValueLabel_);
+    layout->addRow(QStringLiteral("SW у поверхности (Вт/м²):"), shortwaveSurfaceValueLabel_);
+    layout->addRow(QStringLiteral("LW вверх (Вт/м²):"), longwaveUpValueLabel_);
+    layout->addRow(QStringLiteral("LW вниз (Вт/м²):"), longwaveDownValueLabel_);
+    layout->addRow(QStringLiteral("Поток поверхность→воздух (Вт/м²):"), surfaceAirFluxValueLabel_);
+    layout->addRow(QStringLiteral("Поток в грунт (Вт/м²):"), subsurfaceFluxInValueLabel_);
+    layout->addRow(QStringLiteral("Поток из грунта (Вт/м²):"), subsurfaceFluxOutValueLabel_);
     layout->addRow(QStringLiteral("Материал:"), materialValueLabel_);
     layout->addRow(QStringLiteral("Площадь тайла (км²):"), tileAreaValueLabel_);
     layout->addRow(QStringLiteral("Средняя длина ребра (км):"), tileEdgeLengthValueLabel_);
@@ -102,6 +115,15 @@ void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
     pressureValueLabel_->setText(formatNumber(point.pressureAtm, 3));
     windValueLabel_->setText(formatNumber(point.windSpeedMps));
     insolationValueLabel_->setText(formatNumber(point.solarFluxWPerM2));
+    shortwaveSurfaceValueLabel_->setText(formatNumber(point.shortwaveSurfaceWPerM2));
+    longwaveUpValueLabel_->setText(formatNumber(point.longwaveUpWPerM2));
+    longwaveDownValueLabel_->setText(formatNumber(point.longwaveDownWPerM2));
+    surfaceAirFluxValueLabel_->setText(formatNumber(point.surfaceAirFluxWPerM2));
+    // subsurfaceFluxWPerM2 положителен при потоке в грунт.
+    const double fluxIntoGround = qMax(0.0, point.subsurfaceFluxWPerM2);
+    const double fluxFromGround = qMax(0.0, -point.subsurfaceFluxWPerM2);
+    subsurfaceFluxInValueLabel_->setText(formatNumber(fluxIntoGround));
+    subsurfaceFluxOutValueLabel_->setText(formatNumber(fluxFromGround));
     materialValueLabel_->setText(point.materialId.isEmpty() ? QStringLiteral("—") : point.materialId);
     tileAreaValueLabel_->setText(formatNumber(tileAreaKm2));
     tileEdgeLengthValueLabel_->setText(formatNumber(tileEdgeLengthKm));
@@ -183,6 +205,12 @@ void SurfacePointStatusDialog::clearPoint() {
     pressureValueLabel_->setText(QStringLiteral("—"));
     windValueLabel_->setText(QStringLiteral("—"));
     insolationValueLabel_->setText(QStringLiteral("—"));
+    shortwaveSurfaceValueLabel_->setText(QStringLiteral("—"));
+    longwaveUpValueLabel_->setText(QStringLiteral("—"));
+    longwaveDownValueLabel_->setText(QStringLiteral("—"));
+    surfaceAirFluxValueLabel_->setText(QStringLiteral("—"));
+    subsurfaceFluxInValueLabel_->setText(QStringLiteral("—"));
+    subsurfaceFluxOutValueLabel_->setText(QStringLiteral("—"));
     materialValueLabel_->setText(QStringLiteral("—"));
     tileAreaValueLabel_->setText(QStringLiteral("—"));
     tileEdgeLengthValueLabel_->setText(QStringLiteral("—"));
