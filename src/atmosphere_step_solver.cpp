@@ -76,12 +76,17 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         point.airTemperatureK = layers.first().temperatureKelvin();
 
         SurfaceAtmosphereCoupler coupler(input.heatTransferCoefficientWPerM2K);
+        double surfaceAirFluxWPerM2 = 0.0;
         coupler.exchangeHeat(point.state,
                              layers[0],
                              material.roughnessLengthMeters,
-                             timeStepSeconds_);
+                             timeStepSeconds_,
+                             &surfaceAirFluxWPerM2);
         point.airTemperatureK = layers[0].temperatureKelvin();
         point.temperatureK = point.state.temperatureKelvin();
+        point.surfaceAirFluxWPerM2 = surfaceAirFluxWPerM2;
+        // Поток в грунт учитывает радиацию и обмен с воздухом.
+        point.subsurfaceFluxWPerM2 += -surfaceAirFluxWPerM2;
 
         if (i == logPointIndex) {
             qCInfo(atmosphereProfileLog) << "Atmosphere profile (layered step)"

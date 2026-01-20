@@ -86,10 +86,8 @@ double SurfacePointState::topLayerHeatCapacityJPerM2K() const {
     return solver_.topLayerHeatCapacity();
 }
 
-void SurfacePointState::updateTemperature(double absorbedFlux,
-                                          double emittedFlux,
-                                          double dtSeconds) {
-    Q_UNUSED(emittedFlux)
+double SurfacePointState::stabilizedRadiativeFlux(double absorbedFlux,
+                                                  double dtSeconds) const {
     const double surfaceTemperature = temperatureKelvin();
     const double emittedNow =
         emissivity_ * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 4.0);
@@ -98,16 +96,23 @@ void SurfacePointState::updateTemperature(double absorbedFlux,
     // dF/dT = 4 * sigma * T_surface^3.
     // Тогда неявная стабилизация даёт
     // F_eff = (F_in - F_rad(T_n)) / (1 + alpha), alpha = (dF/dT) * dt / C,
-    // где C = rho * c * dz0 - теплоёмкость верхнего слоя.
-    // При alpha > 1 подавляется смена знака потока между шагами и исчезают
-    // осцилляции температуры из-за слишком сильной радиации.
+    // где C — теплоёмкость верхнего слоя в J/(м²·K).
     const double heatCapacity = solver_.topLayerHeatCapacity();
     const double radiativeDerivative =
         4.0 * emissivity_ * kStefanBoltzmannConstant * std::pow(surfaceTemperature, 3.0);
     const double alpha = (heatCapacity > 0.0)
         ? (radiativeDerivative * dtSeconds / heatCapacity)
         : 0.0;
-    const double netFlux = (absorbedFlux - emittedNow) / (1.0 + qMax(0.0, alpha));
+    return (absorbedFlux - emittedNow) / (1.0 + qMax(0.0, alpha));
+}
+
+void SurfacePointState::updateTemperature(double absorbedFlux,
+                                          double emittedFlux,
+                                          double dtSeconds) {
+    Q_UNUSED(emittedFlux)
+    // Обновляем температуру верхнего слоя с учётом стабилизированного
+    // радиационного потока (W/м²).
+    const double netFlux = stabilizedRadiativeFlux(absorbedFlux, dtSeconds);
     solver_.stepImplicit(netFlux, dtSeconds);
     clampProfile();
 }

@@ -16,14 +16,16 @@ public:
     void exchangeHeat(SurfacePointState &surface,
                       AtmosphericLayerState &lowestLayer,
                       double roughnessLengthMeters,
-                      double dtSeconds) const;
+                      double dtSeconds,
+                      double *surfaceAirFluxWPerM2 = nullptr) const;
 
     void exchangeHeat(SurfacePointState &surface,
                       AtmosphericCellState &atmosphere,
                       double windSpeedMps,
                       double longwaveEmissivity,
                       double roughnessLengthMeters,
-                      double dtSeconds) const;
+                      double dtSeconds,
+                      double *surfaceAirFluxWPerM2 = nullptr) const;
 
 private:
     double sensibleHeatTransferCoefficient(double windSpeedMps,
@@ -39,7 +41,8 @@ private:
                               double roughnessLengthMeters,
                               double layerThicknessMeters,
                               double dtSeconds,
-                              double &updatedAirTemperature) const;
+                              double &updatedAirTemperature,
+                              double *surfaceAirFluxWPerM2) const;
 
     double heatTransferCoefficientWPerM2K_ = 8.0;
 };

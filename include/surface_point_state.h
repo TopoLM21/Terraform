@@ -28,6 +28,7 @@ public:
     double toaEmittedFlux() const;
     double topLayerHeatCapacityJPerM2K() const;
 
+    double stabilizedRadiativeFlux(double absorbedFlux, double dtSeconds) const;
     void updateTemperature(double absorbedFlux, double emittedFlux, double dtSeconds);
     void applySurfaceFlux(double netFlux, double dtSeconds);
 

@@ -251,6 +251,22 @@ LongwaveFluxes computeLongwaveFluxes(const RadiationModel &radiationModel,
     return fluxes;
 }
 
+double resolveSurfaceLongwaveUpFlux(const RadiationModel &radiationModel,
+                                    RadiationModelType radiationModelType,
+                                    double surfaceEmittedFluxWPerM2) {
+    if (radiationModelType == RadiationModelType::Layered) {
+        const auto *layeredModel = dynamic_cast<const LayeredRadiationModel *>(&radiationModel);
+        if (layeredModel) {
+            const auto profile = layeredModel->longwaveFluxProfile(surfaceEmittedFluxWPerM2);
+            if (!profile.upwardFluxWPerM2.isEmpty()) {
+                return profile.upwardFluxWPerM2.first();
+            }
+        }
+    }
+    // В однопотоковой модели поток вверх у поверхности равен собственному излучению.
+    return surfaceEmittedFluxWPerM2;
+}
+
 enum class TemperaturePlotSource {
     SurfaceGrid = 0,
     LatitudeModel1D = 1,
@@ -4740,6 +4756,7 @@ private:
                 radiationModel->incomingTransmission();
             // Храним текущий солнечный поток у поверхности в точке для подсказки тайла.
             point.solarFluxWPerM2 = surfaceShortwaveFlux;
+            point.shortwaveSurfaceWPerM2 = surfaceShortwaveFlux;
             point.airTemperatureK =
                 resolveAirTemperatureKelvin(point.state,
                                             point.pressureAtm,
@@ -4752,6 +4769,25 @@ private:
                                             useAtmosphericModel,
                                             input.manualGreenhouseOnTop,
                                             timeStepSeconds);
+            const double emittedFlux = point.state.surfaceEmittedFlux();
+            const double surfaceLongwaveUp =
+                resolveSurfaceLongwaveUpFlux(*radiationModel,
+                                             input.radiationModelType,
+                                             emittedFlux);
+            const double airTemperatureForFlux =
+                (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
+            const LongwaveFluxes longwaveFluxes =
+                computeLongwaveFluxes(*radiationModel,
+                                      input.radiationModelType,
+                                      emittedFlux,
+                                      airTemperatureForFlux,
+                                      point.state.greenhouseOpacity(),
+                                      useAtmosphericModel,
+                                      input.manualGreenhouseOnTop);
+            point.longwaveUpWPerM2 = surfaceLongwaveUp;
+            point.longwaveDownWPerM2 = longwaveFluxes.downwardFluxWPerM2;
+            point.surfaceAirFluxWPerM2 = 0.0;
+            point.subsurfaceFluxWPerM2 = 0.0;
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Resolved air temperature (init)"
                                           << "index=" << i
@@ -5314,8 +5350,11 @@ private:
                 radiationModel->incomingTransmission();
             // Запоминаем солнечный поток у поверхности для UI и логов.
             point.solarFluxWPerM2 = surfaceShortwaveFlux;
+            point.shortwaveSurfaceWPerM2 = surfaceShortwaveFlux;
 
             const double emittedFlux = point.state.surfaceEmittedFlux();
+            const double surfaceLongwaveUp =
+                resolveSurfaceLongwaveUpFlux(*radiationModel, radiationModelType, emittedFlux);
             const double airTemperatureForFlux =
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const double greenhouseOpacity = point.state.greenhouseOpacity();
@@ -5327,9 +5366,15 @@ private:
                                       greenhouseOpacity,
                                       useAtmosphericModel,
                                       manualGreenhouseOnTop);
+            point.longwaveUpWPerM2 = surfaceLongwaveUp;
+            point.longwaveDownWPerM2 = longwaveFluxes.downwardFluxWPerM2;
+            point.surfaceAirFluxWPerM2 = 0.0;
             // Баланс поверхности: учитываем нисходящее LW излучение атмосферы.
             const double absorbedFlux =
                 point.state.absorbedFlux(surfaceShortwaveFlux) + longwaveFluxes.downwardFluxWPerM2;
+            // Положительный поток означает перенос энергии в грунт (вниз).
+            point.subsurfaceFluxWPerM2 =
+                point.state.stabilizedRadiativeFlux(absorbedFlux, timeStepSeconds);
             // Применяем шаговый радиационный баланс для состояния точки.
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             // Обновляем поверхностную температуру до переноса в соседние точки.
@@ -5567,14 +5612,19 @@ private:
                         const double longwaveEmissivity =
                             qBound(0.0, 1.0 - std::exp(-opticalDepth), 1.0);
                         SurfaceAtmosphereCoupler coupler(kDefaultHeatTransferWPerM2K);
+                        double surfaceAirFluxWPerM2 = 0.0;
                         coupler.exchangeHeat(point.state,
                                              airState,
                                              windSpeed,
                                              longwaveEmissivity,
                                              roughnessLengthMeters,
-                                             timeStepSeconds);
+                                             timeStepSeconds,
+                                             &surfaceAirFluxWPerM2);
                         point.airTemperatureK = airState.airTemperatureKelvin();
                         point.temperatureK = point.state.temperatureKelvin();
+                        point.surfaceAirFluxWPerM2 = surfaceAirFluxWPerM2;
+                        // Поток в грунт учитывает радиацию и обмен с воздухом.
+                        point.subsurfaceFluxWPerM2 += -surfaceAirFluxWPerM2;
                     }
                 }
             }
