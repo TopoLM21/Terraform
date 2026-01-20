@@ -92,6 +92,8 @@ struct PlanetPreset {
     double binaryInclinationDegrees = 0.0;
     double binaryArgumentPericenterDegreesA = 0.0;
     double binaryArgumentPericenterDegreesB = 0.0;
+    // Минимальная толщина нижнего атмосферного слоя (м) для уплотнения профиля.
+    double minBottomLayerThicknessMeters = 100.0;
 };
 
 // Допуск 2% от орбитального периода: сглаживает округления и различия между

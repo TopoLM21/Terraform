@@ -8,6 +8,7 @@
 class QLabel;
 class QTableWidget;
 class AtmosphereChartWidget;
+class QDoubleSpinBox;
 
 class AtmosphereWidget : public QGroupBox {
     Q_OBJECT
@@ -19,9 +20,12 @@ public:
     void setComposition(const AtmosphereComposition &composition);
     void clearPlanetParameters();
     AtmosphereComposition composition(bool includeZeroes = false) const;
+    double minBottomLayerThicknessMeters() const;
+    void setMinBottomLayerThicknessMeters(double meters);
 
 signals:
     void compositionChanged(const AtmosphereComposition &composition);
+    void minBottomLayerThicknessChanged(double meters);
 
 private:
     void populateTable();
@@ -39,6 +43,7 @@ private:
     QLabel *totalMassLabel_ = nullptr;
     QLabel *pressureLabel_ = nullptr;
     QLabel *meanMolarMassLabel_ = nullptr;
+    QDoubleSpinBox *minBottomLayerThicknessSpinBox_ = nullptr;
     QVector<GasSpec> gases_;
     double planetMassEarths_ = 0.0;
     double planetRadiusKm_ = 0.0;

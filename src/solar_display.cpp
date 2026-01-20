@@ -166,6 +166,7 @@ constexpr int kRoleBinaryArgumentPericenterA = Qt::UserRole + 38;
 constexpr int kRoleBinaryArgumentPericenterB = Qt::UserRole + 39;
 constexpr int kRoleHasBinaryOrbit = Qt::UserRole + 40;
 constexpr int kRoleAtmosphereDisabled = Qt::UserRole + 41;
+constexpr int kRoleAtmosphereBottomLayerThickness = Qt::UserRole + 42;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -180,6 +181,7 @@ constexpr double kDefaultSurfaceRoughness = 20.0;
 constexpr double kDefaultBasinShape = 3.5;
 constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
+constexpr double kDefaultAtmosphereBottomLayerThicknessMeters = 100.0;
 // Один реальный секундный тик соответствует часу системного времени (1/24 дня).
 constexpr double kStarSystemDaysPerSecond = 1.0 / 24.0;
 constexpr int kKeplerIterations = 8;
@@ -968,6 +970,20 @@ public:
                     }
                     planetComboBox_->setItemData(
                         currentIndex, QVariant::fromValue(composition), kRoleAtmosphere);
+                    updateSurfaceGridTemperatures();
+                });
+        connect(atmosphereWidget_, &AtmosphereWidget::minBottomLayerThicknessChanged, this,
+                [this](double meters) {
+                    if (!planetComboBox_) {
+                        return;
+                    }
+                    const int currentIndex = planetComboBox_->currentIndex();
+                    if (currentIndex < 0) {
+                        return;
+                    }
+                    planetComboBox_->setItemData(currentIndex,
+                                                 meters,
+                                                 kRoleAtmosphereBottomLayerThickness);
                     updateSurfaceGridTemperatures();
                 });
 
@@ -2733,12 +2749,24 @@ private:
         const int index = planetComboBox_ ? planetComboBox_->currentIndex() : -1;
         const bool atmosphereDisabled = isAtmosphereDisabledForIndex(index);
         const QVariant compositionValue = planetComboBox_->currentData(kRoleAtmosphere);
+        const QVariant bottomLayerValue =
+            planetComboBox_->currentData(kRoleAtmosphereBottomLayerThickness);
+        const double bottomLayerThickness = bottomLayerValue.isValid()
+            ? bottomLayerValue.toDouble()
+            : kDefaultAtmosphereBottomLayerThicknessMeters;
+        if (planetComboBox_ && index >= 0 && !bottomLayerValue.isValid()) {
+            planetComboBox_->setItemData(index,
+                                         bottomLayerThickness,
+                                         kRoleAtmosphereBottomLayerThickness);
+        }
         if (!compositionValue.isValid()) {
             atmosphereWidget_->setComposition(AtmosphereComposition{});
+            atmosphereWidget_->setMinBottomLayerThicknessMeters(bottomLayerThickness);
             atmosphereWidget_->setEnabled(!atmosphereDisabled);
             return;
         }
         atmosphereWidget_->setComposition(compositionValue.value<AtmosphereComposition>());
+        atmosphereWidget_->setMinBottomLayerThicknessMeters(bottomLayerThickness);
         atmosphereWidget_->setEnabled(!atmosphereDisabled);
     }
 
@@ -2764,6 +2792,18 @@ private:
             atmosphere = atmosphereValue.value<AtmosphereComposition>();
         }
         return atmosphere;
+    }
+
+    double currentAtmosphereBottomLayerThicknessMeters() const {
+        if (!planetComboBox_) {
+            return kDefaultAtmosphereBottomLayerThicknessMeters;
+        }
+        const QVariant thicknessValue =
+            planetComboBox_->currentData(kRoleAtmosphereBottomLayerThickness);
+        if (!thicknessValue.isValid()) {
+            return kDefaultAtmosphereBottomLayerThicknessMeters;
+        }
+        return qMax(0.0, thicknessValue.toDouble());
     }
 
     int latitudeStepDegrees() const {
@@ -2918,6 +2958,9 @@ private:
         planetComboBox_->setItemData(index,
                                      planet.binaryArgumentPericenterDegreesB,
                                      kRoleBinaryArgumentPericenterB);
+        planetComboBox_->setItemData(index,
+                                     planet.minBottomLayerThicknessMeters,
+                                     kRoleAtmosphereBottomLayerThickness);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -3180,6 +3223,8 @@ private:
             const int spinOrbitQ = spinOrbitQInput->value();
             const quint32 heightSeed = static_cast<quint32>(heightSeedInput->value());
             const AtmosphereComposition composition = atmosphereInput->composition(false);
+            const double minBottomLayerThickness =
+                atmosphereInput->minBottomLayerThicknessMeters();
             StellarParameters primaryStar{1.0, 5772.0, 1.0};
             readStellarParametersForRender(radiusInput_, temperatureInput_, primaryStar);
             std::optional<StellarParameters> secondaryStar = std::nullopt;
@@ -3203,6 +3248,7 @@ private:
             preset.rotationModeOverride = true;
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
+            preset.minBottomLayerThicknessMeters = minBottomLayerThickness;
             if (existingIndex >= 0) {
                 if (!isCustomPlanetIndex(existingIndex)) {
                     showInputError(QStringLiteral("Нельзя заменить планету из пресета."));
@@ -3294,6 +3340,9 @@ private:
                 planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinaryInclinationDegrees);
                 planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinaryArgumentPericenterA);
                 planetComboBox_->setItemData(existingIndex, 0.0, kRoleBinaryArgumentPericenterB);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.minBottomLayerThicknessMeters,
+                                             kRoleAtmosphereBottomLayerThickness);
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
@@ -4955,7 +5004,11 @@ private:
         const double baseTemperatureKelvin =
             (effectiveTemperatureKelvin > 0.0) ? effectiveTemperatureKelvin
                                                : meanSurfaceTemperatureKelvin;
-        surfaceGrid_.initializeAtmosphericGrid(atmosphere, massEarths, baseTemperatureKelvin);
+        surfaceGrid_.initializeAtmosphericGrid(atmosphere,
+                                               massEarths,
+                                               baseTemperatureKelvin,
+                                               0,
+                                               currentAtmosphereBottomLayerThicknessMeters());
 
         SurfaceGridComputationInput input;
         input.grid = surfaceGrid_;

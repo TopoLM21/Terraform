@@ -10,6 +10,7 @@ namespace {
 constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
 constexpr int kDefaultLayerCount = 12;
+constexpr double kDefaultBottomLayerThicknessMeters = 100.0;
 
 double greenhouseMassFraction(const AtmosphereComposition &composition) {
     const auto gases = availableGases();
@@ -77,7 +78,8 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
                                   double radiusKm,
                                   double baseTemperatureKelvin,
                                   int columnCount,
-                                  int layerCount) {
+                                  int layerCount,
+                                  double minBottomLayerThicknessMeters) {
     const int resolvedLayerCount = (layerCount > 0) ? layerCount : kDefaultLayerCount;
     resizeColumns(columnCount, resolvedLayerCount);
     if (columns_.isEmpty()) {
@@ -100,6 +102,10 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
     profileSettings.gravityMps2 = gravity;
     profileSettings.layerCount = resolvedLayerCount;
     profileSettings.useDryAdiabatic = true;
+    profileSettings.minBottomLayerThicknessMeters =
+        (minBottomLayerThicknessMeters > 0.0)
+            ? minBottomLayerThicknessMeters
+            : kDefaultBottomLayerThicknessMeters;
 
     const QVector<AtmosphericProfileLayer> profileLayers =
         initializer.buildProfile(profileSettings);
@@ -110,11 +116,10 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
     const double baseTauLw = 0.05 + 1.2 * greenhouseShare;
     const double dryLapseRateKPerM = AtmosphericThermodynamics::dryAdiabaticLapseRate(
         composition, gravity);
-    const double layerThicknessMeters =
-        profileLayers.isEmpty() ? 0.0 : profileLayers.first().thicknessMeters;
-    const double topHeightMeters = layerThicknessMeters * resolvedLayerCount;
-    const double tauScale =
-        (topHeightMeters > 0.0) ? (layerThicknessMeters / topHeightMeters) : 0.0;
+    double topHeightMeters = 0.0;
+    for (const auto &profileLayer : profileLayers) {
+        topHeightMeters += profileLayer.thicknessMeters;
+    }
 
     for (auto &column : columns_) {
         column.resize(resolvedLayerCount);
@@ -125,16 +130,19 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
             // Теплоёмкость слоя на единицу площади: C = rho * Cp * dz.
             const double heatCapacityJPerM2K =
                 (specificHeat > 0.0)
-                    ? profileLayer.densityKgPerM3 * specificHeat * layerThicknessMeters
+                    ? profileLayer.densityKgPerM3 * specificHeat * profileLayer.thicknessMeters
                     : 0.0;
 
             const bool convectionEnabled =
-                profileLayer.temperatureKelvin > 0.0 && layerThicknessMeters > 0.0;
+                profileLayer.temperatureKelvin > 0.0 && profileLayer.thicknessMeters > 0.0;
             const double convectionMixingCoefficient = convectionEnabled
                 ? qBound(0.0,
-                         (dryLapseRateKPerM * layerThicknessMeters) /
+                         (dryLapseRateKPerM * profileLayer.thicknessMeters) /
                              qMax(1.0, profileLayer.temperatureKelvin),
                          1.0)
+                : 0.0;
+            const double tauScale = (topHeightMeters > 0.0)
+                ? (profileLayer.thicknessMeters / topHeightMeters)
                 : 0.0;
 
             layers[i].setTemperatureKelvin(profileLayer.temperatureKelvin);

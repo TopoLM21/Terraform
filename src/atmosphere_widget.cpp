@@ -5,6 +5,7 @@
 #include <QtCore/QLocale>
 #include <QtCore/QSignalBlocker>
 #include <QtGui/QDoubleValidator>
+#include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QHeaderView>
 #include <QtWidgets/QLabel>
@@ -78,12 +79,21 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     totalMassLabel_ = new QLabel(QStringLiteral("—"), this);
     pressureLabel_ = new QLabel(QStringLiteral("—"), this);
     meanMolarMassLabel_ = new QLabel(QStringLiteral("—"), this);
+    minBottomLayerThicknessSpinBox_ = new QDoubleSpinBox(this);
+    minBottomLayerThicknessSpinBox_->setRange(10.0, 10000.0);
+    minBottomLayerThicknessSpinBox_->setDecimals(0);
+    minBottomLayerThicknessSpinBox_->setSingleStep(10.0);
+    minBottomLayerThicknessSpinBox_->setSuffix(QStringLiteral(" м"));
+    minBottomLayerThicknessSpinBox_->setValue(100.0);
+    minBottomLayerThicknessSpinBox_->setToolTip(QStringLiteral(
+        "Минимальная толщина нижнего атмосферного слоя для уплотнения сетки у поверхности."));
 
     auto *summaryLayout = new QFormLayout();
     summaryLayout->addRow(QStringLiteral("Масса атмосферы:"), totalMassLabel_);
     summaryLayout->addRow(QStringLiteral("Давление (атм):"), pressureLabel_);
     summaryLayout->addRow(QStringLiteral("Средняя молекулярная масса (г/моль):"),
                           meanMolarMassLabel_);
+    summaryLayout->addRow(QStringLiteral("Мин. толщина нижнего слоя:"), minBottomLayerThicknessSpinBox_);
 
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(table_);
@@ -117,12 +127,31 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
         }
     });
 
+    connect(minBottomLayerThicknessSpinBox_,
+            QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this,
+            [this](double value) {
+                emit minBottomLayerThicknessChanged(value);
+            });
+
     updateAllShares();
     updateAllPressures();
     updateSummary();
     if (chartWidget_) {
         chartWidget_->setComposition(composition(true));
     }
+}
+
+double AtmosphereWidget::minBottomLayerThicknessMeters() const {
+    return minBottomLayerThicknessSpinBox_ ? minBottomLayerThicknessSpinBox_->value() : 0.0;
+}
+
+void AtmosphereWidget::setMinBottomLayerThicknessMeters(double meters) {
+    if (!minBottomLayerThicknessSpinBox_) {
+        return;
+    }
+    const QSignalBlocker blocker(minBottomLayerThicknessSpinBox_);
+    minBottomLayerThicknessSpinBox_->setValue(meters);
 }
 
 void AtmosphereWidget::setPlanetParameters(double massEarths, double radiusKm) {

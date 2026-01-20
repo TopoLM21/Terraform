@@ -30,13 +30,37 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
         ? settings.topHeightMeters
         : ((scaleHeight > 0.0) ? qMax(1000.0, scaleHeight * 6.0) : 0.0);
 
-    const double layerThickness = (resolvedTopHeight > 0.0)
+    const double uniformLayerThickness = (resolvedTopHeight > 0.0)
         ? resolvedTopHeight / static_cast<double>(settings.layerCount)
         : 0.0;
+    double bottomLayerThickness = uniformLayerThickness;
+    double remainingLayerThickness = uniformLayerThickness;
+    bool useNonUniformLayers = settings.layerCount > 1 && resolvedTopHeight > 0.0 &&
+        settings.minBottomLayerThicknessMeters > 0.0;
+    if (useNonUniformLayers) {
+        bottomLayerThickness =
+            qMin(settings.minBottomLayerThicknessMeters, resolvedTopHeight);
+        const double remainingHeight = resolvedTopHeight - bottomLayerThickness;
+        if (remainingHeight > 0.0) {
+            remainingLayerThickness =
+                remainingHeight / static_cast<double>(settings.layerCount - 1);
+        } else {
+            useNonUniformLayers = false;
+            bottomLayerThickness = uniformLayerThickness;
+            remainingLayerThickness = uniformLayerThickness;
+        }
+    }
 
+    // Разбиваем профиль так, чтобы первый слой имел заданную толщину, а остальные
+    // делили оставшуюся высоту. Так сетка плотнее у поверхности — там важнее
+    // детализация для визуализации и обитаемого объёма.
+    double bottomEdgeMeters = 0.0;
     for (int i = 0; i < layers.size(); ++i) {
-        const double heightMidMeters =
-            (static_cast<double>(i) + 0.5) * layerThickness;
+        const double layerThickness = useNonUniformLayers
+            ? ((i == 0) ? bottomLayerThickness : remainingLayerThickness)
+            : uniformLayerThickness;
+        const double heightMidMeters = bottomEdgeMeters + layerThickness * 0.5;
+        bottomEdgeMeters += layerThickness;
         // Температура по линейному градиенту: T(z) = T0 - Γ * z.
         const double temperatureKelvin = (settings.surfaceTemperatureKelvin > 0.0)
             ? qMax(1.0, settings.surfaceTemperatureKelvin - lapseRateKPerM * heightMidMeters)
