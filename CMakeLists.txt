@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.126 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.127 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,7 @@ add_executable(solar_constant
     include/atmospheric_column.h
     include/atmospheric_advection_solver.h
     include/atmospheric_dynamics_solver.h
+    include/vertical_wind_mixing_solver.h
     include/atmospheric_grid_3d.h
     include/atmospheric_layer_state.h
     include/atmospheric_profile_initializer.h
@@ -72,6 +73,7 @@ add_executable(solar_constant
     src/atmospheric_column.cpp
     src/atmospheric_advection_solver.cpp
     src/atmospheric_dynamics_solver.cpp
+    src/vertical_wind_mixing_solver.cpp
     src/atmospheric_grid_3d.cpp
     src/atmospheric_layer_state.cpp
     src/atmospheric_profile_initializer.cpp

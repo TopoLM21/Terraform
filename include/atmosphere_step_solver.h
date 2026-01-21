@@ -7,6 +7,7 @@
 #include "layered_radiation_solver.h"
 #include "planet_presets.h"
 #include "planet_surface_grid.h"
+#include "vertical_wind_mixing_solver.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QVector>
@@ -41,6 +42,7 @@ private:
     ConvectiveAdjustmentSolver convectiveSolver_;
     AtmosphericDynamicsSolver dynamicsSolver_;
     AtmosphericAdvectionSolver advectionSolver_;
+    VerticalWindMixingSolver verticalWindMixingSolver_;
     double timeStepSeconds_ = 0.0;
     double dayLengthSeconds_ = 0.0;
     bool isRetrograde_ = false;
