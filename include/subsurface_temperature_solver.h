@@ -49,6 +49,8 @@ public:
     const QVector<double> &layerDepthsMeters() const;
     double surfaceTemperatureKelvin() const;
     double topLayerHeatCapacity() const;
+    SubsurfaceBottomBoundaryCondition bottomBoundary() const;
+    double bottomTemperatureKelvin() const;
 
     void stepImplicit(double netSurfaceFlux, double dtSeconds);
 

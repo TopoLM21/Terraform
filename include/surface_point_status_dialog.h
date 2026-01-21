@@ -35,6 +35,8 @@ private:
     QLabel *surfaceAirFluxValueLabel_ = nullptr;
     QLabel *subsurfaceFluxInValueLabel_ = nullptr;
     QLabel *subsurfaceFluxOutValueLabel_ = nullptr;
+    QLabel *bottomBoundaryValueLabel_ = nullptr;
+    QLabel *bottomTemperatureValueLabel_ = nullptr;
     QLabel *materialValueLabel_ = nullptr;
     QLabel *tileAreaValueLabel_ = nullptr;
     QLabel *tileEdgeLengthValueLabel_ = nullptr;
