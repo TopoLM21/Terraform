@@ -108,7 +108,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
                                 material,
                                 defaults.subsurfaceSettings);
         point.state = state;
-        point.state.setTemperatureKelvin(globalTemperature);
+        point.state.setProfileTemperatureKelvin(globalTemperature);
         point.temperatureK = globalTemperature;
         point.airTemperatureK = globalTemperature;
         result.blendedInsolations.push_back(meanInsolation);

@@ -51,6 +51,10 @@ double SurfacePointState::emissivity() const {
 }
 
 void SurfacePointState::setTemperatureKelvin(double temperatureKelvin) {
+    solver_.setSurfaceLayerTemperatureKelvin(qMax(minTemperatureKelvin_, temperatureKelvin));
+}
+
+void SurfacePointState::setProfileTemperatureKelvin(double temperatureKelvin) {
     solver_.setInitialTemperature(qMax(minTemperatureKelvin_, temperatureKelvin));
 }
 
