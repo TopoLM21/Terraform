@@ -87,6 +87,14 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     minBottomLayerThicknessSpinBox_->setValue(100.0);
     minBottomLayerThicknessSpinBox_->setToolTip(QStringLiteral(
         "Минимальная толщина нижнего атмосферного слоя для уплотнения сетки у поверхности."));
+    verticalWindMixingSpinBox_ = new QDoubleSpinBox(this);
+    verticalWindMixingSpinBox_->setRange(0.0, 1000.0);
+    verticalWindMixingSpinBox_->setDecimals(2);
+    verticalWindMixingSpinBox_->setSingleStep(0.1);
+    verticalWindMixingSpinBox_->setSuffix(QStringLiteral(" м²/с"));
+    verticalWindMixingSpinBox_->setValue(1.0);
+    verticalWindMixingSpinBox_->setToolTip(QStringLiteral(
+        "Kz задаёт интенсивность вертикального турбулентного обмена."));
 
     auto *summaryLayout = new QFormLayout();
     summaryLayout->addRow(QStringLiteral("Масса атмосферы:"), totalMassLabel_);
@@ -94,6 +102,8 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     summaryLayout->addRow(QStringLiteral("Средняя молекулярная масса (г/моль):"),
                           meanMolarMassLabel_);
     summaryLayout->addRow(QStringLiteral("Мин. толщина нижнего слоя:"), minBottomLayerThicknessSpinBox_);
+    summaryLayout->addRow(QStringLiteral("Kz (вертикальное перемешивание):"),
+                          verticalWindMixingSpinBox_);
 
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(table_);
@@ -133,6 +143,12 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
             [this](double value) {
                 emit minBottomLayerThicknessChanged(value);
             });
+    connect(verticalWindMixingSpinBox_,
+            QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this,
+            [this](double value) {
+                emit verticalWindMixingCoefficientChanged(value);
+            });
 
     updateAllShares();
     updateAllPressures();
@@ -152,6 +168,18 @@ void AtmosphereWidget::setMinBottomLayerThicknessMeters(double meters) {
     }
     const QSignalBlocker blocker(minBottomLayerThicknessSpinBox_);
     minBottomLayerThicknessSpinBox_->setValue(meters);
+}
+
+double AtmosphereWidget::verticalWindMixingCoefficient() const {
+    return verticalWindMixingSpinBox_ ? verticalWindMixingSpinBox_->value() : 0.0;
+}
+
+void AtmosphereWidget::setVerticalWindMixingCoefficient(double coefficient) {
+    if (!verticalWindMixingSpinBox_) {
+        return;
+    }
+    const QSignalBlocker blocker(verticalWindMixingSpinBox_);
+    verticalWindMixingSpinBox_->setValue(coefficient);
 }
 
 void AtmosphereWidget::setPlanetParameters(double massEarths, double radiusKm) {

@@ -96,6 +96,8 @@ struct PlanetPreset {
     double minBottomLayerThicknessMeters = 100.0;
     // Нижняя граница температуры для сверхплотных атмосфер (K), 0 — авто.
     double minDenseAtmosphereTemperatureK = 0.0;
+    // Kz задаёт интенсивность вертикального турбулентного обмена (м²/с).
+    double verticalWindMixingCoefficient = 1.0;
 };
 
 // Допуск 2% от орбитального периода: сглаживает округления и различия между

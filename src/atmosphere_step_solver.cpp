@@ -33,6 +33,7 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
     if (processedCount <= 0) {
         return;
     }
+    verticalWindMixingSolver_.setMixingCoefficient(input.verticalWindMixingCoefficientKz);
     int logPointIndex = input.logPointIndex;
     if (logPointIndex < 0 || logPointIndex >= processedCount) {
         // Если индекс не задан, пишем лог для первой ячейки: так проще сравнивать шаги.

@@ -22,6 +22,7 @@ public:
         const SurfaceMaterial &defaultMaterial;
         double cloudShortwaveTransmission = 1.0;
         double heatTransferCoefficientWPerM2K = 0.0;
+        double verticalWindMixingCoefficientKz = 1.0;
         int logPointIndex = 0;
     };
 
