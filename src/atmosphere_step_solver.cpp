@@ -109,6 +109,9 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                                     isRetrograde_,
                                     timeStepSeconds_,
                                     1);
+    for (int i = 0; i < processedCount; ++i) {
+        verticalWindMixingSolver_.mix(input.atmosphereGrid.columns()[i], timeStepSeconds_);
+    }
     advectionSolver_.advectLayerWinds(input.surfaceGrid,
                                       input.atmosphereGrid,
                                       dayLengthSeconds_,
