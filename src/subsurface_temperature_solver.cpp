@@ -64,6 +64,13 @@ void SubsurfaceTemperatureSolver::setInitialTemperature(double temperatureKelvin
     }
 }
 
+void SubsurfaceTemperatureSolver::setSurfaceLayerTemperatureKelvin(double temperatureKelvin) {
+    if (temperatures_.isEmpty()) {
+        return;
+    }
+    temperatures_.first() = temperatureKelvin;
+}
+
 void SubsurfaceTemperatureSolver::setTemperatures(const QVector<double> &temperatures) {
     temperatures_ = temperatures;
     if (temperatures_.size() != grid_.layerCount()) {

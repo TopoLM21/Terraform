@@ -42,6 +42,7 @@ public:
                double geothermalFluxWPerM2);
 
     void setInitialTemperature(double temperatureKelvin);
+    void setSurfaceLayerTemperatureKelvin(double temperatureKelvin);
     void setTemperatures(const QVector<double> &temperatures);
 
     const QVector<double> &temperatures() const;
