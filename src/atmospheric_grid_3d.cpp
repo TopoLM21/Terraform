@@ -45,6 +45,41 @@ double surfaceGravityMps2(double planetMassEarths, double radiusKm) {
     // g = G * M / R^2
     return kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
 }
+
+int resolveLayerCountForTopPressure(double surfacePressureAtm,
+                                    double minTopPressureAtm,
+                                    double surfaceTemperatureKelvin,
+                                    double gravityMps2,
+                                    double specificGasConstant) {
+    if (surfacePressureAtm <= 0.0 || minTopPressureAtm <= 0.0 ||
+        surfacePressureAtm <= minTopPressureAtm || surfaceTemperatureKelvin <= 0.0 ||
+        gravityMps2 <= 0.0 || specificGasConstant <= 0.0) {
+        return 0;
+    }
+
+    // Масштабная высота: H = R * T / g, затем используем её для оценки высоты до P_min.
+    const double scaleHeight =
+        (specificGasConstant * surfaceTemperatureKelvin) / gravityMps2;
+    if (scaleHeight <= 0.0) {
+        return 0;
+    }
+
+    const double topHeightMeters = scaleHeight * qLn(surfacePressureAtm / minTopPressureAtm);
+    if (topHeightMeters <= 0.0) {
+        return 0;
+    }
+
+    const double defaultTopHeight = scaleHeight * 6.0;
+    const double targetLayerThickness =
+        (defaultTopHeight > 0.0)
+            ? (defaultTopHeight / static_cast<double>(kDefaultLayerCount))
+            : 0.0;
+    if (targetLayerThickness <= 0.0) {
+        return 0;
+    }
+
+    return qMax(1, static_cast<int>(qCeil(topHeightMeters / targetLayerThickness)));
+}
 } // namespace
 
 void AtmosphericGrid3D::resizeColumns(int columnCount, int layerCount) {
@@ -79,21 +114,35 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
                                   double baseTemperatureKelvin,
                                   int columnCount,
                                   int layerCount,
-                                  double minBottomLayerThicknessMeters) {
-    const int resolvedLayerCount = (layerCount > 0) ? layerCount : kDefaultLayerCount;
-    resizeColumns(columnCount, resolvedLayerCount);
-    if (columns_.isEmpty()) {
-        return;
-    }
-
+                                  double minBottomLayerThicknessMeters,
+                                  double minTopPressureAtm) {
     const double surfacePressureAtm =
         composition.totalPressureAtm(planetMassEarths, radiusKm);
     const double gravity = surfaceGravityMps2(planetMassEarths, radiusKm);
     const double specificHeat = AtmosphericThermodynamics::specificHeatCp(composition);
+    const double rSpecific = AtmosphericThermodynamics::specificGasConstant(composition);
 
     // Простейшее допущение: заданная температура на поверхности.
     const double resolvedBaseTemperatureKelvin =
         (surfacePressureAtm > 0.0) ? qMax(0.0, baseTemperatureKelvin) : 0.0;
+
+    int resolvedLayerCount = (layerCount > 0) ? layerCount : kDefaultLayerCount;
+    if (layerCount <= 0 && minTopPressureAtm > 0.0) {
+        const int pressureDrivenLayerCount = resolveLayerCountForTopPressure(
+            surfacePressureAtm,
+            minTopPressureAtm,
+            resolvedBaseTemperatureKelvin,
+            gravity,
+            rSpecific);
+        if (pressureDrivenLayerCount > 0) {
+            resolvedLayerCount = pressureDrivenLayerCount;
+        }
+    }
+
+    resizeColumns(columnCount, resolvedLayerCount);
+    if (columns_.isEmpty()) {
+        return;
+    }
 
     AtmosphericProfileInitializer initializer(composition);
     AtmosphericProfileInitializer::Settings profileSettings;
@@ -102,6 +151,7 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
     profileSettings.gravityMps2 = gravity;
     profileSettings.layerCount = resolvedLayerCount;
     profileSettings.useDryAdiabatic = true;
+    profileSettings.minTopPressureAtm = minTopPressureAtm;
     profileSettings.minBottomLayerThicknessMeters =
         (minBottomLayerThicknessMeters > 0.0)
             ? minBottomLayerThicknessMeters

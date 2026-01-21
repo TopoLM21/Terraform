@@ -33,7 +33,8 @@ public:
                                    double planetMassEarths,
                                    double baseTemperatureKelvin,
                                    int layerCount = 0,
-                                   double minBottomLayerThicknessMeters = 0.0);
+                                   double minBottomLayerThicknessMeters = 0.0,
+                                   double minTopPressureAtm = 0.0);
 
     void setHeightSource(HeightSourceType sourceType,
                          const QString &heightmapPath,

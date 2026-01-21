@@ -26,6 +26,8 @@ public:
         bool useDryAdiabatic = true;
         // Можно указать вручную; если 0, высота берётся как ~6 масштабных высот.
         double topHeightMeters = 0.0;
+        // Верхняя граница по давлению (атм): если > 0, профиль строится до P <= порога.
+        double minTopPressureAtm = 0.0;
         // Минимальная толщина нижнего слоя (м). Используется для уплотнения сетки у поверхности.
         double minBottomLayerThicknessMeters = 0.0;
     };

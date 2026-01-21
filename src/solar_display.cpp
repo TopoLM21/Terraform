@@ -5095,7 +5095,8 @@ private:
                                                massEarths,
                                                baseTemperatureKelvin,
                                                0,
-                                               currentAtmosphereBottomLayerThicknessMeters());
+                                               currentAtmosphereBottomLayerThicknessMeters(),
+                                               0.0);
 
         SurfaceGridComputationInput input;
         input.grid = surfaceGrid_;
