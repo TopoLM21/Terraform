@@ -5585,8 +5585,8 @@ private:
                                                             *defaultMaterial,
                                                             cloudShortwaveTransmission,
                                                             kDefaultHeatTransferWPerM2K};
-            stepInput.verticalWindMixingCoefficientKz = input.verticalWindMixingCoefficientKz;
-            stepInput.logPointIndex = input.logPointIndex;
+            stepInput.verticalWindMixingCoefficientKz = currentVerticalWindMixingCoefficientKz();
+            stepInput.logPointIndex = selectedSurfacePointIndex_;
             stepSolver.runLayeredStep(stepInput);
         }
 
