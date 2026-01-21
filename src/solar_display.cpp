@@ -5513,7 +5513,8 @@ private:
 
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
-            point.state.setTemperatureKelvin(advectedTemperatures.at(i));
+            // Перенос — поверхностная величина и не должен переписывать профиль глубины.
+            point.state.setSurfaceLayerTemperatureKelvin(advectedTemperatures.at(i));
             // Температура после переноса хранится как поверхностная величина.
             point.temperatureK = point.state.temperatureKelvin();
         }

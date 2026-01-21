@@ -54,6 +54,10 @@ void SurfacePointState::setTemperatureKelvin(double temperatureKelvin) {
     solver_.setInitialTemperature(qMax(minTemperatureKelvin_, temperatureKelvin));
 }
 
+void SurfacePointState::setSurfaceLayerTemperatureKelvin(double temperatureKelvin) {
+    solver_.setSurfaceLayerTemperatureKelvin(qMax(minTemperatureKelvin_, temperatureKelvin));
+}
+
 void SurfacePointState::setGreenhouseOpacity(double greenhouseOpacity) {
     greenhouseOpacity_ = qBound(0.0, greenhouseOpacity, 0.999);
 }
