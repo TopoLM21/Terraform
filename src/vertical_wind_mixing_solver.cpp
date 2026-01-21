@@ -1,5 +1,6 @@
 #include "vertical_wind_mixing_solver.h"
 
+#include <QtCore/QLoggingCategory>
 #include <QtCore/QtMath>
 
 #include <limits>
@@ -8,6 +9,8 @@ namespace {
 constexpr double kMinThicknessMeters = 1.0e-3;
 constexpr double kMaxDiffusionCourant = 0.5;
 }
+
+Q_LOGGING_CATEGORY(verticalWindMixingLog, "solar.atmosphere.vertical_mixing")
 
 VerticalWindMixingSolver::VerticalWindMixingSolver(double mixingCoefficientKz)
     : mixingCoefficientKz_(mixingCoefficientKz) {}
@@ -38,10 +41,18 @@ void VerticalWindMixingSolver::mix(AtmosphericColumn &column, double dtSeconds) 
     windV.reserve(layerCount);
     thickness.reserve(layerCount);
 
+    const bool logEnabled = verticalWindMixingLog().isInfoEnabled();
+    double energyBefore = 0.0;
     double minThickness = std::numeric_limits<double>::max();
     for (const auto &layer : layers) {
-        windU.push_back(layer.windUMps());
-        windV.push_back(layer.windVMps());
+        const double u = layer.windUMps();
+        const double v = layer.windVMps();
+        windU.push_back(u);
+        windV.push_back(v);
+        if (logEnabled) {
+            // Кинетическая энергия на единицу массы: 0.5 * (u^2 + v^2).
+            energyBefore += 0.5 * (u * u + v * v);
+        }
         const double layerThickness = qMax(layer.thicknessMeters(), kMinThicknessMeters);
         thickness.push_back(layerThickness);
         minThickness = qMin(minThickness, layerThickness);
@@ -80,6 +91,9 @@ void VerticalWindMixingSolver::mix(AtmosphericColumn &column, double dtSeconds) 
     const double bottomFluxU = -mixingCoefficientKz_ * (windU.at(0) - bottomBoundaryU) / bottomDz;
     const double bottomFluxV = -mixingCoefficientKz_ * (windV.at(0) - bottomBoundaryV) / bottomDz;
 
+    double energyAfter = 0.0;
+    double maxDeltaU = 0.0;
+    double maxDeltaV = 0.0;
     for (int k = 0; k < layerCount; ++k) {
         const double dzLayer = thickness.at(k);
         const double fluxDownU = (k > 0) ? fluxU.at(k - 1) : bottomFluxU;
@@ -89,7 +103,22 @@ void VerticalWindMixingSolver::mix(AtmosphericColumn &column, double dtSeconds) 
 
         const double updatedU = windU.at(k) + (fluxDownU - fluxUpU) * effectiveDt / dzLayer;
         const double updatedV = windV.at(k) + (fluxDownV - fluxUpV) * effectiveDt / dzLayer;
+        if (logEnabled) {
+            energyAfter += 0.5 * (updatedU * updatedU + updatedV * updatedV);
+            maxDeltaU = qMax(maxDeltaU, qAbs(updatedU - windU.at(k)));
+            maxDeltaV = qMax(maxDeltaV, qAbs(updatedV - windV.at(k)));
+        }
         layers[k].setWindUMps(updatedU);
         layers[k].setWindVMps(updatedV);
+    }
+
+    if (logEnabled) {
+        qCInfo(verticalWindMixingLog) << "Vertical wind mixing step"
+                                      << "layers=" << layerCount
+                                      << "dt=" << effectiveDt
+                                      << "energyBefore=" << energyBefore
+                                      << "energyAfter=" << energyAfter
+                                      << "maxDeltaU=" << maxDeltaU
+                                      << "maxDeltaV=" << maxDeltaV;
     }
 }
