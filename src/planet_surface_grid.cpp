@@ -291,14 +291,16 @@ void PlanetSurfaceGrid::initializeAtmosphericGrid(const AtmosphereComposition &c
                                                   double planetMassEarths,
                                                   double baseTemperatureKelvin,
                                                   int layerCount,
-                                                  double minBottomLayerThicknessMeters) {
+                                                  double minBottomLayerThicknessMeters,
+                                                  double minTopPressureAtm) {
     atmosphericGrid_.initialize(composition,
                                 planetMassEarths,
                                 radiusKm_,
                                 baseTemperatureKelvin,
                                 points_.size(),
                                 layerCount,
-                                minBottomLayerThicknessMeters);
+                                minBottomLayerThicknessMeters,
+                                minTopPressureAtm);
 }
 
 void PlanetSurfaceGrid::setHeightSource(HeightSourceType sourceType,

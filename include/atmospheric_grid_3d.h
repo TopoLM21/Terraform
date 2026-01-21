@@ -20,7 +20,8 @@ public:
                     double baseTemperatureKelvin,
                     int columnCount,
                     int layerCount,
-                    double minBottomLayerThicknessMeters);
+                    double minBottomLayerThicknessMeters,
+                    double minTopPressureAtm = 0.0);
 
 private:
     QVector<AtmosphericColumn> columns_;

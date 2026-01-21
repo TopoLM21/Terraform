@@ -26,9 +26,19 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
     const double scaleHeight =
         scaleHeightMeters(settings.surfaceTemperatureKelvin, settings.gravityMps2);
 
-    const double resolvedTopHeight = (settings.topHeightMeters > 0.0)
-        ? settings.topHeightMeters
-        : ((scaleHeight > 0.0) ? qMax(1000.0, scaleHeight * 6.0) : 0.0);
+    double resolvedTopHeight = 0.0;
+    if (settings.minTopPressureAtm > 0.0 &&
+        settings.surfacePressureAtm > settings.minTopPressureAtm &&
+        scaleHeight > 0.0) {
+        // Верхняя граница задаётся давлением: прекращаем слои, когда P падает ниже порога,
+        // чтобы моделировать только атмосферу с заметной массой и оптическим вкладом.
+        resolvedTopHeight =
+            scaleHeight * qLn(settings.surfacePressureAtm / settings.minTopPressureAtm);
+    } else if (settings.topHeightMeters > 0.0) {
+        resolvedTopHeight = settings.topHeightMeters;
+    } else {
+        resolvedTopHeight = (scaleHeight > 0.0) ? qMax(1000.0, scaleHeight * 6.0) : 0.0;
+    }
 
     const double uniformLayerThickness = (resolvedTopHeight > 0.0)
         ? resolvedTopHeight / static_cast<double>(settings.layerCount)
