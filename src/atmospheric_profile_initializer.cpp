@@ -65,6 +65,7 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
     // делили оставшуюся высоту. Так сетка плотнее у поверхности — там важнее
     // детализация для визуализации и обитаемого объёма.
     double bottomEdgeMeters = 0.0;
+    double pressureAtmAtBottom = settings.surfacePressureAtm;
     for (int i = 0; i < layers.size(); ++i) {
         const double layerThickness = useNonUniformLayers
             ? ((i == 0) ? bottomLayerThickness : remainingLayerThickness)
@@ -75,10 +76,19 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
         const double temperatureKelvin = (settings.surfaceTemperatureKelvin > 0.0)
             ? qMax(1.0, settings.surfaceTemperatureKelvin - lapseRateKPerM * heightMidMeters)
             : 0.0;
-        // Барометрическая формула: P(z) = P0 * exp(-z / H).
-        const double pressureAtm = pressureAtmAtHeight(settings.surfacePressureAtm,
-                                                       heightMidMeters,
-                                                       scaleHeight);
+        const double scaleHeightLayer = (rSpecific > 0.0 &&
+                                         temperatureKelvin > 0.0 &&
+                                         settings.gravityMps2 > 0.0)
+            ? (rSpecific * temperatureKelvin) / settings.gravityMps2
+            : 0.0;
+        double pressureAtm = 0.0;
+        if (pressureAtmAtBottom > 0.0 && scaleHeightLayer > 0.0) {
+            // Гидростатическое равновесие с переменной температурой.
+            pressureAtm = pressureAtmAtBottom *
+                qExp(-0.5 * layerThickness / scaleHeightLayer);
+            pressureAtmAtBottom =
+                pressureAtmAtBottom * qExp(-layerThickness / scaleHeightLayer);
+        }
         const double pressurePa = pressureAtm * kStandardPressurePa;
         // Уравнение состояния идеального газа: rho = P / (R * T).
         const double densityKgPerM3 =
