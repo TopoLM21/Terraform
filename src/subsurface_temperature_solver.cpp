@@ -99,6 +99,14 @@ double SubsurfaceTemperatureSolver::topLayerHeatCapacity() const {
     return volumetricHeatCapacity * dz.first();
 }
 
+SubsurfaceBottomBoundaryCondition SubsurfaceTemperatureSolver::bottomBoundary() const {
+    return bottomBoundary_;
+}
+
+double SubsurfaceTemperatureSolver::bottomTemperatureKelvin() const {
+    return bottomTemperatureKelvin_;
+}
+
 void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtSeconds) {
     if (temperatures_.isEmpty() || dtSeconds <= 0.0) {
         return;

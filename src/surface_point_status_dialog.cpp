@@ -38,6 +38,8 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     surfaceAirFluxValueLabel_ = new QLabel(QStringLiteral("—"), this);
     subsurfaceFluxInValueLabel_ = new QLabel(QStringLiteral("—"), this);
     subsurfaceFluxOutValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    bottomBoundaryValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    bottomTemperatureValueLabel_ = new QLabel(QStringLiteral("—"), this);
     materialValueLabel_ = new QLabel(QStringLiteral("—"), this);
     tileAreaValueLabel_ = new QLabel(QStringLiteral("—"), this);
     tileEdgeLengthValueLabel_ = new QLabel(QStringLiteral("—"), this);
@@ -98,6 +100,17 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Поток поверхность→воздух (Вт/м²):"), surfaceAirFluxValueLabel_);
     layout->addRow(QStringLiteral("Поток в грунт (Вт/м²):"), subsurfaceFluxInValueLabel_);
     layout->addRow(QStringLiteral("Поток из грунта (Вт/м²):"), subsurfaceFluxOutValueLabel_);
+    const QString bottomBoundaryTooltip = QStringLiteral(
+        "Фиксированная температура задаёт «глубинный резервуар», который может "
+        "подогревать профиль.");
+    auto *bottomBoundaryLabel = new QLabel(QStringLiteral("Bottom boundary:"), this);
+    bottomBoundaryLabel->setToolTip(bottomBoundaryTooltip);
+    bottomBoundaryValueLabel_->setToolTip(bottomBoundaryTooltip);
+    layout->addRow(bottomBoundaryLabel, bottomBoundaryValueLabel_);
+    auto *bottomTemperatureLabel = new QLabel(QStringLiteral("Bottom temperature (K):"), this);
+    bottomTemperatureLabel->setToolTip(bottomBoundaryTooltip);
+    bottomTemperatureValueLabel_->setToolTip(bottomBoundaryTooltip);
+    layout->addRow(bottomTemperatureLabel, bottomTemperatureValueLabel_);
     layout->addRow(QStringLiteral("Материал:"), materialValueLabel_);
     layout->addRow(QStringLiteral("Площадь тайла (км²):"), tileAreaValueLabel_);
     layout->addRow(QStringLiteral("Средняя длина ребра (км):"), tileEdgeLengthValueLabel_);
@@ -128,11 +141,19 @@ void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
     tileAreaValueLabel_->setText(formatNumber(tileAreaKm2));
     tileEdgeLengthValueLabel_->setText(formatNumber(tileEdgeLengthKm));
 
+    const auto &solver = point.state.solver();
+    const auto bottomBoundary = solver.bottomBoundary();
+    const bool isFixedBoundary =
+        bottomBoundary == SubsurfaceBottomBoundaryCondition::FixedTemperature;
+    bottomBoundaryValueLabel_->setText(
+        isFixedBoundary ? QStringLiteral("FixedTemperature") : QStringLiteral("Insulating"));
+    bottomTemperatureValueLabel_->setText(
+        isFixedBoundary ? formatNumber(solver.bottomTemperatureKelvin()) : QStringLiteral("—"));
+
     if (!subsurfaceTable_) {
         return;
     }
 
-    const auto &solver = point.state.solver();
     // Используем solver() у SurfacePointState, потому что он хранит локальную
     // тепловую инерцию и «грунтовые» слои для конкретной точки поверхности.
     const auto &temperatures = solver.temperatures();
@@ -211,6 +232,8 @@ void SurfacePointStatusDialog::clearPoint() {
     surfaceAirFluxValueLabel_->setText(QStringLiteral("—"));
     subsurfaceFluxInValueLabel_->setText(QStringLiteral("—"));
     subsurfaceFluxOutValueLabel_->setText(QStringLiteral("—"));
+    bottomBoundaryValueLabel_->setText(QStringLiteral("—"));
+    bottomTemperatureValueLabel_->setText(QStringLiteral("—"));
     materialValueLabel_->setText(QStringLiteral("—"));
     tileAreaValueLabel_->setText(QStringLiteral("—"));
     tileEdgeLengthValueLabel_->setText(QStringLiteral("—"));
