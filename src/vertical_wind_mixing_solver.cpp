@@ -62,60 +62,83 @@ void VerticalWindMixingSolver::mix(AtmosphericColumn &column, double dtSeconds) 
     // Ограничение диффузионного числа Куранта: dt <= C * dz^2 / Kz
     // для устойчивости явной схемы. Используем минимальную толщину слоя.
     const double maxStableDt = kMaxDiffusionCourant * minThickness * minThickness / mixingCoefficientKz_;
-    const double effectiveDt = qMin(dtSeconds, maxStableDt);
-    if (effectiveDt <= 0.0) {
+    if (maxStableDt <= 0.0) {
         return;
     }
 
+    // Сохраняем полный шаг модели, но делим на подшаги для соблюдения
+    // ограничения Куранта по вертикальной диффузии (физическая устойчивость явной схемы).
+    const int substeps = qMax(1, static_cast<int>(qCeil(dtSeconds / maxStableDt)));
+    const double stepDt = dtSeconds / static_cast<double>(substeps);
+
     const int interfaceCount = layerCount - 1;
+    QVector<double> initialWindU;
+    QVector<double> initialWindV;
+    if (logEnabled) {
+        initialWindU = windU;
+        initialWindV = windV;
+    }
+
     QVector<double> fluxU(interfaceCount);
     QVector<double> fluxV(interfaceCount);
-
-    for (int i = 0; i < interfaceCount; ++i) {
-        const double dz = qMax(0.5 * (thickness.at(i) + thickness.at(i + 1)), kMinThicknessMeters);
-        // Вертикальная диффузия по уравнению
-        //   ∂u/∂t = ∂/∂z (Kz ∂u/∂z)
-        // в дискретной форме: поток на границе слоев
-        //   F = -Kz (u_{k+1} - u_k) / Δz,
-        // а изменение в слое: Δu = (F_{k-1/2} - F_{k+1/2}) * dt / h_k.
-        fluxU[i] = -mixingCoefficientKz_ * (windU.at(i + 1) - windU.at(i)) / dz;
-        fluxV[i] = -mixingCoefficientKz_ * (windV.at(i + 1) - windV.at(i)) / dz;
-    }
+    QVector<double> nextWindU(layerCount);
+    QVector<double> nextWindV(layerCount);
 
     // Нижняя граница: выбираем no-slip (u, v = 0 у поверхности), чтобы учесть
     // торможение ветра о шероховатую поверхность. Верхняя граница: нулевой поток
     // (∂u/∂z = 0), что эквивалентно отсутствию потока импульса через верх.
     const double bottomBoundaryU = 0.0;
     const double bottomBoundaryV = 0.0;
-    const double bottomDz = qMax(0.5 * thickness.at(0), kMinThicknessMeters);
-    const double bottomFluxU = -mixingCoefficientKz_ * (windU.at(0) - bottomBoundaryU) / bottomDz;
-    const double bottomFluxV = -mixingCoefficientKz_ * (windV.at(0) - bottomBoundaryV) / bottomDz;
+
+    for (int step = 0; step < substeps; ++step) {
+        for (int i = 0; i < interfaceCount; ++i) {
+            const double dz = qMax(0.5 * (thickness.at(i) + thickness.at(i + 1)), kMinThicknessMeters);
+            // Вертикальная диффузия по уравнению
+            //   ∂u/∂t = ∂/∂z (Kz ∂u/∂z)
+            // в дискретной форме: поток на границе слоев
+            //   F = -Kz (u_{k+1} - u_k) / Δz,
+            // а изменение в слое: Δu = (F_{k-1/2} - F_{k+1/2}) * dt / h_k.
+            fluxU[i] = -mixingCoefficientKz_ * (windU.at(i + 1) - windU.at(i)) / dz;
+            fluxV[i] = -mixingCoefficientKz_ * (windV.at(i + 1) - windV.at(i)) / dz;
+        }
+
+        const double bottomDz = qMax(0.5 * thickness.at(0), kMinThicknessMeters);
+        const double bottomFluxU = -mixingCoefficientKz_ * (windU.at(0) - bottomBoundaryU) / bottomDz;
+        const double bottomFluxV = -mixingCoefficientKz_ * (windV.at(0) - bottomBoundaryV) / bottomDz;
+
+        for (int k = 0; k < layerCount; ++k) {
+            const double dzLayer = thickness.at(k);
+            const double fluxDownU = (k > 0) ? fluxU.at(k - 1) : bottomFluxU;
+            const double fluxUpU = (k < interfaceCount) ? fluxU.at(k) : 0.0;
+            const double fluxDownV = (k > 0) ? fluxV.at(k - 1) : bottomFluxV;
+            const double fluxUpV = (k < interfaceCount) ? fluxV.at(k) : 0.0;
+
+            nextWindU[k] = windU.at(k) + (fluxDownU - fluxUpU) * stepDt / dzLayer;
+            nextWindV[k] = windV.at(k) + (fluxDownV - fluxUpV) * stepDt / dzLayer;
+        }
+
+        windU.swap(nextWindU);
+        windV.swap(nextWindV);
+    }
 
     double energyAfter = 0.0;
     double maxDeltaU = 0.0;
     double maxDeltaV = 0.0;
     for (int k = 0; k < layerCount; ++k) {
-        const double dzLayer = thickness.at(k);
-        const double fluxDownU = (k > 0) ? fluxU.at(k - 1) : bottomFluxU;
-        const double fluxUpU = (k < interfaceCount) ? fluxU.at(k) : 0.0;
-        const double fluxDownV = (k > 0) ? fluxV.at(k - 1) : bottomFluxV;
-        const double fluxUpV = (k < interfaceCount) ? fluxV.at(k) : 0.0;
-
-        const double updatedU = windU.at(k) + (fluxDownU - fluxUpU) * effectiveDt / dzLayer;
-        const double updatedV = windV.at(k) + (fluxDownV - fluxUpV) * effectiveDt / dzLayer;
         if (logEnabled) {
-            energyAfter += 0.5 * (updatedU * updatedU + updatedV * updatedV);
-            maxDeltaU = qMax(maxDeltaU, qAbs(updatedU - windU.at(k)));
-            maxDeltaV = qMax(maxDeltaV, qAbs(updatedV - windV.at(k)));
+            energyAfter += 0.5 * (windU.at(k) * windU.at(k) + windV.at(k) * windV.at(k));
+            maxDeltaU = qMax(maxDeltaU, qAbs(windU.at(k) - initialWindU.at(k)));
+            maxDeltaV = qMax(maxDeltaV, qAbs(windV.at(k) - initialWindV.at(k)));
         }
-        layers[k].setWindUMps(updatedU);
-        layers[k].setWindVMps(updatedV);
+        layers[k].setWindUMps(windU.at(k));
+        layers[k].setWindVMps(windV.at(k));
     }
 
     if (logEnabled) {
         qCInfo(verticalWindMixingLog) << "Vertical wind mixing step"
                                       << "layers=" << layerCount
-                                      << "dt=" << effectiveDt
+                                      << "dt=" << dtSeconds
+                                      << "substeps=" << substeps
                                       << "energyBefore=" << energyBefore
                                       << "energyAfter=" << energyAfter
                                       << "maxDeltaU=" << maxDeltaU
