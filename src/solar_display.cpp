@@ -99,12 +99,18 @@ bool isSolarRadiationLoggingEnabledFromEnvironment() {
     return rawValue != "0" && rawValue != "false" && rawValue != "off";
 }
 
-void enableSolarRadiationLogging() {
-    QString rules = QString::fromLocal8Bit(qgetenv("QT_LOGGING_RULES"));
+QString buildSolarRadiationLoggingRules(const QString &baseRules) {
+    QString rules = baseRules;
     if (!rules.isEmpty()) {
         rules.append('\n');
     }
     rules.append(QStringLiteral("solar.radiation.info=true\nsolar.radiation.debug=true"));
+    return rules;
+}
+
+void setSolarRadiationLoggingEnabled(const QString &baseRules, bool enabled) {
+    // Сохраняем исходные правила Qt логирования, чтобы отключение не стирало пользовательские настройки.
+    const QString rules = enabled ? buildSolarRadiationLoggingRules(baseRules) : baseRules;
     QLoggingCategory::setFilterRules(rules);
 }
 
@@ -756,8 +762,13 @@ struct SurfaceGridComputationResult {
 
 class SolarCalculatorWidget : public QWidget {
 public:
-    explicit SolarCalculatorWidget(int precision, QWidget *parent = nullptr)
-        : QWidget(parent), precision_(precision) {
+    explicit SolarCalculatorWidget(int precision,
+                                   const QString &baseLoggingRules,
+                                   bool enableRadiationLog,
+                                   QWidget *parent = nullptr)
+        : QWidget(parent),
+          precision_(precision),
+          baseLoggingRules_(baseLoggingRules) {
         auto *validator = new QDoubleValidator(0.0, std::numeric_limits<double>::max(), 10, this);
         validator->setNotation(QDoubleValidator::StandardNotation);
 
@@ -921,6 +932,17 @@ public:
             QStringLiteral("Уточняет передачу коротковолнового и длинноволнового излучения\n"
                            "через атмосферу в многослойной аппроксимации.\n"
                            "По умолчанию точная модель включена."));
+        radiationLoggingCheckBox_ = new QCheckBox(
+            QStringLiteral("Логи радиационной модели"), this);
+        radiationLoggingCheckBox_->setToolTip(
+            QStringLiteral("Включает подробные логи радиационной модели в консоли."));
+        {
+            const QSignalBlocker blocker(radiationLoggingCheckBox_);
+            radiationLoggingCheckBox_->setChecked(enableRadiationLog);
+        }
+        connect(radiationLoggingCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+            setSolarRadiationLoggingEnabled(baseLoggingRules_, checked);
+        });
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
@@ -983,6 +1005,7 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
         planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
         planetControlsLayout->addRow(QString(), advancedRadiationCheckBox_);
+        planetControlsLayout->addRow(QString(), radiationLoggingCheckBox_);
         planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
 
         auto *planetActionsLayout = new QHBoxLayout();
@@ -1733,6 +1756,7 @@ private:
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
     QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
     QCheckBox *advancedRadiationCheckBox_ = nullptr;
+    QCheckBox *radiationLoggingCheckBox_ = nullptr;
     ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
@@ -1790,6 +1814,7 @@ private:
     std::atomic_bool temperaturePauseFlag_{false};
     int temperatureRequestId_ = 0;
     int precision_ = kDefaultPrecision;
+    QString baseLoggingRules_;
     std::shared_ptr<std::atomic<int>> surfaceGridRequestId_ =
         std::make_shared<std::atomic<int>>(0);
     bool surfaceGridCalculationRunning_ = false;
@@ -6248,11 +6273,12 @@ int main(int argc, char *argv[]) {
 
     BinarySystemParameters parameters{};
     int precision = kDefaultPrecision;
+    const QString baseLoggingRules = QString::fromLocal8Bit(qgetenv("QT_LOGGING_RULES"));
     bool enableRadiationLog = isSolarRadiationLoggingEnabledFromEnvironment();
     const ArgumentsParseResult argsResult =
         parseParametersFromArguments(app, output, parameters, precision, enableRadiationLog);
     if (enableRadiationLog) {
-        enableSolarRadiationLogging();
+        setSolarRadiationLoggingEnabled(baseLoggingRules, true);
     }
 
     switch (argsResult) {
@@ -6269,7 +6295,7 @@ int main(int argc, char *argv[]) {
         break;
     }
 
-    SolarCalculatorWidget widget(precision);
+    SolarCalculatorWidget widget(precision, baseLoggingRules, enableRadiationLog);
     widget.setWindowTitle(QStringLiteral("Калькулятор солнечной постоянной"));
     widget.show();
 
