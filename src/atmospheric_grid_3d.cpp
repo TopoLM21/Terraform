@@ -11,6 +11,79 @@ constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
 constexpr int kDefaultLayerCount = 12;
 constexpr double kDefaultBottomLayerThicknessMeters = 100.0;
+constexpr double kEpsilonHeightMeters = 1e-6;
+
+double lerp(double a, double b, double t) {
+    return a + (b - a) * t;
+}
+
+AtmosphericLayerState interpolateLayerState(const QVector<AtmosphericLayerState> &layers,
+                                            double targetHeightMeters,
+                                            double targetThicknessMeters) {
+    AtmosphericLayerState result;
+    if (layers.isEmpty()) {
+        return result;
+    }
+
+    int upperIndex = 0;
+    while (upperIndex < layers.size() &&
+           layers.at(upperIndex).heightMeters() < targetHeightMeters) {
+        ++upperIndex;
+    }
+
+    int lowerIndex = upperIndex;
+    if (upperIndex <= 0) {
+        lowerIndex = 0;
+        upperIndex = 0;
+    } else if (upperIndex >= layers.size()) {
+        lowerIndex = layers.size() - 1;
+        upperIndex = layers.size() - 1;
+    } else {
+        lowerIndex = upperIndex - 1;
+    }
+
+    const AtmosphericLayerState &lower = layers.at(lowerIndex);
+    const AtmosphericLayerState &upper = layers.at(upperIndex);
+    const double lowerHeight = lower.heightMeters();
+    const double upperHeight = upper.heightMeters();
+    const double heightSpan = qMax(kEpsilonHeightMeters, upperHeight - lowerHeight);
+    const double t = qBound(0.0, (targetHeightMeters - lowerHeight) / heightSpan, 1.0);
+
+    const auto perMeter = [](double value, double thickness) -> double {
+        return (thickness > 0.0) ? (value / thickness) : 0.0;
+    };
+
+    const double heatCapacityPerMeter =
+        lerp(perMeter(lower.heatCapacityJPerM2K(), lower.thicknessMeters()),
+             perMeter(upper.heatCapacityJPerM2K(), upper.thicknessMeters()),
+             t);
+    const double tauSwPerMeter =
+        lerp(perMeter(lower.opticalDepthShortwave(), lower.thicknessMeters()),
+             perMeter(upper.opticalDepthShortwave(), upper.thicknessMeters()),
+             t);
+    const double tauLwPerMeter =
+        lerp(perMeter(lower.opticalDepthLongwave(), lower.thicknessMeters()),
+             perMeter(upper.opticalDepthLongwave(), upper.thicknessMeters()),
+             t);
+
+    const double mixingCoefficient =
+        lerp(lower.convectionMixingCoefficient(), upper.convectionMixingCoefficient(), t);
+
+    result.setTemperatureKelvin(
+        lerp(lower.temperatureKelvin(), upper.temperatureKelvin(), t));
+    result.setPressureAtm(lerp(lower.pressureAtm(), upper.pressureAtm(), t));
+    result.setDensityKgPerM3(lerp(lower.densityKgPerM3(), upper.densityKgPerM3(), t));
+    result.setWindUMps(lerp(lower.windUMps(), upper.windUMps(), t));
+    result.setWindVMps(lerp(lower.windVMps(), upper.windVMps(), t));
+    // Теплоёмкость и оптическая толщина масштабируются по толщине слоя.
+    result.setHeatCapacityJPerM2K(heatCapacityPerMeter * targetThicknessMeters);
+    result.setOpticalDepthShortwave(tauSwPerMeter * targetThicknessMeters);
+    result.setOpticalDepthLongwave(tauLwPerMeter * targetThicknessMeters);
+    result.setConvectionMixingCoefficient(mixingCoefficient);
+    result.setConvectionEnabled(mixingCoefficient > 0.0);
+
+    return result;
+}
 
 double greenhouseMassFraction(const AtmosphereComposition &composition) {
     const auto gases = availableGases();
@@ -100,6 +173,10 @@ int AtmosphericGrid3D::layerCount() const {
     return layerCount_;
 }
 
+double AtmosphericGrid3D::minTopPressureAtm() const {
+    return minTopPressureAtm_;
+}
+
 QVector<AtmosphericColumn> &AtmosphericGrid3D::columns() {
     return columns_;
 }
@@ -116,6 +193,7 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
                                   int layerCount,
                                   double minBottomLayerThicknessMeters,
                                   double minTopPressureAtm) {
+    minTopPressureAtm_ = minTopPressureAtm;
     const double surfacePressureAtm =
         composition.totalPressureAtm(planetMassEarths, radiusKm);
     const double gravity = surfaceGravityMps2(planetMassEarths, radiusKm);
@@ -209,4 +287,104 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
             layers[i].setConvectionMixingCoefficient(convectionMixingCoefficient);
         }
     }
+}
+
+bool AtmosphericGrid3D::updateLayerCountForTopPressure(double surfacePressureAtm,
+                                                       double minTopPressureAtm,
+                                                       double surfaceTemperatureKelvin,
+                                                       double gravityMps2,
+                                                       double specificGasConstant,
+                                                       double changeThresholdFraction) {
+    if (surfacePressureAtm <= 0.0 || minTopPressureAtm <= 0.0 ||
+        surfacePressureAtm <= minTopPressureAtm || surfaceTemperatureKelvin <= 0.0 ||
+        gravityMps2 <= 0.0 || specificGasConstant <= 0.0) {
+        return false;
+    }
+
+    minTopPressureAtm_ = minTopPressureAtm;
+    // Масштабная высота: H = R * T / g (см. resolveLayerCountForTopPressure).
+    const double scaleHeightMeters =
+        (specificGasConstant * surfaceTemperatureKelvin) / gravityMps2;
+    if (scaleHeightMeters <= 0.0) {
+        return false;
+    }
+
+    const double topHeightMeters =
+        scaleHeightMeters * qLn(surfacePressureAtm / minTopPressureAtm);
+    if (topHeightMeters <= 0.0) {
+        return false;
+    }
+
+    const int newLayerCount = resolveLayerCountForTopPressure(surfacePressureAtm,
+                                                              minTopPressureAtm,
+                                                              surfaceTemperatureKelvin,
+                                                              gravityMps2,
+                                                              specificGasConstant);
+    if (newLayerCount <= 0) {
+        return false;
+    }
+
+    auto relativeChange = [](double value, double previous) -> double {
+        return (previous > 0.0) ? qAbs(value - previous) / previous : 0.0;
+    };
+
+    const double scaleHeightDelta =
+        relativeChange(scaleHeightMeters, lastScaleHeightMeters_);
+    const double surfacePressureDelta =
+        relativeChange(surfacePressureAtm, lastSurfacePressureAtm_);
+    const double topHeightDelta =
+        relativeChange(topHeightMeters, lastTopHeightMeters_);
+
+    const bool hasBaseline =
+        lastScaleHeightMeters_ > 0.0 && lastSurfacePressureAtm_ > 0.0 &&
+        lastTopHeightMeters_ > 0.0;
+    const bool thresholdExceeded = (changeThresholdFraction <= 0.0)
+        ? true
+        : (!hasBaseline ||
+           scaleHeightDelta > changeThresholdFraction ||
+           surfacePressureDelta > changeThresholdFraction ||
+           topHeightDelta > changeThresholdFraction);
+
+    lastScaleHeightMeters_ = scaleHeightMeters;
+    lastSurfacePressureAtm_ = surfacePressureAtm;
+    lastTopHeightMeters_ = topHeightMeters;
+
+    if (!thresholdExceeded || columns_.isEmpty()) {
+        return false;
+    }
+
+    rebuildLayersWithInterpolation(newLayerCount, topHeightMeters);
+    return true;
+}
+
+void AtmosphericGrid3D::rebuildLayersWithInterpolation(int newLayerCount,
+                                                       double topHeightMeters) {
+    if (newLayerCount <= 0 || topHeightMeters <= 0.0) {
+        return;
+    }
+
+    const double layerThickness =
+        topHeightMeters / static_cast<double>(newLayerCount);
+    if (layerThickness <= 0.0) {
+        return;
+    }
+
+    for (auto &column : columns_) {
+        const QVector<AtmosphericLayerState> oldLayers = column.layers();
+        column.resize(newLayerCount);
+        auto &layers = column.layers();
+        double bottomEdgeMeters = 0.0;
+        for (int i = 0; i < newLayerCount; ++i) {
+            const double heightMeters = bottomEdgeMeters + layerThickness * 0.5;
+            bottomEdgeMeters += layerThickness;
+
+            AtmosphericLayerState newLayer =
+                interpolateLayerState(oldLayers, heightMeters, layerThickness);
+            newLayer.setHeightMeters(heightMeters);
+            newLayer.setThicknessMeters(layerThickness);
+            layers[i] = newLayer;
+        }
+    }
+
+    layerCount_ = newLayerCount;
 }
