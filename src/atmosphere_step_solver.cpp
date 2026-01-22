@@ -1,5 +1,6 @@
 #include "atmosphere_step_solver.h"
 
+#include "atmospheric_thermodynamics.h"
 #include "surface_atmosphere_coupler.h"
 
 #include <QtCore/QLoggingCategory>
@@ -14,6 +15,8 @@ AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composit
                                            bool isRetrograde)
     : radiationSolver_(timeStepSeconds)
     , convectiveSolver_(composition, gravityMps2)
+    , gravityMps2_(gravityMps2)
+    , rSpecific_(AtmosphericThermodynamics::specificGasConstant(composition))
     , timeStepSeconds_(timeStepSeconds)
     , dayLengthSeconds_(dayLengthSeconds)
     , isRetrograde_(isRetrograde) {}
@@ -24,6 +27,36 @@ const SurfaceMaterial &AtmosphereStepSolver::materialForPoint(
     const QString &materialId) const {
     const auto it = materialsById.constFind(materialId);
     return it != materialsById.cend() ? *it : defaultMaterial;
+}
+
+void AtmosphereStepSolver::updateLayerPressures(double surfacePressureAtm,
+                                                QVector<AtmosphericLayerState> &layers) const {
+    if (surfacePressureAtm <= 0.0 || rSpecific_ <= 0.0 || gravityMps2_ <= 0.0) {
+        return;
+    }
+
+    double pressureAtmAtBottom = surfacePressureAtm;
+    for (int layerIndex = 0; layerIndex < layers.size(); ++layerIndex) {
+        const double layerTemperatureKelvin = layers.at(layerIndex).temperatureKelvin();
+        const double layerThicknessMeters = layers.at(layerIndex).thicknessMeters();
+        double layerPressureAtm = 0.0;
+        if (pressureAtmAtBottom > 0.0 && layerTemperatureKelvin > 0.0 &&
+            layerThicknessMeters > 0.0) {
+            // Масштабная высота: H = R_specific * T / g, где
+            // R_specific [Дж/(кг·К)], T [К], g [м/с²], H [м].
+            const double scaleHeightMeters =
+                (rSpecific_ * layerTemperatureKelvin) / gravityMps2_;
+            if (scaleHeightMeters > 0.0) {
+                // Гидростатика: dP/dz = -P/H ⇒ P(z+dz) = P(z) * exp(-dz/H).
+                // Давление в середине слоя: P_mid = P_bottom * exp(-0.5 * dz / H) [атм].
+                layerPressureAtm =
+                    pressureAtmAtBottom * qExp(-0.5 * layerThicknessMeters / scaleHeightMeters);
+                pressureAtmAtBottom =
+                    pressureAtmAtBottom * qExp(-layerThicknessMeters / scaleHeightMeters);
+            }
+        }
+        layers[layerIndex].setPressureAtm(layerPressureAtm);
+    }
 }
 
 void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
@@ -88,6 +121,8 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         point.surfaceAirFluxWPerM2 = surfaceAirFluxWPerM2;
         // Поток в грунт учитывает радиацию и обмен с воздухом.
         point.subsurfaceFluxWPerM2 += -surfaceAirFluxWPerM2;
+
+        updateLayerPressures(point.pressureAtm, layers);
 
         if (i == logPointIndex) {
             qCInfo(atmosphereProfileLog) << "Atmosphere profile (layered step)"
