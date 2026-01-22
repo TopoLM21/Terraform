@@ -772,7 +772,7 @@ struct SurfaceGridComputationResult {
 
 class SolarCalculatorWidget : public QWidget {
 public:
-    explicit SolarCalculatorWidget(int precision, QWidget *parent = nullptr)
+    explicit SolarCalculatorWidget(int precision, bool enableRadiationLog, QWidget *parent = nullptr)
         : QWidget(parent), precision_(precision) {
         auto *validator = new QDoubleValidator(0.0, std::numeric_limits<double>::max(), 10, this);
         validator->setNotation(QDoubleValidator::StandardNotation);
@@ -939,7 +939,7 @@ public:
                            "По умолчанию точная модель включена."));
         debugLogCheckBox_ = new QCheckBox(
             QStringLiteral("Показывать отладочные логи в консоли"), this);
-        debugLogCheckBox_->setChecked(false);
+        debugLogCheckBox_->setChecked(enableRadiationLog);
         debugLogCheckBox_->setToolTip(
             QStringLiteral("Выводит подробные расчётные параметры в консоль/дебаг.\n"
                            "По умолчанию вывод отключён."));
@@ -6286,7 +6286,7 @@ int main(int argc, char *argv[]) {
     bool enableRadiationLog = isSolarRadiationLoggingEnabledFromEnvironment();
     const ArgumentsParseResult argsResult =
         parseParametersFromArguments(app, output, parameters, precision, enableRadiationLog);
-    if (argsResult != ArgumentsParseResult::None && enableRadiationLog) {
+    if (enableRadiationLog) {
         enableSolarRadiationLogging();
     }
 
@@ -6304,7 +6304,7 @@ int main(int argc, char *argv[]) {
         break;
     }
 
-    SolarCalculatorWidget widget(precision);
+    SolarCalculatorWidget widget(precision, enableRadiationLog);
     widget.setWindowTitle(QStringLiteral("Калькулятор солнечной постоянной"));
     widget.show();
 
