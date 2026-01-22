@@ -38,12 +38,16 @@ private:
     const SurfaceMaterial &materialForPoint(const QHash<QString, SurfaceMaterial> &materialsById,
                                             const SurfaceMaterial &defaultMaterial,
                                             const QString &materialId) const;
+    void updateLayerPressures(double surfacePressureAtm,
+                              QVector<AtmosphericLayerState> &layers) const;
 
     LayeredRadiationSolver radiationSolver_;
     ConvectiveAdjustmentSolver convectiveSolver_;
     AtmosphericDynamicsSolver dynamicsSolver_;
     AtmosphericAdvectionSolver advectionSolver_;
     VerticalWindMixingSolver verticalWindMixingSolver_;
+    double gravityMps2_ = 0.0;
+    double rSpecific_ = 0.0;
     double timeStepSeconds_ = 0.0;
     double dayLengthSeconds_ = 0.0;
     bool isRetrograde_ = false;
