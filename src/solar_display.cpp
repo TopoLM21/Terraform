@@ -199,6 +199,7 @@ constexpr int kRoleAtmosphereDisabled = Qt::UserRole + 41;
 constexpr int kRoleAtmosphereBottomLayerThickness = Qt::UserRole + 42;
 constexpr int kRoleMinDenseAtmosphereTemperature = Qt::UserRole + 43;
 constexpr int kRoleVerticalWindMixingCoefficient = Qt::UserRole + 44;
+constexpr int kRoleMinTopPressureAtm = Qt::UserRole + 45;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -215,6 +216,7 @@ constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
 constexpr double kDefaultAtmosphereBottomLayerThicknessMeters = 100.0;
 constexpr double kDefaultVerticalWindMixingCoefficientKz = 1.0;
+constexpr double kDefaultMinTopPressureAtm = 0.0;
 // Один реальный секундный тик соответствует часу системного времени (1/24 дня).
 constexpr double kStarSystemDaysPerSecond = 1.0 / 24.0;
 constexpr int kKeplerIterations = 8;
@@ -1049,6 +1051,20 @@ public:
                     planetComboBox_->setItemData(currentIndex,
                                                  meters,
                                                  kRoleAtmosphereBottomLayerThickness);
+                    updateSurfaceGridTemperatures();
+                });
+        connect(atmosphereWidget_, &AtmosphereWidget::minTopPressureChanged, this,
+                [this](double minTopPressureAtm) {
+                    if (!planetComboBox_) {
+                        return;
+                    }
+                    const int currentIndex = planetComboBox_->currentIndex();
+                    if (currentIndex < 0) {
+                        return;
+                    }
+                    planetComboBox_->setItemData(currentIndex,
+                                                 minTopPressureAtm,
+                                                 kRoleMinTopPressureAtm);
                     updateSurfaceGridTemperatures();
                 });
         connect(atmosphereWidget_, &AtmosphereWidget::verticalWindMixingCoefficientChanged, this,
@@ -2840,11 +2856,16 @@ private:
         const QVariant compositionValue = planetComboBox_->currentData(kRoleAtmosphere);
         const QVariant bottomLayerValue =
             planetComboBox_->currentData(kRoleAtmosphereBottomLayerThickness);
+        const QVariant minTopPressureValue =
+            planetComboBox_->currentData(kRoleMinTopPressureAtm);
         const QVariant mixingValue =
             planetComboBox_->currentData(kRoleVerticalWindMixingCoefficient);
         const double bottomLayerThickness = bottomLayerValue.isValid()
             ? bottomLayerValue.toDouble()
             : kDefaultAtmosphereBottomLayerThicknessMeters;
+        const double minTopPressureAtm = minTopPressureValue.isValid()
+            ? minTopPressureValue.toDouble()
+            : kDefaultMinTopPressureAtm;
         const double verticalWindMixingCoefficient = mixingValue.isValid()
             ? mixingValue.toDouble()
             : kDefaultVerticalWindMixingCoefficientKz;
@@ -2852,6 +2873,11 @@ private:
             planetComboBox_->setItemData(index,
                                          bottomLayerThickness,
                                          kRoleAtmosphereBottomLayerThickness);
+        }
+        if (planetComboBox_ && index >= 0 && !minTopPressureValue.isValid()) {
+            planetComboBox_->setItemData(index,
+                                         minTopPressureAtm,
+                                         kRoleMinTopPressureAtm);
         }
         if (planetComboBox_ && index >= 0 && !mixingValue.isValid()) {
             planetComboBox_->setItemData(index,
@@ -2861,12 +2887,14 @@ private:
         if (!compositionValue.isValid()) {
             atmosphereWidget_->setComposition(AtmosphereComposition{});
             atmosphereWidget_->setMinBottomLayerThicknessMeters(bottomLayerThickness);
+            atmosphereWidget_->setMinTopPressureAtm(minTopPressureAtm);
             atmosphereWidget_->setVerticalWindMixingCoefficient(verticalWindMixingCoefficient);
             atmosphereWidget_->setEnabled(!atmosphereDisabled);
             return;
         }
         atmosphereWidget_->setComposition(compositionValue.value<AtmosphereComposition>());
         atmosphereWidget_->setMinBottomLayerThicknessMeters(bottomLayerThickness);
+        atmosphereWidget_->setMinTopPressureAtm(minTopPressureAtm);
         atmosphereWidget_->setVerticalWindMixingCoefficient(verticalWindMixingCoefficient);
         atmosphereWidget_->setEnabled(!atmosphereDisabled);
     }
@@ -2929,6 +2957,18 @@ private:
             return 0.0;
         }
         return qMax(0.0, temperatureValue.toDouble());
+    }
+
+    double currentMinTopPressureAtm() const {
+        if (!planetComboBox_) {
+            return kDefaultMinTopPressureAtm;
+        }
+        const QVariant pressureValue =
+            planetComboBox_->currentData(kRoleMinTopPressureAtm);
+        if (!pressureValue.isValid()) {
+            return kDefaultMinTopPressureAtm;
+        }
+        return qMax(0.0, pressureValue.toDouble());
     }
 
     int latitudeStepDegrees() const {
@@ -3086,6 +3126,9 @@ private:
         planetComboBox_->setItemData(index,
                                      planet.minBottomLayerThicknessMeters,
                                      kRoleAtmosphereBottomLayerThickness);
+        planetComboBox_->setItemData(index,
+                                     planet.minTopPressureAtm,
+                                     kRoleMinTopPressureAtm);
         planetComboBox_->setItemData(index,
                                      planet.minDenseAtmosphereTemperatureK,
                                      kRoleMinDenseAtmosphereTemperature);
@@ -3356,6 +3399,8 @@ private:
             const AtmosphereComposition composition = atmosphereInput->composition(false);
             const double minBottomLayerThickness =
                 atmosphereInput->minBottomLayerThicknessMeters();
+            const double minTopPressureAtm =
+                atmosphereInput->minTopPressureAtm();
             const double verticalWindMixingCoefficient =
                 atmosphereInput->verticalWindMixingCoefficient();
             StellarParameters primaryStar{1.0, 5772.0, 1.0};
@@ -3387,6 +3432,7 @@ private:
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
             preset.minBottomLayerThicknessMeters = minBottomLayerThickness;
+            preset.minTopPressureAtm = minTopPressureAtm;
             preset.minDenseAtmosphereTemperatureK = minDenseAtmosphereTemperatureK;
             preset.verticalWindMixingCoefficient = verticalWindMixingCoefficient;
             if (existingIndex >= 0) {
@@ -3483,6 +3529,9 @@ private:
                 planetComboBox_->setItemData(existingIndex,
                                              preset.minBottomLayerThicknessMeters,
                                              kRoleAtmosphereBottomLayerThickness);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.minTopPressureAtm,
+                                             kRoleMinTopPressureAtm);
                 planetComboBox_->setItemData(existingIndex,
                                              preset.minDenseAtmosphereTemperatureK,
                                              kRoleMinDenseAtmosphereTemperature);
@@ -5181,7 +5230,7 @@ private:
                                                baseTemperatureKelvin,
                                                0,
                                                currentAtmosphereBottomLayerThicknessMeters(),
-                                               0.0);
+                                               currentMinTopPressureAtm());
 
         SurfaceGridComputationInput input;
         input.grid = surfaceGrid_;

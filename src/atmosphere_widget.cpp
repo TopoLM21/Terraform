@@ -87,6 +87,15 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     minBottomLayerThicknessSpinBox_->setValue(100.0);
     minBottomLayerThicknessSpinBox_->setToolTip(QStringLiteral(
         "Минимальная толщина нижнего атмосферного слоя для уплотнения сетки у поверхности."));
+    minTopPressureSpinBox_ = new QDoubleSpinBox(this);
+    minTopPressureSpinBox_->setRange(0.0, 10.0);
+    minTopPressureSpinBox_->setDecimals(3);
+    minTopPressureSpinBox_->setSingleStep(0.05);
+    minTopPressureSpinBox_->setSuffix(QStringLiteral(" атм"));
+    minTopPressureSpinBox_->setValue(0.0);
+    minTopPressureSpinBox_->setToolTip(QStringLiteral(
+        "Целевое давление на верхней границе атмосферы: для сверхплотных атмосфер "
+        "помогает увеличить число слоёв и задать более реалистичную высоту профиля."));
     verticalWindMixingSpinBox_ = new QDoubleSpinBox(this);
     verticalWindMixingSpinBox_->setRange(0.0, 1000.0);
     verticalWindMixingSpinBox_->setDecimals(2);
@@ -102,6 +111,7 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     summaryLayout->addRow(QStringLiteral("Средняя молекулярная масса (г/моль):"),
                           meanMolarMassLabel_);
     summaryLayout->addRow(QStringLiteral("Мин. толщина нижнего слоя:"), minBottomLayerThicknessSpinBox_);
+    summaryLayout->addRow(QStringLiteral("Давление на верхней границе:"), minTopPressureSpinBox_);
     summaryLayout->addRow(QStringLiteral("Kz (вертикальное перемешивание):"),
                           verticalWindMixingSpinBox_);
 
@@ -143,6 +153,12 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
             [this](double value) {
                 emit minBottomLayerThicknessChanged(value);
             });
+    connect(minTopPressureSpinBox_,
+            QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this,
+            [this](double value) {
+                emit minTopPressureChanged(value);
+            });
     connect(verticalWindMixingSpinBox_,
             QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this,
@@ -168,6 +184,18 @@ void AtmosphereWidget::setMinBottomLayerThicknessMeters(double meters) {
     }
     const QSignalBlocker blocker(minBottomLayerThicknessSpinBox_);
     minBottomLayerThicknessSpinBox_->setValue(meters);
+}
+
+double AtmosphereWidget::minTopPressureAtm() const {
+    return minTopPressureSpinBox_ ? minTopPressureSpinBox_->value() : 0.0;
+}
+
+void AtmosphereWidget::setMinTopPressureAtm(double pressureAtm) {
+    if (!minTopPressureSpinBox_) {
+        return;
+    }
+    const QSignalBlocker blocker(minTopPressureSpinBox_);
+    minTopPressureSpinBox_->setValue(pressureAtm);
 }
 
 double AtmosphereWidget::verticalWindMixingCoefficient() const {

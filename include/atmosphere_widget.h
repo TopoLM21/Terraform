@@ -22,12 +22,15 @@ public:
     AtmosphereComposition composition(bool includeZeroes = false) const;
     double minBottomLayerThicknessMeters() const;
     void setMinBottomLayerThicknessMeters(double meters);
+    double minTopPressureAtm() const;
+    void setMinTopPressureAtm(double pressureAtm);
     double verticalWindMixingCoefficient() const;
     void setVerticalWindMixingCoefficient(double coefficient);
 
 signals:
     void compositionChanged(const AtmosphereComposition &composition);
     void minBottomLayerThicknessChanged(double meters);
+    void minTopPressureChanged(double pressureAtm);
     void verticalWindMixingCoefficientChanged(double coefficient);
 
 private:
@@ -47,6 +50,7 @@ private:
     QLabel *pressureLabel_ = nullptr;
     QLabel *meanMolarMassLabel_ = nullptr;
     QDoubleSpinBox *minBottomLayerThicknessSpinBox_ = nullptr;
+    QDoubleSpinBox *minTopPressureSpinBox_ = nullptr;
     QDoubleSpinBox *verticalWindMixingSpinBox_ = nullptr;
     QVector<GasSpec> gases_;
     double planetMassEarths_ = 0.0;
