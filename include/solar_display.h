@@ -16,6 +16,7 @@ enum class ArgumentsParseResult {
 ArgumentsParseResult parseParametersFromArguments(const QCoreApplication &app,
                                                   QTextStream &output,
                                                   BinarySystemParameters &parameters,
-                                                  int &precision);
+                                                  int &precision,
+                                                  bool &enableRadiationLog);
 void promptAndComputeSolarConstant(QTextStream &input, QTextStream &output,
                                    int precision);
