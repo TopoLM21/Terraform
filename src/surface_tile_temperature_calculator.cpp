@@ -84,9 +84,17 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         // поэтому T_surface = T_eq * ((τ_surface + 2/3)/(τ_em + 2/3))^(1/4).
         ? std::pow((tauSurface + kTwoThirds) / (tauEmission + kTwoThirds), 0.25)
         : 1.0;
+    const double maxGreenhouseFactor = 2.5;
+    const double limitedGreenhouseFactor =
+        (greenhouseFactor <= 1.0)
+            ? greenhouseFactor
+            : 1.0 + (maxGreenhouseFactor - 1.0)
+                * std::tanh((greenhouseFactor - 1.0) / (maxGreenhouseFactor - 1.0));
+    // Ограничиваем начальный парниковый множитель мягкой компрессией:
+    // это лишь стартовая инициализация, реальные значения должна догнать динамика.
     const double globalTemperature =
         qMax(defaults.minTemperatureKelvin,
-             baseEquilibriumTemperature * greenhouseFactor);
+             baseEquilibriumTemperature * limitedGreenhouseFactor);
     const double meanInsolation =
         settings.hasSolarConstant ? settings.segmentSolarConstant * kMeanInsolationFactor : 0.0;
 
