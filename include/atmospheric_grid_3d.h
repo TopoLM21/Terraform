@@ -10,6 +10,7 @@ public:
     void resizeColumns(int columnCount, int layerCount = 0);
     int columnCount() const;
     int layerCount() const;
+    double minTopPressureAtm() const;
 
     QVector<AtmosphericColumn> &columns();
     const QVector<AtmosphericColumn> &columns() const;
@@ -23,7 +24,20 @@ public:
                     double minBottomLayerThicknessMeters,
                     double minTopPressureAtm = 0.0);
 
+    bool updateLayerCountForTopPressure(double surfacePressureAtm,
+                                        double minTopPressureAtm,
+                                        double surfaceTemperatureKelvin,
+                                        double gravityMps2,
+                                        double specificGasConstant,
+                                        double changeThresholdFraction);
+
 private:
+    void rebuildLayersWithInterpolation(int newLayerCount, double topHeightMeters);
+
     QVector<AtmosphericColumn> columns_;
     int layerCount_ = 0;
+    double minTopPressureAtm_ = 0.0;
+    double lastScaleHeightMeters_ = 0.0;
+    double lastSurfacePressureAtm_ = 0.0;
+    double lastTopHeightMeters_ = 0.0;
 };

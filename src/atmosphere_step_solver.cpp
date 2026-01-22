@@ -66,11 +66,51 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
     if (processedCount <= 0) {
         return;
     }
+    constexpr double kLayerRegridThresholdFraction = 0.1;
     verticalWindMixingSolver_.setMixingCoefficient(input.verticalWindMixingCoefficientKz);
     int logPointIndex = input.logPointIndex;
     if (logPointIndex < 0 || logPointIndex >= processedCount) {
         // Если индекс не задан, пишем лог для первой ячейки: так проще сравнивать шаги.
         logPointIndex = 0;
+    }
+
+    const double minTopPressureAtm = input.atmosphereGrid.minTopPressureAtm();
+    if (minTopPressureAtm > 0.0) {
+        double meanSurfacePressureAtm = 0.0;
+        double meanSurfaceTemperatureKelvin = 0.0;
+        int pressureSamples = 0;
+        int temperatureSamples = 0;
+        for (int i = 0; i < processedCount; ++i) {
+            const auto &point = input.surfaceGrid.points().at(i);
+            if (point.pressureAtm > 0.0) {
+                meanSurfacePressureAtm += point.pressureAtm;
+                ++pressureSamples;
+            }
+
+            const AtmosphericColumn &column = input.atmosphereGrid.columns().at(i);
+            double surfaceTemperatureKelvin = 0.0;
+            if (!column.layers().isEmpty()) {
+                surfaceTemperatureKelvin = column.layers().first().temperatureKelvin();
+            } else if (point.airTemperatureK > 0.0) {
+                surfaceTemperatureKelvin = point.airTemperatureK;
+            } else {
+                surfaceTemperatureKelvin = point.temperatureK;
+            }
+            if (surfaceTemperatureKelvin > 0.0) {
+                meanSurfaceTemperatureKelvin += surfaceTemperatureKelvin;
+                ++temperatureSamples;
+            }
+        }
+
+        if (pressureSamples > 0 && temperatureSamples > 0) {
+            input.atmosphereGrid.updateLayerCountForTopPressure(
+                meanSurfacePressureAtm / static_cast<double>(pressureSamples),
+                minTopPressureAtm,
+                meanSurfaceTemperatureKelvin / static_cast<double>(temperatureSamples),
+                gravityMps2_,
+                rSpecific_,
+                kLayerRegridThresholdFraction);
+        }
     }
 
     // Последовательность шага атмосферы:
