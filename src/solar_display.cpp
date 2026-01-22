@@ -87,6 +87,27 @@
 namespace {
 Q_LOGGING_CATEGORY(solarRadiationLog, "solar.radiation")
 
+QString solarLoggingBaseRules() {
+    static const QString baseRules = QString::fromLocal8Bit(qgetenv("QT_LOGGING_RULES"));
+    return baseRules;
+}
+
+void setSolarDebugLoggingEnabled(bool enabled) {
+    QString rules = solarLoggingBaseRules();
+    if (!rules.isEmpty()) {
+        rules.append('\n');
+    }
+    const QString flagValue = enabled ? QStringLiteral("true") : QStringLiteral("false");
+    rules.append(QStringLiteral("solar.radiation.info=%1\n"
+                                "solar.radiation.debug=%1\n"
+                                "solar.atmosphere.profile.info=%1\n"
+                                "solar.atmosphere.profile.debug=%1\n"
+                                "solar.atmosphere.vertical_mixing.info=%1\n"
+                                "solar.atmosphere.vertical_mixing.debug=%1")
+                     .arg(flagValue));
+    QLoggingCategory::setFilterRules(rules);
+}
+
 bool isSolarRadiationLoggingEnabledFromEnvironment() {
     if (!qEnvironmentVariableIsSet("SOLAR_RADIATION_LOG")) {
         return false;
@@ -100,12 +121,7 @@ bool isSolarRadiationLoggingEnabledFromEnvironment() {
 }
 
 void enableSolarRadiationLogging() {
-    QString rules = QString::fromLocal8Bit(qgetenv("QT_LOGGING_RULES"));
-    if (!rules.isEmpty()) {
-        rules.append('\n');
-    }
-    rules.append(QStringLiteral("solar.radiation.info=true\nsolar.radiation.debug=true"));
-    QLoggingCategory::setFilterRules(rules);
+    setSolarDebugLoggingEnabled(true);
 }
 
 double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
@@ -921,6 +937,14 @@ public:
             QStringLiteral("Уточняет передачу коротковолнового и длинноволнового излучения\n"
                            "через атмосферу в многослойной аппроксимации.\n"
                            "По умолчанию точная модель включена."));
+        debugLogCheckBox_ = new QCheckBox(
+            QStringLiteral("Показывать отладочные логи в консоли"), this);
+        debugLogCheckBox_->setChecked(false);
+        debugLogCheckBox_->setToolTip(
+            QStringLiteral("Выводит подробные расчётные параметры в консоль/дебаг.\n"
+                           "По умолчанию вывод отключён."));
+        debugLogEnabled_ = debugLogCheckBox_->isChecked();
+        setSolarDebugLoggingEnabled(debugLogEnabled_);
         modeIllustrationWidget_ = new ModeIllustrationWidget(this);
         modeIllustrationWidget_->setRotationMode(
             static_cast<RotationMode>(rotationModeComboBox_->currentData().toInt()));
@@ -983,6 +1007,7 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
         planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
         planetControlsLayout->addRow(QString(), advancedRadiationCheckBox_);
+        planetControlsLayout->addRow(QString(), debugLogCheckBox_);
         planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
 
         auto *planetActionsLayout = new QHBoxLayout();
@@ -1466,6 +1491,11 @@ public:
             updateSurfaceGridTemperatures();
         });
 
+        connect(debugLogCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+            debugLogEnabled_ = checked;
+            setSolarDebugLoggingEnabled(checked);
+        });
+
         connect(temperaturePauseButton_, &QPushButton::clicked, this, [this]() {
             const bool shouldPause = !temperaturePauseFlag_.load();
             temperaturePauseFlag_.store(shouldPause);
@@ -1679,6 +1709,9 @@ private:
     }
 
     bool shouldLogRadiationForPoint(int pointIndex) const {
+        if (!debugLogEnabled_) {
+            return false;
+        }
         if (surfaceGrid_.points().isEmpty()) {
             return false;
         }
@@ -1733,6 +1766,7 @@ private:
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
     QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
     QCheckBox *advancedRadiationCheckBox_ = nullptr;
+    QCheckBox *debugLogCheckBox_ = nullptr;
     ModeIllustrationWidget *modeIllustrationWidget_ = nullptr;
     QPushButton *addPlanetButton_ = nullptr;
     QPushButton *deletePlanetButton_ = nullptr;
@@ -1758,6 +1792,7 @@ private:
     QComboBox *surfaceMapModeComboBox_ = nullptr;
     QPushButton *surfaceViewToggleButton_ = nullptr;
     QCheckBox *surfaceMarkupCheckBox_ = nullptr;
+    bool debugLogEnabled_ = false;
     QLabel *surfaceCalculationLabel_ = nullptr;
     QProgressBar *surfaceCalculationProgress_ = nullptr;
     QSpinBox *subsurfaceLayersSpinBox_ = nullptr;
@@ -6251,7 +6286,7 @@ int main(int argc, char *argv[]) {
     bool enableRadiationLog = isSolarRadiationLoggingEnabledFromEnvironment();
     const ArgumentsParseResult argsResult =
         parseParametersFromArguments(app, output, parameters, precision, enableRadiationLog);
-    if (enableRadiationLog) {
+    if (argsResult != ArgumentsParseResult::None && enableRadiationLog) {
         enableSolarRadiationLogging();
     }
 
