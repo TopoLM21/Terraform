@@ -194,10 +194,24 @@ void SurfacePointStatusDialog::setAtmosphereProfile(const AtmosphericColumn *col
     }
 
     const auto &layers = column->layers();
+    const QString invalidMarker = QStringLiteral("—");
+    bool hasValidLayer = false;
+    for (const auto &layer : layers) {
+        if (layer.temperatureKelvin() > 0.0 && layer.pressureAtm() > 0.0) {
+            hasValidLayer = true;
+            break;
+        }
+    }
+    if (!hasValidLayer) {
+        clearAtmosphereProfile();
+        return;
+    }
+
     profileTable_->setRowCount(layers.size());
     for (int i = 0; i < layers.size(); ++i) {
         const AtmosphericLayerState &layer = layers.at(i);
         const double heightKm = layer.heightMeters() / 1000.0;
+        const bool isValidLayer = layer.temperatureKelvin() > 0.0 && layer.pressureAtm() > 0.0;
 
         auto *layerItem = new QTableWidgetItem(QString::number(i));
         layerItem->setFlags(layerItem->flags() & ~Qt::ItemIsEditable);
@@ -207,11 +221,13 @@ void SurfacePointStatusDialog::setAtmosphereProfile(const AtmosphericColumn *col
         heightItem->setFlags(heightItem->flags() & ~Qt::ItemIsEditable);
         profileTable_->setItem(i, 1, heightItem);
 
-        auto *temperatureItem = new QTableWidgetItem(formatNumber(layer.temperatureKelvin(), 2));
+        auto *temperatureItem = new QTableWidgetItem(
+            isValidLayer ? formatNumber(layer.temperatureKelvin(), 2) : invalidMarker);
         temperatureItem->setFlags(temperatureItem->flags() & ~Qt::ItemIsEditable);
         profileTable_->setItem(i, 2, temperatureItem);
 
-        auto *pressureItem = new QTableWidgetItem(formatNumber(layer.pressureAtm(), 4));
+        auto *pressureItem = new QTableWidgetItem(
+            isValidLayer ? formatNumber(layer.pressureAtm(), 4) : invalidMarker);
         pressureItem->setFlags(pressureItem->flags() & ~Qt::ItemIsEditable);
         profileTable_->setItem(i, 3, pressureItem);
     }
