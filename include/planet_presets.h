@@ -93,7 +93,7 @@ struct PlanetPreset {
     double binaryArgumentPericenterDegreesA = 0.0;
     double binaryArgumentPericenterDegreesB = 0.0;
     // Минимальная толщина нижнего атмосферного слоя (м) для уплотнения профиля.
-    double minBottomLayerThicknessMeters = 100.0;
+    double minBottomLayerThicknessMeters = 250.0;
     // Целевое давление на верхней границе атмосферы (атм), 0 — отключено.
     double minTopPressureAtm = 0.0;
     // Нижняя граница температуры для сверхплотных атмосфер (K), 0 — авто.

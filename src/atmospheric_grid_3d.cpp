@@ -11,7 +11,9 @@ namespace {
 constexpr double kEarthMassKg = 5.9722e24;
 constexpr double kGravitationalConstant = 6.67430e-11;
 constexpr int kDefaultLayerCount = 12;
-constexpr double kDefaultBottomLayerThicknessMeters = 100.0;
+constexpr double kMinBottomLayerThicknessMeters = 250.0;
+constexpr double kMaxBottomLayerThicknessMeters = 500.0;
+constexpr double kDefaultBottomLayerThicknessMeters = 250.0;
 double greenhouseMassFraction(const AtmosphereComposition &composition) {
     const auto gases = availableGases();
     QHash<QString, bool> isGreenhouse;
@@ -159,10 +161,14 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
     profileSettings.layerCount = resolvedLayerCount;
     profileSettings.useDryAdiabatic = true;
     profileSettings.minTopPressureAtm = minTopPressureAtm;
-    profileSettings.minBottomLayerThicknessMeters =
+    // Жёстко ограничиваем "обитаемый слой" 250–500 м как компромисс между
+    // стабильной визуализацией и физической точностью.
+    profileSettings.minBottomLayerThicknessMeters = qBound(
+        kMinBottomLayerThicknessMeters,
         (minBottomLayerThicknessMeters > 0.0)
             ? minBottomLayerThicknessMeters
-            : kDefaultBottomLayerThicknessMeters;
+            : kDefaultBottomLayerThicknessMeters,
+        kMaxBottomLayerThicknessMeters);
 
     const QVector<AtmosphericProfileLayer> profileLayers =
         initializer.buildProfile(profileSettings);
