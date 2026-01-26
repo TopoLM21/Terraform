@@ -5167,7 +5167,10 @@ private:
         if (massEarths > 0.0 && radiusKm > 0.0) {
             atmospherePressureAtm = atmosphere.totalPressureAtm(massEarths, radiusKm);
         }
-        const bool useAtmosphericModel = atmosphere.totalMassGigatons() > 0.0;
+        const double atmosphereMassGt = atmosphere.totalMassGigatons();
+        const double co2MassGt = atmosphere.massGigatons(QStringLiteral("co2"));
+        const double co2Share = atmosphereMassGt > 0.0 ? co2MassGt / atmosphereMassGt : 0.0;
+        const bool useAtmosphericModel = atmosphereMassGt > 0.0;
         const bool hasAtmospherePressure = atmospherePressureAtm > 0.0;
         const bool atmosphereEnabled = useAtmosphericModel || hasAtmospherePressure;
 
@@ -5183,11 +5186,11 @@ private:
             segmentSolarConstant * qMax(0.0, 1.0 - cloudAlbedo) / 4.0;
         const double effectiveTemperatureKelvin =
             std::pow(qMax(0.0, meanToaFlux) / kStefanBoltzmannConstant, 0.25);
+        const double minDenseAtmosphereTemperatureK =
+            currentMinDenseAtmosphereTemperatureKelvin();
         if (atmosphereEnabled && meanToaFlux > 0.0) {
             // Учитываем атмосферный парник уже в инициализации:
             // без этого плотные атмосферы могут «схлопнуться» в холодный режим на старте.
-            const double minDenseAtmosphereTemperatureK =
-                currentMinDenseAtmosphereTemperatureKelvin();
             stateDefaults->greenhouseOpacity =
                 computeLocalGreenhouseOpacity(atmosphere,
                                               stateDefaults->material,
@@ -5222,9 +5225,20 @@ private:
 
         // Базу берём из t_eff (или текущей средней поверхности), чтобы старт атмосферы
         // был синхронизирован с картой поверхности и не давал скачка при первом тике.
-        const double baseTemperatureKelvin =
+        double baseTemperatureKelvin =
             (effectiveTemperatureKelvin > 0.0) ? effectiveTemperatureKelvin
                                                : meanSurfaceTemperatureKelvin;
+        if (atmospherePressureAtm >= 0.1) {
+            // Для плотных атмосфер профиль должен стартовать не от t_eff (ТОА),
+            // а от нижней границы парникового прогрева, задаваемой давлением и составом.
+            const double denseAtmosphereBase =
+                denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                    atmospherePressureAtm,
+                                                    stateDefaults->greenhouseOpacity,
+                                                    co2Share,
+                                                    minDenseAtmosphereTemperatureK);
+            baseTemperatureKelvin = qMax(baseTemperatureKelvin, denseAtmosphereBase);
+        }
         surfaceGrid_.initializeAtmosphericGrid(atmosphere,
                                                massEarths,
                                                baseTemperatureKelvin,
