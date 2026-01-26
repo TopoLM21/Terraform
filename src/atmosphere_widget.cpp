@@ -80,11 +80,11 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     pressureLabel_ = new QLabel(QStringLiteral("—"), this);
     meanMolarMassLabel_ = new QLabel(QStringLiteral("—"), this);
     minBottomLayerThicknessSpinBox_ = new QDoubleSpinBox(this);
-    minBottomLayerThicknessSpinBox_->setRange(10.0, 10000.0);
+    minBottomLayerThicknessSpinBox_->setRange(250.0, 500.0);
     minBottomLayerThicknessSpinBox_->setDecimals(0);
     minBottomLayerThicknessSpinBox_->setSingleStep(10.0);
     minBottomLayerThicknessSpinBox_->setSuffix(QStringLiteral(" м"));
-    minBottomLayerThicknessSpinBox_->setValue(100.0);
+    minBottomLayerThicknessSpinBox_->setValue(250.0);
     minBottomLayerThicknessSpinBox_->setToolTip(QStringLiteral(
         "Минимальная толщина нижнего атмосферного слоя для уплотнения сетки у поверхности."));
     minTopPressureSpinBox_ = new QDoubleSpinBox(this);
