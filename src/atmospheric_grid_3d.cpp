@@ -123,6 +123,14 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
                                   double minBottomLayerThicknessMeters,
                                   double minTopPressureAtm) {
     minTopPressureAtm_ = minTopPressureAtm;
+    // Сохраняем фактический минимум толщины нижнего слоя, чтобы повторять
+    // «уплотнённую» геометрию при пересборке сетки.
+    minBottomLayerThicknessMeters_ = qBound(
+        kMinBottomLayerThicknessMeters,
+        (minBottomLayerThicknessMeters > 0.0)
+            ? minBottomLayerThicknessMeters
+            : kDefaultBottomLayerThicknessMeters,
+        kMaxBottomLayerThicknessMeters);
     const double surfacePressureAtm =
         composition.totalPressureAtm(planetMassEarths, radiusKm);
     const double gravity = surfaceGravityMps2(planetMassEarths, radiusKm);
@@ -163,12 +171,7 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
     profileSettings.minTopPressureAtm = minTopPressureAtm;
     // Жёстко ограничиваем "обитаемый слой" 250–500 м как компромисс между
     // стабильной визуализацией и физической точностью.
-    profileSettings.minBottomLayerThicknessMeters = qBound(
-        kMinBottomLayerThicknessMeters,
-        (minBottomLayerThicknessMeters > 0.0)
-            ? minBottomLayerThicknessMeters
-            : kDefaultBottomLayerThicknessMeters,
-        kMaxBottomLayerThicknessMeters);
+    profileSettings.minBottomLayerThicknessMeters = minBottomLayerThicknessMeters_;
 
     const QVector<AtmosphericProfileLayer> profileLayers =
         initializer.buildProfile(profileSettings);
@@ -300,10 +303,38 @@ void AtmosphericGrid3D::rebuildLayersWithInterpolation(int newLayerCount,
 
     for (auto &column : columns_) {
         const QVector<AtmosphericLayerState> oldLayers = column.layers();
+        const int remainingLayers = newLayerCount - 1;
+        const double requestedBottomThickness = qBound(
+            kMinBottomLayerThicknessMeters,
+            (minBottomLayerThicknessMeters_ > 0.0)
+                ? minBottomLayerThicknessMeters_
+                : kDefaultBottomLayerThicknessMeters,
+            kMaxBottomLayerThicknessMeters);
+        // Если остаётся один слой, покрываем всю высоту, сохраняя нижнюю «плотность»
+        // только для многослойной сетки.
+        const double bottomThickness = (remainingLayers == 0)
+            ? topHeightMeters
+            : qMin(requestedBottomThickness, topHeightMeters);
+        const double remainingHeight =
+            (remainingLayers > 0) ? qMax(0.0, topHeightMeters - bottomThickness) : 0.0;
+        const double uniformThickness =
+            (remainingLayers > 0) ? (remainingHeight / remainingLayers) : 0.0;
+
+        QVector<AtmosphericLayerResampler::TargetLayer> targets;
+        targets.reserve(newLayerCount);
+        double bottomEdgeMeters = 0.0;
+        targets.push_back(AtmosphericLayerResampler::TargetLayer{
+            bottomEdgeMeters + bottomThickness * 0.5, bottomThickness});
+        bottomEdgeMeters += bottomThickness;
+        for (int i = 0; i < remainingLayers; ++i) {
+            const double heightMeters = bottomEdgeMeters + uniformThickness * 0.5;
+            targets.push_back(AtmosphericLayerResampler::TargetLayer{
+                heightMeters, uniformThickness});
+            bottomEdgeMeters += uniformThickness;
+        }
+
         const QVector<AtmosphericLayerState> newLayers =
-            AtmosphericLayerResampler::resampleUniform(oldLayers,
-                                                       newLayerCount,
-                                                       topHeightMeters);
+            AtmosphericLayerResampler::resample(oldLayers, targets);
         if (newLayers.isEmpty()) {
             return;
         }
