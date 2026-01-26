@@ -73,8 +73,19 @@ void SubsurfaceTemperatureSolver::setSurfaceLayerTemperatureKelvin(double temper
 
 void SubsurfaceTemperatureSolver::setTemperatures(const QVector<double> &temperatures) {
     temperatures_ = temperatures;
-    if (temperatures_.size() != grid_.layerCount()) {
-        temperatures_.resize(grid_.layerCount());
+    const int targetLayers = grid_.layerCount();
+    if (temperatures_.size() < targetLayers) {
+        const double fillTemperature = temperatures_.isEmpty() ? bottomTemperatureKelvin_
+                                                               : temperatures_.last();
+        const int oldSize = temperatures_.size();
+        temperatures_.resize(targetLayers);
+        // Продлеваем профиль последней известной температурой (или нижней границей),
+        // чтобы не вводить физически нереалистичные нули и избегать всплесков градиента.
+        for (int i = oldSize; i < targetLayers; ++i) {
+            temperatures_[i] = fillTemperature;
+        }
+    } else if (temperatures_.size() > targetLayers) {
+        temperatures_.resize(targetLayers);
     }
 }
 
