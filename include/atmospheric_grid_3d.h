@@ -36,6 +36,7 @@ private:
 
     QVector<AtmosphericColumn> columns_;
     int layerCount_ = 0;
+    double minBottomLayerThicknessMeters_ = 0.0;
     double minTopPressureAtm_ = 0.0;
     double lastScaleHeightMeters_ = 0.0;
     double lastSurfacePressureAtm_ = 0.0;
