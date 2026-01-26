@@ -301,6 +301,7 @@ void AtmosphericGrid3D::rebuildLayersWithInterpolation(int newLayerCount,
         return;
     }
 
+    bool anyColumnRebuilt = false;
     for (auto &column : columns_) {
         const QVector<AtmosphericLayerState> oldLayers = column.layers();
         const int remainingLayers = newLayerCount - 1;
@@ -336,14 +337,18 @@ void AtmosphericGrid3D::rebuildLayersWithInterpolation(int newLayerCount,
         const QVector<AtmosphericLayerState> newLayers =
             AtmosphericLayerResampler::resample(oldLayers, targets);
         if (newLayers.isEmpty()) {
-            return;
+            // Если ресемплинг дал пустой результат, оставляем колонку без изменений.
+            continue;
         }
         column.resize(newLayerCount);
         auto &layers = column.layers();
         for (int i = 0; i < layers.size(); ++i) {
             layers[i] = newLayers.at(i);
         }
+        anyColumnRebuilt = true;
     }
 
-    layerCount_ = newLayerCount;
+    if (anyColumnRebuilt) {
+        layerCount_ = newLayerCount;
+    }
 }
