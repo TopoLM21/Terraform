@@ -23,6 +23,7 @@ constexpr int kColumnPressure = 2;
 constexpr int kColumnShare = 3;
 constexpr double kKgPerGigaton = 1.0e12;
 constexpr double kGramsPerKg = 1000.0;
+constexpr double kDefaultMinTopPressureAtm = 0.01;
 
 class NumericColumnDelegate : public QStyledItemDelegate {
 public:
@@ -92,7 +93,7 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     minTopPressureSpinBox_->setDecimals(3);
     minTopPressureSpinBox_->setSingleStep(0.05);
     minTopPressureSpinBox_->setSuffix(QStringLiteral(" атм"));
-    minTopPressureSpinBox_->setValue(0.0);
+    minTopPressureSpinBox_->setValue(kDefaultMinTopPressureAtm);
     minTopPressureSpinBox_->setToolTip(QStringLiteral(
         "Целевое давление на верхней границе атмосферы: для сверхплотных атмосфер "
         "помогает увеличить число слоёв и задать более реалистичную высоту профиля."));

@@ -216,7 +216,8 @@ constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
 constexpr double kDefaultAtmosphereBottomLayerThicknessMeters = 100.0;
 constexpr double kDefaultVerticalWindMixingCoefficientKz = 1.0;
-constexpr double kDefaultMinTopPressureAtm = 0.0;
+// 0.01 атм = 1% от земного давления, используем как базовый порог для всех планет.
+constexpr double kDefaultMinTopPressureAtm = 0.01;
 // Один реальный секундный тик соответствует часу системного времени (1/24 дня).
 constexpr double kStarSystemDaysPerSecond = 1.0 / 24.0;
 constexpr int kKeplerIterations = 8;
@@ -3128,8 +3129,12 @@ private:
         planetComboBox_->setItemData(index,
                                      planet.minBottomLayerThicknessMeters,
                                      kRoleAtmosphereBottomLayerThickness);
+        const QVariant minTopPressureValue =
+            (planet.minTopPressureAtm > 0.0)
+                ? QVariant(planet.minTopPressureAtm)
+                : QVariant();
         planetComboBox_->setItemData(index,
-                                     planet.minTopPressureAtm,
+                                     minTopPressureValue,
                                      kRoleMinTopPressureAtm);
         planetComboBox_->setItemData(index,
                                      planet.minDenseAtmosphereTemperatureK,
