@@ -142,9 +142,9 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
         (surfacePressureAtm > 0.0) ? qMax(0.0, baseTemperatureKelvin) : 0.0;
 
     int resolvedLayerCount = (layerCount > 0) ? layerCount : kDefaultLayerCount;
-    if (layerCount <= 0 && minTopPressureAtm > 0.0) {
-        // Для сверхплотных атмосфер выбираем верх по давлению, чтобы слои покрывали
-        // физически значимую высоту (например, 0.1–0.5 атм для Венеры).
+    if (minTopPressureAtm > 0.0) {
+        // Режим minTopPressureAtm «переопределяет» фиксированное число слоёв,
+        // чтобы верхняя граница приходилась на физически значимую высоту.
         const int pressureDrivenLayerCount = resolveLayerCountForTopPressure(
             surfacePressureAtm,
             minTopPressureAtm,
