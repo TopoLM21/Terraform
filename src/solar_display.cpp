@@ -742,6 +742,8 @@ struct SurfaceGridComputationInput {
     int currentAbsoluteHourIndex = 0;
     int logPointIndex = 0;
     bool skipSpinUp = false;
+    double minBottomLayerThicknessMeters = 0.0;
+    double minTopPressureAtm = 0.0;
 };
 
 struct SurfaceGridComputationResult {
@@ -4938,6 +4940,51 @@ private:
         result.minPressureAtm = minPressureAtm;
         result.maxPressureAtm = maxPressureAtm;
 
+        double meanSurfaceTemperatureKelvin = 0.0;
+        int meanSurfaceSamples = 0;
+        for (const auto &point : result.grid.points()) {
+            if (point.temperatureK > 0.0) {
+                meanSurfaceTemperatureKelvin += point.temperatureK;
+                ++meanSurfaceSamples;
+            }
+        }
+        if (meanSurfaceSamples > 0) {
+            meanSurfaceTemperatureKelvin /= static_cast<double>(meanSurfaceSamples);
+        }
+
+        double baselineMeanTemperature = 0.0;
+        int baselineSamples = 0;
+        for (const auto &temperature : baselineAirTemperatures) {
+            if (temperature > 0.0) {
+                baselineMeanTemperature += temperature;
+                ++baselineSamples;
+            }
+        }
+        if (baselineSamples > 0) {
+            baselineMeanTemperature /= static_cast<double>(baselineSamples);
+        }
+
+        // Базовый профиль атмосферы синхронизируем с рассчитанной поверхностью,
+        // чтобы слои получали ненулевую температуру и давление на старте.
+        double baseTemperatureKelvin =
+            (effectiveTemperatureKelvin > 0.0) ? effectiveTemperatureKelvin
+                                                : meanSurfaceTemperatureKelvin;
+        if (baseTemperatureKelvin <= 0.0) {
+            // Если и t_eff, и средняя поверхность равны нулю, используем разумный fallback,
+            // чтобы профиль атмосферы не был полностью нулевым.
+            baseTemperatureKelvin =
+                (baselineMeanTemperature > 0.0) ? baselineMeanTemperature
+                                                : qMax(1.0, input.stateDefaults.minTemperatureKelvin);
+        }
+        if (meanSurfaceTemperatureKelvin > 0.0) {
+            result.grid.initializeAtmosphericGrid(input.atmosphere,
+                                                  input.massEarths,
+                                                  baseTemperatureKelvin,
+                                                  0,
+                                                  input.minBottomLayerThicknessMeters,
+                                                  input.minTopPressureAtm);
+        }
+
         if (shouldCancel()) {
             result.cancelled = true;
             return result;
@@ -5228,6 +5275,11 @@ private:
         double baseTemperatureKelvin =
             (effectiveTemperatureKelvin > 0.0) ? effectiveTemperatureKelvin
                                                : meanSurfaceTemperatureKelvin;
+        if (baseTemperatureKelvin <= 0.0) {
+            // Fallback нужен, чтобы при нулевых входных потоках профиль атмосферы
+            // не оставался в 0 K: это обеспечивает ненулевые T/P в слоях (например, Земля).
+            baseTemperatureKelvin = qMax(1.0, stateDefaults->minTemperatureKelvin);
+        }
         if (atmospherePressureAtm >= 0.1) {
             // Для плотных атмосфер профиль должен стартовать не от t_eff (ТОА),
             // а от нижней границы парникового прогрева, задаваемой давлением и составом.
@@ -5276,6 +5328,8 @@ private:
         input.verticalWindMixingCoefficientKz = currentVerticalWindMixingCoefficientKz();
         input.logPointIndex = selectedSurfacePointIndex_;
         input.skipSpinUp = skipSpinUp;
+        input.minBottomLayerThicknessMeters = currentAtmosphereBottomLayerThicknessMeters();
+        input.minTopPressureAtm = currentMinTopPressureAtm();
 
         surfaceGridCancelFlag_ = std::make_shared<std::atomic_bool>(false);
         if (!surfaceGridRequestId_) {
