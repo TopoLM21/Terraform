@@ -19,26 +19,37 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
         return layers;
     }
 
-    layers.resize(settings.layerCount);
-
     const double rSpecific = AtmosphericThermodynamics::specificGasConstant(composition_);
     const double lapseRateKPerM = resolveLapseRateKPerM(settings);
     const double scaleHeight =
         scaleHeightMeters(settings.surfaceTemperatureKelvin, settings.gravityMps2);
+    double pressureStopAtm = 0.0;
+    if (settings.minTopPressureAtm > 0.0) {
+        pressureStopAtm = settings.minTopPressureAtm;
+    }
+    if (settings.minTopPressureFraction > 0.0 && settings.surfacePressureAtm > 0.0) {
+        const double fractionPressureAtm =
+            settings.surfacePressureAtm * settings.minTopPressureFraction;
+        pressureStopAtm = (pressureStopAtm > 0.0)
+            ? qMax(pressureStopAtm, fractionPressureAtm)
+            : fractionPressureAtm;
+    }
 
     double resolvedTopHeight = 0.0;
-    if (settings.minTopPressureAtm > 0.0 &&
-        settings.surfacePressureAtm > settings.minTopPressureAtm &&
+    if (pressureStopAtm > 0.0 &&
+        settings.surfacePressureAtm > pressureStopAtm &&
         scaleHeight > 0.0) {
         // Верхняя граница задаётся давлением: прекращаем слои, когда P падает ниже порога,
         // чтобы моделировать только атмосферу с заметной массой и оптическим вкладом.
         resolvedTopHeight =
-            scaleHeight * qLn(settings.surfacePressureAtm / settings.minTopPressureAtm);
+            scaleHeight * qLn(settings.surfacePressureAtm / pressureStopAtm);
     } else if (settings.topHeightMeters > 0.0) {
         resolvedTopHeight = settings.topHeightMeters;
     } else {
         resolvedTopHeight = (scaleHeight > 0.0) ? qMax(1000.0, scaleHeight * 6.0) : 0.0;
     }
+
+    layers.reserve(settings.layerCount);
 
     const double uniformLayerThickness = (resolvedTopHeight > 0.0)
         ? resolvedTopHeight / static_cast<double>(settings.layerCount)
@@ -66,7 +77,7 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
     // детализация для визуализации и обитаемого объёма.
     double bottomEdgeMeters = 0.0;
     double pressureAtmAtBottom = settings.surfacePressureAtm;
-    for (int i = 0; i < layers.size(); ++i) {
+    for (int i = 0; i < settings.layerCount; ++i) {
         const double layerThickness = useNonUniformLayers
             ? ((i == 0) ? bottomLayerThickness : remainingLayerThickness)
             : uniformLayerThickness;
@@ -96,11 +107,19 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
                 ? (pressurePa / (rSpecific * temperatureKelvin))
                 : 0.0;
 
-        layers[i].heightMeters = heightMidMeters;
-        layers[i].thicknessMeters = layerThickness;
-        layers[i].temperatureKelvin = temperatureKelvin;
-        layers[i].pressureAtm = pressureAtm;
-        layers[i].densityKgPerM3 = densityKgPerM3;
+        AtmosphericProfileLayer layer;
+        layer.heightMeters = heightMidMeters;
+        layer.thicknessMeters = layerThickness;
+        layer.temperatureKelvin = temperatureKelvin;
+        layer.pressureAtm = pressureAtm;
+        layer.densityKgPerM3 = densityKgPerM3;
+        layers.append(layer);
+
+        if (pressureStopAtm > 0.0 && pressureAtm > 0.0 && pressureAtm <= pressureStopAtm) {
+            // Порог по давлению: выше этой доли от поверхностного давления атмосфера настолько
+            // разрежена, что её вклад в массу и визуальную толщину можно отбросить.
+            break;
+        }
     }
 
     return layers;
