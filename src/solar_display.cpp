@@ -201,6 +201,7 @@ constexpr int kRoleAtmosphereBottomLayerThickness = Qt::UserRole + 43;
 constexpr int kRoleMinDenseAtmosphereTemperature = Qt::UserRole + 44;
 constexpr int kRoleVerticalWindMixingCoefficient = Qt::UserRole + 45;
 constexpr int kRoleMinTopPressureAtm = Qt::UserRole + 46;
+constexpr int kRoleDisableWaterAndClouds = Qt::UserRole + 47;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -556,6 +557,7 @@ double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
 double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      const SurfaceMaterial &material,
                                      double cloudAlbedo,
+                                     bool disableWaterAndClouds,
                                      double pressureAtm,
                                      double planetRadiusKm,
                                      double surfaceGravity,
@@ -580,6 +582,9 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
         potentialCoverage = 1.0 - std::exp(-fillFactor * 3.0);
     }
     potentialCoverage = qBound(0.0, potentialCoverage, 1.0);
+    if (disableWaterAndClouds) {
+        potentialCoverage = 0.0;
+    }
 
     // Давление также усиливает облачность: давление выше порога повышает отражение.
     const double pressureClouds =
@@ -626,10 +631,10 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
         tEffPre * std::pow(1.0 / baseLongwaveTransmission, 0.25);
 
     double evaporation = 0.0;
-    if (potentialCoverage > 0.0 && tBasePre > 263.0) {
+    if (!disableWaterAndClouds && potentialCoverage > 0.0 && tBasePre > 263.0) {
         evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
     }
-    const double waterTau = qMin(8.0, evaporation * 1.5);
+    const double waterTau = disableWaterAndClouds ? 0.0 : qMin(8.0, evaporation * 1.5);
     double extraTau = waterTau;
     // Облака повышают альбедо, но также усиливают ИК-поглощение.
     // Держим вклад умеренным и связываем его с облачным альбедо и давлением.
@@ -637,7 +642,8 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     const double cloudLongwaveFactor =
         qBound(0.0, clampedCloudAlbedo + pressureClouds, 1.0);
     constexpr double kCloudLongwaveTau = 0.3;
-    const double tauCloudLW = kCloudLongwaveTau * cloudLongwaveFactor;
+    const double tauCloudLW =
+        disableWaterAndClouds ? 0.0 : kCloudLongwaveTau * cloudLongwaveFactor;
     extraTau += tauCloudLW;
     const double co2PartialPressureAtm = pressureAtm * co2Share;
     if (co2PartialPressureAtm > 0.0) {
@@ -724,6 +730,7 @@ struct SurfaceGridComputationInput {
     double massEarths = 0.0;
     double radiusKm = 0.0;
     double cloudAlbedo = 0.0;
+    bool disableWaterAndClouds = false;
     double dayLengthDays = 0.0;
     double yearLengthDays = 0.0;
     double elapsedDays = 0.0;
@@ -3114,6 +3121,7 @@ private:
                                      static_cast<int>(RadiationModelType::Layered),
                                      kRoleAdvancedRadiationModel);
         planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
+        planetComboBox_->setItemData(index, planet.disableWaterAndClouds, kRoleDisableWaterAndClouds);
         planetComboBox_->setItemData(index, 0.0, kRoleDiurnalCoolingBiasK);
         planetComboBox_->setItemData(index, planet.geothermalFluxWPerM2, kRoleGeothermalFlux);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
@@ -3472,10 +3480,15 @@ private:
                     ? planetComboBox_->itemData(existingIndex,
                                                 kRoleMinDenseAtmosphereTemperature).toDouble()
                     : 0.0;
+            const bool disableWaterAndClouds =
+                existingIndex >= 0
+                    ? planetComboBox_->itemData(existingIndex, kRoleDisableWaterAndClouds).toBool()
+                    : false;
             PlanetPreset preset{name, axis, dayLength, yearLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
                                 composition, QStringLiteral("custom"), primaryStar, secondaryStar,
                                 greenhouseOpacity, manualGreenhouseOnTop, cloudAlbedo,
+                                disableWaterAndClouds,
                                 geothermalFlux, spinOrbitP, spinOrbitQ, tidallyLocked};
             preset.rotationModeOverride = true;
             preset.heightSeed = heightSeed;
@@ -3523,6 +3536,9 @@ private:
                     advancedRadiationValue.isValid() ? advancedRadiationValue : fallbackRadiation,
                     kRoleAdvancedRadiationModel);
                 planetComboBox_->setItemData(existingIndex, preset.cloudAlbedo, kRoleCloudAlbedo);
+                planetComboBox_->setItemData(existingIndex,
+                                             disableWaterAndClouds,
+                                             kRoleDisableWaterAndClouds);
                 planetComboBox_->setItemData(existingIndex,
                                              diurnalCoolingBiasK,
                                              kRoleDiurnalCoolingBiasK);
@@ -4902,6 +4918,7 @@ private:
                 computeLocalGreenhouseOpacity(input.atmosphere,
                                               material,
                                               input.cloudAlbedo,
+                                              input.disableWaterAndClouds,
                                               point.pressureAtm,
                                               input.radiusKm,
                                               gravity,
@@ -5239,6 +5256,8 @@ private:
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         const double cloudAlbedo =
             qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
+        const bool disableWaterAndClouds =
+            planetComboBox_->currentData(kRoleDisableWaterAndClouds).toBool();
         const QString baseMaterialId =
             resolveSurfaceMaterialIdForPoint(atmosphere, massEarths, radiusKm);
 
@@ -5322,6 +5341,7 @@ private:
                 computeLocalGreenhouseOpacity(atmosphere,
                                               stateDefaults->material,
                                               cloudAlbedo,
+                                              disableWaterAndClouds,
                                               qMax(0.0, atmospherePressureAtm),
                                               radiusKm,
                                               gravity,
@@ -5387,6 +5407,7 @@ private:
         input.massEarths = massEarths;
         input.radiusKm = radiusKm;
         input.cloudAlbedo = cloudAlbedo;
+        input.disableWaterAndClouds = disableWaterAndClouds;
         input.dayLengthDays = dayLengthDays;
         input.yearLengthDays = yearLengthDays;
         input.elapsedDays = surfaceTime_.surfaceElapsedDays();
@@ -5528,6 +5549,8 @@ private:
             planetComboBox_->currentData(kRoleAdvancedRadiationModel).toInt());
         const double cloudAlbedo =
             qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
+        const bool disableWaterAndClouds =
+            planetComboBox_->currentData(kRoleDisableWaterAndClouds).toBool();
 
         QHash<QString, SurfaceMaterial> materialsById;
         const auto materials = surfaceMaterials();
@@ -5759,6 +5782,7 @@ private:
                 computeLocalGreenhouseOpacity(atmosphere,
                                               material,
                                               cloudAlbedo,
+                                              disableWaterAndClouds,
                                               point.pressureAtm,
                                               radiusKm,
                                               gravity,
