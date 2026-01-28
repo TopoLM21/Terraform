@@ -179,27 +179,28 @@ constexpr int kRoleFlatHeight = Qt::UserRole + 21;
 constexpr int kRoleManualGreenhouseOnTopOfAtmosphere = Qt::UserRole + 22;
 constexpr int kRoleAdvancedRadiationModel = Qt::UserRole + 23;
 constexpr int kRoleGeothermalFlux = Qt::UserRole + 24;
-constexpr int kRolePrimaryStarRadius = Qt::UserRole + 25;
-constexpr int kRolePrimaryStarTemperature = Qt::UserRole + 26;
-constexpr int kRoleSecondaryStarRadius = Qt::UserRole + 27;
-constexpr int kRoleSecondaryStarTemperature = Qt::UserRole + 28;
-constexpr int kRoleHasSecondaryStar = Qt::UserRole + 29;
-constexpr int kRoleStarPresetId = Qt::UserRole + 30;
-constexpr int kRoleRotationModeOverride = Qt::UserRole + 31;
-constexpr int kRoleSpinOrbitP = Qt::UserRole + 32;
-constexpr int kRoleSpinOrbitQ = Qt::UserRole + 33;
-constexpr int kRoleBinarySemiMajorAxis = Qt::UserRole + 34;
-constexpr int kRoleBinaryPeriodDays = Qt::UserRole + 35;
-constexpr int kRoleBinaryEccentricity = Qt::UserRole + 36;
-constexpr int kRoleBinaryInclinationDegrees = Qt::UserRole + 37;
-constexpr int kRoleBinaryArgumentPericenterA = Qt::UserRole + 38;
-constexpr int kRoleBinaryArgumentPericenterB = Qt::UserRole + 39;
-constexpr int kRoleHasBinaryOrbit = Qt::UserRole + 40;
-constexpr int kRoleAtmosphereDisabled = Qt::UserRole + 41;
-constexpr int kRoleAtmosphereBottomLayerThickness = Qt::UserRole + 42;
-constexpr int kRoleMinDenseAtmosphereTemperature = Qt::UserRole + 43;
-constexpr int kRoleVerticalWindMixingCoefficient = Qt::UserRole + 44;
-constexpr int kRoleMinTopPressureAtm = Qt::UserRole + 45;
+constexpr int kRoleDiurnalCoolingBiasK = Qt::UserRole + 25;
+constexpr int kRolePrimaryStarRadius = Qt::UserRole + 26;
+constexpr int kRolePrimaryStarTemperature = Qt::UserRole + 27;
+constexpr int kRoleSecondaryStarRadius = Qt::UserRole + 28;
+constexpr int kRoleSecondaryStarTemperature = Qt::UserRole + 29;
+constexpr int kRoleHasSecondaryStar = Qt::UserRole + 30;
+constexpr int kRoleStarPresetId = Qt::UserRole + 31;
+constexpr int kRoleRotationModeOverride = Qt::UserRole + 32;
+constexpr int kRoleSpinOrbitP = Qt::UserRole + 33;
+constexpr int kRoleSpinOrbitQ = Qt::UserRole + 34;
+constexpr int kRoleBinarySemiMajorAxis = Qt::UserRole + 35;
+constexpr int kRoleBinaryPeriodDays = Qt::UserRole + 36;
+constexpr int kRoleBinaryEccentricity = Qt::UserRole + 37;
+constexpr int kRoleBinaryInclinationDegrees = Qt::UserRole + 38;
+constexpr int kRoleBinaryArgumentPericenterA = Qt::UserRole + 39;
+constexpr int kRoleBinaryArgumentPericenterB = Qt::UserRole + 40;
+constexpr int kRoleHasBinaryOrbit = Qt::UserRole + 41;
+constexpr int kRoleAtmosphereDisabled = Qt::UserRole + 42;
+constexpr int kRoleAtmosphereBottomLayerThickness = Qt::UserRole + 43;
+constexpr int kRoleMinDenseAtmosphereTemperature = Qt::UserRole + 44;
+constexpr int kRoleVerticalWindMixingCoefficient = Qt::UserRole + 45;
+constexpr int kRoleMinTopPressureAtm = Qt::UserRole + 46;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -708,6 +709,7 @@ struct SurfacePointStateDefaults {
     double greenhouseOpacity = 0.0;
     double manualGreenhouseOpacity = 0.0;
     double minTemperatureKelvin = 3.0;
+    double diurnalCoolingBiasK = 0.0;
     RadiationModelType radiationModelType = RadiationModelType::Fast;
     SurfaceMaterial material;
     SubsurfaceModelSettings subsurfaceSettings;
@@ -931,6 +933,14 @@ public:
         cloudAlbedoSpinBox_->setRange(0.0, 1.0);
         cloudAlbedoSpinBox_->setDecimals(2);
         cloudAlbedoSpinBox_->setSingleStep(0.05);
+        diurnalCoolingBiasSpinBox_ = new QDoubleSpinBox(this);
+        diurnalCoolingBiasSpinBox_->setRange(0.0, 200.0);
+        diurnalCoolingBiasSpinBox_->setDecimals(1);
+        diurnalCoolingBiasSpinBox_->setSingleStep(1.0);
+        diurnalCoolingBiasSpinBox_->setSuffix(QStringLiteral(" K"));
+        diurnalCoolingBiasSpinBox_->setToolTip(
+            QStringLiteral("Грубая поправка на суточное охлаждение поверхности.\n"
+                           "Сдвигает стартовую температуру вниз при инициализации."));
         manualGreenhouseOnTopCheckBox_ = new QCheckBox(
             QStringLiteral("Добавлять ручную парниковую непрозрачность поверх атмосферы"), this);
         manualGreenhouseOnTopCheckBox_->setToolTip(
@@ -1010,6 +1020,8 @@ public:
         heightAtmosphereLayout->addStretch();
         planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), heightAtmosphereButtons);
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
+        planetControlsLayout->addRow(QStringLiteral("Поправка суточного охлаждения (К):"),
+                                     diurnalCoolingBiasSpinBox_);
         planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
         planetControlsLayout->addRow(QString(), advancedRadiationCheckBox_);
         planetControlsLayout->addRow(QString(), debugLogCheckBox_);
@@ -1379,6 +1391,7 @@ public:
             syncFlatHeightWithPlanet();
             syncAtmosphereDisableWithPlanet();
             syncCloudAlbedoWithPlanet();
+            syncDiurnalCoolingBiasWithPlanet();
             syncManualGreenhouseOnTopWithPlanet();
             syncAdvancedRadiationWithPlanet();
             applyStellarPresetForCurrentPlanet();
@@ -1488,6 +1501,16 @@ public:
                 return;
             }
             syncPlanetCloudAlbedoWithSelection();
+            updateTemperaturePlot();
+            updateSurfaceGridTemperatures();
+        });
+
+        connect(diurnalCoolingBiasSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, [this](double) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            syncPlanetDiurnalCoolingBiasWithSelection();
             updateTemperaturePlot();
             updateSurfaceGridTemperatures();
         });
@@ -1783,6 +1806,7 @@ private:
     QPushButton *flatHeightButton_ = nullptr;
     QPushButton *disableAtmosphereButton_ = nullptr;
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
+    QDoubleSpinBox *diurnalCoolingBiasSpinBox_ = nullptr;
     QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
     QCheckBox *advancedRadiationCheckBox_ = nullptr;
     QCheckBox *debugLogCheckBox_ = nullptr;
@@ -2528,6 +2552,7 @@ private:
         syncFlatHeightWithPlanet();
         syncAtmosphereDisableWithPlanet();
         syncCloudAlbedoWithPlanet();
+        syncDiurnalCoolingBiasWithPlanet();
         syncManualGreenhouseOnTopWithPlanet();
         syncAdvancedRadiationWithPlanet();
         applyStellarPresetForCurrentPlanet();
@@ -2575,6 +2600,10 @@ private:
         if (cloudAlbedoSpinBox_) {
             const QSignalBlocker cloudBlocker(cloudAlbedoSpinBox_);
             cloudAlbedoSpinBox_->setValue(0.0);
+        }
+        if (diurnalCoolingBiasSpinBox_) {
+            const QSignalBlocker diurnalBlocker(diurnalCoolingBiasSpinBox_);
+            diurnalCoolingBiasSpinBox_->setValue(0.0);
         }
         if (manualGreenhouseOnTopCheckBox_) {
             const QSignalBlocker greenhouseBlocker(manualGreenhouseOnTopCheckBox_);
@@ -3085,6 +3114,7 @@ private:
                                      static_cast<int>(RadiationModelType::Layered),
                                      kRoleAdvancedRadiationModel);
         planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
+        planetComboBox_->setItemData(index, 0.0, kRoleDiurnalCoolingBiasK);
         planetComboBox_->setItemData(index, planet.geothermalFluxWPerM2, kRoleGeothermalFlux);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
                                      kRoleHeightSourceType);
@@ -3225,6 +3255,14 @@ private:
         cloudAlbedoInput->setDecimals(2);
         cloudAlbedoInput->setSingleStep(0.05);
 
+        auto *diurnalCoolingBiasInput = new QDoubleSpinBox(&dialog);
+        diurnalCoolingBiasInput->setRange(0.0, 200.0);
+        diurnalCoolingBiasInput->setDecimals(1);
+        diurnalCoolingBiasInput->setSingleStep(1.0);
+        diurnalCoolingBiasInput->setSuffix(QStringLiteral(" K"));
+        diurnalCoolingBiasInput->setToolTip(
+            QStringLiteral("Грубая поправка на суточное охлаждение поверхности."));
+
         auto *manualGreenhouseOnTopInput = new QCheckBox(
             QStringLiteral("Добавлять поверх атмосферной модели"), &dialog);
         manualGreenhouseOnTopInput->setToolTip(
@@ -3250,6 +3288,8 @@ private:
         formLayout->addRow(QStringLiteral("Парниковая непрозрачность поверх атмосферы:"),
                            manualGreenhouseOnTopInput);
         formLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoInput);
+        formLayout->addRow(QStringLiteral("Поправка суточного охлаждения (К):"),
+                           diurnalCoolingBiasInput);
         formLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedInput);
 
         auto *materialInput = new QComboBox(&dialog);
@@ -3319,6 +3359,7 @@ private:
                 [&dialog, nameInput, axisInput, dayLengthInput, yearLengthInput, massInput, radiusInput,
                  eccentricityInput, obliquityInput, perihelionArgumentInput,
                  greenhouseOpacityInput, manualGreenhouseOnTopInput, cloudAlbedoInput,
+                 diurnalCoolingBiasInput,
                  heightSeedInput, materialInput,
                  rotationModeInput, spinOrbitPInput, spinOrbitQInput, atmosphereInput, this]() {
             const QString name = nameInput->text().trimmed();
@@ -3392,6 +3433,7 @@ private:
             }
             const bool manualGreenhouseOnTop = manualGreenhouseOnTopInput->isChecked();
             const double cloudAlbedo = cloudAlbedoInput->value();
+            const double diurnalCoolingBiasK = diurnalCoolingBiasInput->value();
             const double geothermalFlux =
                 subsurfaceGeothermalFluxSpinBox_ ? subsurfaceGeothermalFluxSpinBox_->value() : 0.0;
 
@@ -3482,6 +3524,9 @@ private:
                     kRoleAdvancedRadiationModel);
                 planetComboBox_->setItemData(existingIndex, preset.cloudAlbedo, kRoleCloudAlbedo);
                 planetComboBox_->setItemData(existingIndex,
+                                             diurnalCoolingBiasK,
+                                             kRoleDiurnalCoolingBiasK);
+                planetComboBox_->setItemData(existingIndex,
                                              preset.geothermalFluxWPerM2,
                                              kRoleGeothermalFlux);
                 planetComboBox_->setItemData(existingIndex,
@@ -3548,7 +3593,11 @@ private:
                 planetComboBox_->setCurrentIndex(existingIndex);
             } else {
                 addPlanetItem(preset, true);
-                planetComboBox_->setCurrentIndex(planetComboBox_->count() - 1);
+                const int newIndex = planetComboBox_->count() - 1;
+                planetComboBox_->setItemData(newIndex,
+                                             diurnalCoolingBiasK,
+                                             kRoleDiurnalCoolingBiasK);
+                planetComboBox_->setCurrentIndex(newIndex);
             }
 
             updatePlanetSemiMajorAxisLabel();
@@ -3695,6 +3744,18 @@ private:
         cloudAlbedoSpinBox_->setValue(cloudAlbedo);
     }
 
+    void syncDiurnalCoolingBiasWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !diurnalCoolingBiasSpinBox_) {
+            return;
+        }
+
+        const double diurnalCoolingBiasK =
+            planetComboBox_->itemData(index, kRoleDiurnalCoolingBiasK).toDouble();
+        const QSignalBlocker blocker(diurnalCoolingBiasSpinBox_);
+        diurnalCoolingBiasSpinBox_->setValue(qMax(0.0, diurnalCoolingBiasK));
+    }
+
     void syncGeothermalFluxWithPlanet() {
         if (!subsurfaceGeothermalFluxSpinBox_) {
             return;
@@ -3809,6 +3870,16 @@ private:
         planetComboBox_->setItemData(index, cloudAlbedoSpinBox_->value(), kRoleCloudAlbedo);
     }
 
+    void syncPlanetDiurnalCoolingBiasWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !diurnalCoolingBiasSpinBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(index,
+                                     diurnalCoolingBiasSpinBox_->value(),
+                                     kRoleDiurnalCoolingBiasK);
+    }
+
     void syncPlanetManualGreenhouseOnTopWithSelection() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0 || !manualGreenhouseOnTopCheckBox_) {
@@ -3917,6 +3988,8 @@ private:
 
         const double manualGreenhouseOpacity =
             planetComboBox_->currentData(kRoleGreenhouseOpacity).toDouble();
+        const double diurnalCoolingBiasK =
+            planetComboBox_->currentData(kRoleDiurnalCoolingBiasK).toDouble();
         const double albedo = qBound(0.0, material->albedo, 1.0);
         // Не задаем высокий нижний порог: карта поверхности должна стартовать от физического минимума,
         // чтобы при слабой инсоляции температура могла быть значительно ниже 200 K.
@@ -3938,6 +4011,7 @@ private:
         defaults.manualGreenhouseOpacity = atmosphereEnabled ? 0.0 : manualGreenhouseOpacity;
         defaults.greenhouseOpacity = defaults.manualGreenhouseOpacity;
         defaults.minTemperatureKelvin = minTemperatureKelvin;
+        defaults.diurnalCoolingBiasK = qMax(0.0, diurnalCoolingBiasK);
         defaults.material = *material;
         defaults.subsurfaceSettings = buildSubsurfaceSettings();
         return defaults;
@@ -4738,6 +4812,7 @@ private:
         tileDefaults.minTemperatureKelvin = input.stateDefaults.minTemperatureKelvin;
         tileDefaults.greenhouseOpacity = input.stateDefaults.greenhouseOpacity;
         tileDefaults.radiationModelType = input.stateDefaults.radiationModelType;
+        tileDefaults.diurnalCoolingBiasK = input.stateDefaults.diurnalCoolingBiasK;
         tileDefaults.subsurfaceSettings = input.stateDefaults.subsurfaceSettings;
 
         SurfaceTileTemperatureSettings tileSettings;

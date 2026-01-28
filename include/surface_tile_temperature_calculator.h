@@ -13,6 +13,8 @@ struct SurfaceTileTemperatureDefaults {
     double minTemperatureKelvin = 3.0;
     double greenhouseOpacity = 0.0;
     RadiationModelType radiationModelType = RadiationModelType::Fast;
+    // Грубая поправка на суточное охлаждение (K), 0 — отключено.
+    double diurnalCoolingBiasK = 0.0;
     SubsurfaceModelSettings subsurfaceSettings;
 };
 

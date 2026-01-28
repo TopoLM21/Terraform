@@ -95,11 +95,18 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const double globalTemperature =
         qMax(defaults.minTemperatureKelvin,
              baseEquilibriumTemperature * limitedGreenhouseFactor);
+    const double diurnalCoolingBiasK = qMax(0.0, defaults.diurnalCoolingBiasK);
+    // Грубая поправка на суточное охлаждение: компенсируем отсутствие суточного цикла
+    // и инерции грунта в стартовой оценке, чтобы не переоценивать среднюю T.
+    const double adjustedGlobalTemperature =
+        (diurnalCoolingBiasK > 0.0)
+            ? qMax(defaults.minTemperatureKelvin, globalTemperature - diurnalCoolingBiasK)
+            : globalTemperature;
     const double meanInsolation =
         settings.hasSolarConstant ? settings.segmentSolarConstant * kMeanInsolationFactor : 0.0;
 
-    double minTemperature = globalTemperature;
-    double maxTemperature = globalTemperature;
+    double minTemperature = adjustedGlobalTemperature;
+    double maxTemperature = adjustedGlobalTemperature;
 
     for (auto &point : grid.points()) {
         const auto materialIt = materialsById.constFind(point.materialId);
@@ -108,7 +115,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
         // Облака перекрывают поверхность, поэтому берём максимум отражения.
         const double albedo = qMax(materialAlbedo, clampedCloudAlbedo);
-        SurfacePointState state(globalTemperature,
+        SurfacePointState state(adjustedGlobalTemperature,
                                 albedo,
                                 defaults.greenhouseOpacity,
                                 defaults.radiationModelType,
@@ -116,11 +123,11 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
                                 material,
                                 defaults.subsurfaceSettings);
         point.state = state;
-        point.state.setProfileTemperatureKelvin(globalTemperature);
-        point.temperatureK = globalTemperature;
-        point.airTemperatureK = globalTemperature;
+        point.state.setProfileTemperatureKelvin(adjustedGlobalTemperature);
+        point.temperatureK = adjustedGlobalTemperature;
+        point.airTemperatureK = adjustedGlobalTemperature;
         result.blendedInsolations.push_back(meanInsolation);
-        result.baselineAirTemperatures.push_back(globalTemperature);
+        result.baselineAirTemperatures.push_back(adjustedGlobalTemperature);
     }
 
     result.hasTemperatureRange = settings.hasSolarConstant && minTemperature <= maxTemperature;
