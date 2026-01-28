@@ -60,6 +60,8 @@ struct PlanetPreset {
     bool manualGreenhouseOnTopOfAtmosphere = false;
     // Отражательная способность облаков (0..1), учитывает даже неводные облака.
     double cloudAlbedo = 0.0;
+    // Временный режим "без воды и облаков" для последующей детальной модели.
+    bool disableWaterAndClouds = false;
     // Геотермальный поток снизу (Вт/м²) для подповерхностной модели.
     // По умолчанию задан земной порядок (~0.02 Вт/м²) как физически реалистичный фон.
     double geothermalFluxWPerM2 = 0.02;
