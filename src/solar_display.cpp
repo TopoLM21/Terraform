@@ -218,8 +218,8 @@ constexpr double kEarthWaterGigatons = 1.4e9;
 constexpr int kSurfaceTemperatureHistoryDays = kSurfaceOrbitSegmentsPerYear;
 constexpr double kDefaultAtmosphereBottomLayerThicknessMeters = 100.0;
 constexpr double kDefaultVerticalWindMixingCoefficientKz = 1.0;
-// 0.01 атм = 1% от земного давления, используем как базовый порог для всех планет.
-constexpr double kDefaultMinTopPressureAtm = 0.01;
+// 0.001 атм ≈ 1 гПа, используем как базовый порог верхней границы профиля.
+constexpr double kDefaultMinTopPressureAtm = 0.001;
 // Один реальный секундный тик соответствует часу системного времени (1/24 дня).
 constexpr double kStarSystemDaysPerSecond = 1.0 / 24.0;
 constexpr int kKeplerIterations = 8;
