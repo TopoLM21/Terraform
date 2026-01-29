@@ -25,7 +25,7 @@ double AtmosphericThermodynamics::meanMolarMassKgPerMol(
     }
 
     double totalShare = 0.0;
-    double meanMolarMass = 0.0;
+    double inverseMassSum = 0.0;
     const auto gases = availableGases();
     for (const auto &fraction : fractions) {
         if (fraction.share <= 0.0) {
@@ -39,13 +39,15 @@ double AtmosphericThermodynamics::meanMolarMassKgPerMol(
             continue;
         }
         totalShare += fraction.share;
-        meanMolarMass += fraction.share * (it->molarMass / 1000.0);
+        inverseMassSum += fraction.share / (it->molarMass / 1000.0);
     }
 
-    if (totalShare <= 0.0) {
+    if (totalShare <= 0.0 || inverseMassSum <= 0.0) {
         return kDryAirMolarMassKgPerMol;
     }
-    return meanMolarMass / totalShare;
+    // Для массовых долей w_i средняя молярная масса:
+    // M = 1 / Σ(w_i / M_i) = (Σ w_i) / Σ(w_i / M_i).
+    return totalShare / inverseMassSum;
 }
 
 double AtmosphericThermodynamics::specificGasConstant(const AtmosphereComposition &composition) {

@@ -16,7 +16,7 @@ struct GasFraction {
     QString id;
     // Масса газа в гигатоннах (Gt).
     double massGigatons = 0.0;
-    // Доля от общей массы (0..1).
+    // Массовая доля от общей массы (0..1).
     double share = 0.0;
 };
 
