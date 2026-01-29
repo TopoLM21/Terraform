@@ -5,6 +5,7 @@
 #include "solar_calculator.h"
 #include "solar_display.h"
 #include "atmosphere_widget.h"
+#include "heightmap_storage.h"
 #include "surface_tile_temperature_calculator.h"
 #include "surface_temperature_plot.h"
 #include "surface_map_widget.h"
@@ -13,6 +14,7 @@
 #include "surface_atmosphere_coupler.h"
 #include "surface_temperature_scale_widget.h"
 #include "surface_height_scale_widget.h"
+#include "surface_heightmap.h"
 #include "surface_wind_scale_widget.h"
 #include "surface_pressure_scale_widget.h"
 #include "surface_realistic_scale_widget.h"
@@ -52,6 +54,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QLoggingCategory>
 #include <QtGui/QDoubleValidator>
+#include <QtGui/QImage>
 #include <QtGui/QVector3D>
 #include <QtConcurrent/QtConcurrent>
 #include <QtWidgets/QApplication>
@@ -59,6 +62,7 @@
 #include <QtWidgets/QDialog>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDoubleSpinBox>
+#include <QtWidgets/QFileDialog>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
@@ -929,6 +933,14 @@ public:
         spinOrbitQSpinBox_->setToolTip(spinOrbitTooltip);
         heightSeedSpinBox_ = new QSpinBox(this);
         heightSeedSpinBox_->setRange(0, std::numeric_limits<int>::max());
+        heightmapImportButton_ = new QPushButton(QStringLiteral("Импорт heightmap..."), this);
+        heightmapScaleSpinBox_ = new QDoubleSpinBox(this);
+        heightmapScaleSpinBox_->setRange(0.0, 100.0);
+        heightmapScaleSpinBox_->setDecimals(3);
+        heightmapScaleSpinBox_->setSingleStep(0.1);
+        heightmapScaleSpinBox_->setSuffix(QStringLiteral(" км"));
+        heightmapScaleSpinBox_->setToolTip(
+            QStringLiteral("Масштаб рельефа: 1.0 = диапазон (-1..+1) км."));
         flatHeightButton_ = new QPushButton(QStringLiteral("Обнулить высоту"), this);
         flatHeightButton_->setCheckable(true);
         flatHeightButton_->setEnabled(false);
@@ -1020,6 +1032,13 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
         planetControlsLayout->addRow(QStringLiteral("Резонанс вращения p:q:"), spinOrbitWidget);
         planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
+        auto *heightmapControls = new QWidget(this);
+        auto *heightmapControlsLayout = new QHBoxLayout(heightmapControls);
+        heightmapControlsLayout->setContentsMargins(0, 0, 0, 0);
+        heightmapControlsLayout->addWidget(heightmapImportButton_);
+        heightmapControlsLayout->addWidget(heightmapScaleSpinBox_);
+        heightmapControlsLayout->addStretch();
+        planetControlsLayout->addRow(QStringLiteral("Heightmap:"), heightmapControls);
         auto *heightAtmosphereButtons = new QWidget(this);
         auto *heightAtmosphereLayout = new QHBoxLayout(heightAtmosphereButtons);
         heightAtmosphereLayout->setContentsMargins(0, 0, 0, 0);
@@ -1396,6 +1415,7 @@ public:
             syncRotationModeWithPlanet();
             syncSpinOrbitWithPlanet();
             syncHeightSeedWithPlanet();
+            syncHeightmapScaleWithPlanet();
             syncFlatHeightWithPlanet();
             syncAtmosphereDisableWithPlanet();
             syncCloudAlbedoWithPlanet();
@@ -1483,6 +1503,18 @@ public:
             syncPlanetHeightSeedWithSelection();
             updateSurfaceGridTemperatures();
         });
+
+        connect(heightmapScaleSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, [this](double) {
+                    if (planetComboBox_->currentIndex() < 0) {
+                        return;
+                    }
+                    syncPlanetHeightmapScaleWithSelection();
+                    updateSurfaceGridTemperatures();
+                });
+
+        connect(heightmapImportButton_, &QPushButton::clicked, this,
+                [this]() { onImportHeightmapRequested(); });
 
         connect(flatHeightButton_, &QPushButton::toggled, this, [this](bool checked) {
             if (planetComboBox_->currentIndex() < 0) {
@@ -1811,6 +1843,8 @@ private:
     QSpinBox *spinOrbitPSpinBox_ = nullptr;
     QSpinBox *spinOrbitQSpinBox_ = nullptr;
     QSpinBox *heightSeedSpinBox_ = nullptr;
+    QPushButton *heightmapImportButton_ = nullptr;
+    QDoubleSpinBox *heightmapScaleSpinBox_ = nullptr;
     QPushButton *flatHeightButton_ = nullptr;
     QPushButton *disableAtmosphereButton_ = nullptr;
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
@@ -2557,6 +2591,7 @@ private:
         syncMaterialWithPlanet();
         syncRotationModeWithPlanet();
         syncHeightSeedWithPlanet();
+        syncHeightmapScaleWithPlanet();
         syncFlatHeightWithPlanet();
         syncAtmosphereDisableWithPlanet();
         syncCloudAlbedoWithPlanet();
@@ -2592,6 +2627,14 @@ private:
         if (heightSeedSpinBox_) {
             const QSignalBlocker seedBlocker(heightSeedSpinBox_);
             heightSeedSpinBox_->setValue(0);
+        }
+        if (heightmapScaleSpinBox_) {
+            const QSignalBlocker scaleBlocker(heightmapScaleSpinBox_);
+            heightmapScaleSpinBox_->setValue(0.0);
+            heightmapScaleSpinBox_->setEnabled(false);
+        }
+        if (heightmapImportButton_) {
+            heightmapImportButton_->setEnabled(false);
         }
         if (flatHeightButton_) {
             const QSignalBlocker flatBlocker(flatHeightButton_);
@@ -3704,6 +3747,28 @@ private:
         heightSeedSpinBox_->setValue(heightSeed);
     }
 
+    void syncHeightmapScaleWithPlanet() {
+        if (!heightmapScaleSpinBox_ || !heightmapImportButton_) {
+            return;
+        }
+
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            const QSignalBlocker blocker(heightmapScaleSpinBox_);
+            heightmapScaleSpinBox_->setValue(0.0);
+            heightmapScaleSpinBox_->setEnabled(false);
+            heightmapImportButton_->setEnabled(false);
+            return;
+        }
+
+        const QVariant scaleValue = planetComboBox_->itemData(index, kRoleHeightmapScaleKm);
+        const double scaleKm = scaleValue.isValid() ? qMax(0.0, scaleValue.toDouble()) : 0.0;
+        const QSignalBlocker blocker(heightmapScaleSpinBox_);
+        heightmapScaleSpinBox_->setValue(scaleKm);
+        heightmapScaleSpinBox_->setEnabled(true);
+        heightmapImportButton_->setEnabled(true);
+    }
+
     void syncFlatHeightWithPlanet() {
         if (!flatHeightButton_) {
             return;
@@ -3877,6 +3942,70 @@ private:
             return;
         }
         planetComboBox_->setItemData(index, heightSeedSpinBox_->value(), kRoleHeightSeed);
+    }
+
+    void syncPlanetHeightmapScaleWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !heightmapScaleSpinBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(index,
+                                     heightmapScaleSpinBox_->value(),
+                                     kRoleHeightmapScaleKm);
+    }
+
+    void onImportHeightmapRequested() {
+        if (!planetComboBox_) {
+            return;
+        }
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            showInputError(QStringLiteral("Сначала выберите планету."));
+            return;
+        }
+
+        const QString filePath = QFileDialog::getOpenFileName(
+            this,
+            QStringLiteral("Импорт heightmap"),
+            QString(),
+            QStringLiteral("Heightmap (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;Все файлы (*.*)"));
+        if (filePath.isEmpty()) {
+            return;
+        }
+
+        const double scaleKm = heightmapScaleSpinBox_ ? heightmapScaleSpinBox_->value() : 0.0;
+        SurfaceHeightmap validator;
+        if (!validator.loadFromFile(filePath, scaleKm)) {
+            showInputError(
+                QStringLiteral("Heightmap должен быть equirectangular (2:1) и 16-битным."));
+            return;
+        }
+
+        QImage image(filePath);
+        if (image.isNull()) {
+            showInputError(QStringLiteral("Не удалось загрузить файл heightmap."));
+            return;
+        }
+
+        const QString planetName =
+            planetComboBox_->itemData(index, kRolePlanetName).toString();
+        HeightmapStorage storage;
+        constexpr int kHeightmapSubdivisionLevel = 0;
+        // Сохраняем нормализованный 16-битный height-файл в папке heightmaps:
+        // исходный .tif нужен только для импорта и не обязателен при старте.
+        if (!storage.saveHeightmap(image, scaleKm, planetName, kHeightmapSubdivisionLevel)) {
+            showInputError(QStringLiteral("Не удалось сохранить heightmap в локальном хранилище."));
+            return;
+        }
+
+        const QString storedPath = storage.makeFilePath(planetName, kHeightmapSubdivisionLevel);
+        planetComboBox_->setItemData(index, storedPath, kRoleHeightmapPath);
+        planetComboBox_->setItemData(index, scaleKm, kRoleHeightmapScaleKm);
+        planetComboBox_->setItemData(index,
+                                     static_cast<int>(HeightSourceType::HeightmapEquirectangular),
+                                     kRoleHeightSourceType);
+        updateSurfaceGridTemperatures();
+        updateTemperaturePlot();
     }
 
     void syncPlanetCloudAlbedoWithSelection() {
