@@ -23,7 +23,8 @@ constexpr int kColumnPressure = 2;
 constexpr int kColumnShare = 3;
 constexpr double kKgPerGigaton = 1.0e12;
 constexpr double kGramsPerKg = 1000.0;
-constexpr double kDefaultMinTopPressureAtm = 0.01;
+// 0.001–0.0001 атм соответствует уровню 1–0.1 гПа для верхней границы профиля.
+constexpr double kDefaultMinTopPressureAtm = 0.001;
 
 class NumericColumnDelegate : public QStyledItemDelegate {
 public:
@@ -95,8 +96,8 @@ AtmosphereWidget::AtmosphereWidget(QWidget *parent, bool showTable)
     minTopPressureSpinBox_->setSuffix(QStringLiteral(" атм"));
     minTopPressureSpinBox_->setValue(kDefaultMinTopPressureAtm);
     minTopPressureSpinBox_->setToolTip(QStringLiteral(
-        "Целевое давление на верхней границе атмосферы: для сверхплотных атмосфер "
-        "помогает увеличить число слоёв и задать более реалистичную высоту профиля."));
+        "Целевое давление на верхней границе атмосферы: 0.001 атм ≈ 1 гПа. "
+        "Меньшие значения увеличивают расчётную высоту профиля и число слоёв."));
     verticalWindMixingSpinBox_ = new QDoubleSpinBox(this);
     verticalWindMixingSpinBox_->setRange(0.0, 1000.0);
     verticalWindMixingSpinBox_->setDecimals(2);
