@@ -4084,13 +4084,33 @@ private:
     void rebuildSurfaceGrid() {
         const double radiusKm = planetComboBox_->currentData(kRoleRadiusKm).toDouble();
         surfaceGrid_.setRadiusKm(radiusKm);
-        const HeightSourceType heightSource =
-            static_cast<HeightSourceType>(planetComboBox_->currentData(kRoleHeightSourceType)
-                                              .toInt());
-        const QString heightmapPath =
-            planetComboBox_->currentData(kRoleHeightmapPath).toString();
-        const double heightmapScaleKm =
-            planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
+
+        const int latitudePointCount = latitudePoints();
+        const int pointsPerLatitude = 6;
+        const int targetPointCount = qMax(1, latitudePointCount * pointsPerLatitude);
+        // Число ячеек в геодезической сетке равно 20 * 4^n, подбираем n под желаемое
+        // количество точек, чтобы сохранить приблизительную плотность сетки.
+        const double ratio = qMax(1.0, static_cast<double>(targetPointCount) / 20.0);
+        const int subdivisionLevel = qMax(0, static_cast<int>(qRound(qLn(ratio) / qLn(4.0))));
+
+        HeightSourceType heightSource = HeightSourceType::Procedural;
+        QString heightmapPath;
+        double heightmapScaleKm = 0.0;
+        const QString planetName =
+            planetComboBox_->currentData(kRolePlanetName).toString();
+        HeightmapStorage storage;
+        if (!planetName.isEmpty() &&
+            storage.loadHeightmap(&heightmapPath, &heightmapScaleKm, planetName, subdivisionLevel)) {
+            heightSource = HeightSourceType::HeightmapEquirectangular;
+        }
+        const int index = planetComboBox_->currentIndex();
+        if (index >= 0) {
+            planetComboBox_->setItemData(index, static_cast<int>(heightSource),
+                                         kRoleHeightSourceType);
+            planetComboBox_->setItemData(index, heightmapPath, kRoleHeightmapPath);
+            planetComboBox_->setItemData(index, heightmapScaleKm, kRoleHeightmapScaleKm);
+        }
+
         // Seed влияет только на HeightSourceType::Procedural.
         const quint32 heightSeed =
             planetComboBox_->currentData(kRoleHeightSeed).toUInt();
@@ -4109,14 +4129,6 @@ private:
             surfaceGrid_.generateIcosahedronGrid(0);
             return;
         }
-
-        const int latitudePointCount = latitudePoints();
-        const int pointsPerLatitude = 6;
-        const int targetPointCount = qMax(1, latitudePointCount * pointsPerLatitude);
-        // Число ячеек в геодезической сетке равно 20 * 4^n, подбираем n под желаемое
-        // количество точек, чтобы сохранить приблизительную плотность сетки.
-        const double ratio = qMax(1.0, static_cast<double>(targetPointCount) / 20.0);
-        const int subdivisionLevel = qMax(0, static_cast<int>(qRound(qLn(ratio) / qLn(4.0))));
         surfaceGrid_.generateIcosahedronGrid(subdivisionLevel);
 
         if (useFlatHeight) {
