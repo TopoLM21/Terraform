@@ -30,6 +30,7 @@
 #include "layered_radiation_model.h"
 #include "radiation_model_utils.h"
 #include "atmospheric_pressure_model.h"
+#include "atmospheric_profile_initializer.h"
 #include "atmospheric_cell_state.h"
 #include "atmosphere_model.h"
 
@@ -4887,14 +4888,57 @@ private:
                 return result;
             }
             auto &point = result.grid.points()[i];
+            const double baselineAirTemperature =
+                (i < baselineAirTemperatures.size()) ? baselineAirTemperatures.at(i) : 0.0;
+            const double surfaceAirTemperatureK =
+                (point.airTemperatureK > 0.0)
+                    ? point.airTemperatureK
+                    : ((baselineAirTemperature > 0.0) ? baselineAirTemperature : point.temperatureK);
+            double airColumnTemperatureK = surfaceAirTemperatureK;
+            bool usedProfileTemperature = false;
+            if (airColumnTemperatureK > 0.0) {
+                AtmosphericProfileInitializer profileInitializer(input.atmosphere);
+                AtmosphericProfileInitializer::Settings profileSettings;
+                profileSettings.surfaceTemperatureKelvin = airColumnTemperatureK;
+                profileSettings.surfacePressureAtm = localSeaLevelPressureAtm;
+                profileSettings.gravityMps2 = gravity;
+                profileSettings.layerCount = 12;
+                profileSettings.useDryAdiabatic = true;
+                profileSettings.minTopPressureFraction = 0.01;
+                const QVector<AtmosphericProfileLayer> profileLayers =
+                    profileInitializer.buildProfile(profileSettings);
+                double columnMass = 0.0;
+                double columnTemperatureSum = 0.0;
+                for (const auto &layer : profileLayers) {
+                    const double layerMass = layer.densityKgPerM3 * layer.thicknessMeters;
+                    if (layerMass > 0.0 && layer.temperatureKelvin > 0.0) {
+                        columnMass += layerMass;
+                        columnTemperatureSum += layer.temperatureKelvin * layerMass;
+                    }
+                }
+                if (columnMass > 0.0) {
+                    airColumnTemperatureK = columnTemperatureSum / columnMass;
+                    usedProfileTemperature = true;
+                }
+            }
+            if (!usedProfileTemperature && airColumnTemperatureK > 0.0) {
+                // Fallback: стандартный градиент 6.5 K/км, берём среднюю температуру
+                // столба на половине высоты.
+                constexpr double kStandardLapseRateKPerM = 0.0065;
+                const double halfHeightMeters = point.heightKm * 1000.0 * 0.5;
+                airColumnTemperatureK =
+                    qMax(1.0, airColumnTemperatureK - kStandardLapseRateKPerM * halfHeightMeters);
+            }
             // Инициализируем поверхностное давление (на уровне рельефа), чтобы дальше
             // переносить его ветром без пересчёта из всей атмосферы каждый тик.
             // Это нужно и в fallback-ветке, чтобы карта давления/ветра не оставалась с нулями.
             // Масса газового столба в ячейке пропорциональна её площади, поэтому P = (m_cell * g) / area_cell.
+            // Для масштаба высоты нужен воздушный профиль, а не температура грунта.
+            // Ожидаемый контроль: для Земли ~0.7 атм на 3 км при 280–290 K.
             const double pressureAtm =
                 AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
                                                               point.heightKm * 1000.0,
-                                                              point.temperatureK,
+                                                              airColumnTemperatureK,
                                                               input.atmosphere,
                                                               gravity);
             // Храним поверхностное давление в точке для последующего переноса по ветру.
