@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.157 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.158 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,6 +39,7 @@ add_executable(solar_constant
     include/planet_surface_point.h
     include/segment_selector_widget.h
     include/height_color_scale.h
+    include/heightmap_storage.h
     include/surface_point_state.h
     include/surface_temperature_state.h
     include/spectral_band_model.h
@@ -109,6 +110,7 @@ add_executable(solar_constant
     src/solar_calculator.cpp
     src/solar_display.cpp
     src/height_color_scale.cpp
+    src/heightmap_storage.cpp
     src/surface_map_widget.cpp
     src/surface_map_interpolator.cpp
     src/surface_map_cache.cpp
