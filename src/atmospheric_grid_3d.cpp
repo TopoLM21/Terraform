@@ -92,6 +92,7 @@ void AtmosphericGrid3D::resizeColumns(int columnCount, int layerCount) {
             column.resize(layerCount);
         }
     }
+    ensureHistorySize();
 }
 
 int AtmosphericGrid3D::columnCount() const {
@@ -238,6 +239,52 @@ bool AtmosphericGrid3D::updateLayerCountForTopPressure(double surfacePressureAtm
         gravityMps2 <= 0.0 || specificGasConstant <= 0.0) {
         return false;
     }
+    minTopPressureAtm_ = minTopPressureAtm;
+    if (columns_.isEmpty()) {
+        return false;
+    }
+
+    bool anyUpdated = false;
+    for (int columnIndex = 0; columnIndex < columns_.size(); ++columnIndex) {
+        const bool updated = updateColumnLayerCountForTopPressure(columnIndex,
+                                                                  surfacePressureAtm,
+                                                                  minTopPressureAtm,
+                                                                  surfaceTemperatureKelvin,
+                                                                  gravityMps2,
+                                                                  specificGasConstant,
+                                                                  changeThresholdFraction);
+        anyUpdated = anyUpdated || updated;
+    }
+    return anyUpdated;
+}
+
+void AtmosphericGrid3D::rebuildLayersWithInterpolation(int newLayerCount,
+                                                       double topHeightMeters) {
+    if (newLayerCount <= 0 || topHeightMeters <= 0.0) {
+        return;
+    }
+
+    for (auto &column : columns_) {
+        rebuildColumnLayersWithInterpolation(column, newLayerCount, topHeightMeters);
+    }
+    updateMaxLayerCount();
+}
+
+bool AtmosphericGrid3D::updateColumnLayerCountForTopPressure(int columnIndex,
+                                                             double surfacePressureAtm,
+                                                             double minTopPressureAtm,
+                                                             double surfaceTemperatureKelvin,
+                                                             double gravityMps2,
+                                                             double specificGasConstant,
+                                                             double changeThresholdFraction) {
+    if (columnIndex < 0 || columnIndex >= columns_.size()) {
+        return false;
+    }
+    if (surfacePressureAtm <= 0.0 || minTopPressureAtm <= 0.0 ||
+        surfacePressureAtm <= minTopPressureAtm || surfaceTemperatureKelvin <= 0.0 ||
+        gravityMps2 <= 0.0 || specificGasConstant <= 0.0) {
+        return false;
+    }
 
     minTopPressureAtm_ = minTopPressureAtm;
     // Масштабная высота: H = R * T / g (см. resolveLayerCountForTopPressure).
@@ -262,20 +309,23 @@ bool AtmosphericGrid3D::updateLayerCountForTopPressure(double surfacePressureAtm
         return false;
     }
 
+    ensureHistorySize();
+
     auto relativeChange = [](double value, double previous) -> double {
         return (previous > 0.0) ? qAbs(value - previous) / previous : 0.0;
     };
 
     const double scaleHeightDelta =
-        relativeChange(scaleHeightMeters, lastScaleHeightMeters_);
+        relativeChange(scaleHeightMeters, lastScaleHeightMetersByColumn_.at(columnIndex));
     const double surfacePressureDelta =
-        relativeChange(surfacePressureAtm, lastSurfacePressureAtm_);
+        relativeChange(surfacePressureAtm, lastSurfacePressureAtmByColumn_.at(columnIndex));
     const double topHeightDelta =
-        relativeChange(topHeightMeters, lastTopHeightMeters_);
+        relativeChange(topHeightMeters, lastTopHeightMetersByColumn_.at(columnIndex));
 
     const bool hasBaseline =
-        lastScaleHeightMeters_ > 0.0 && lastSurfacePressureAtm_ > 0.0 &&
-        lastTopHeightMeters_ > 0.0;
+        lastScaleHeightMetersByColumn_.at(columnIndex) > 0.0 &&
+        lastSurfacePressureAtmByColumn_.at(columnIndex) > 0.0 &&
+        lastTopHeightMetersByColumn_.at(columnIndex) > 0.0;
     const bool thresholdExceeded = (changeThresholdFraction <= 0.0)
         ? true
         : (!hasBaseline ||
@@ -283,22 +333,28 @@ bool AtmosphericGrid3D::updateLayerCountForTopPressure(double surfacePressureAtm
            surfacePressureDelta > changeThresholdFraction ||
            topHeightDelta > changeThresholdFraction);
 
-    lastScaleHeightMeters_ = scaleHeightMeters;
-    lastSurfacePressureAtm_ = surfacePressureAtm;
-    lastTopHeightMeters_ = topHeightMeters;
+    lastScaleHeightMetersByColumn_[columnIndex] = scaleHeightMeters;
+    lastSurfacePressureAtmByColumn_[columnIndex] = surfacePressureAtm;
+    lastTopHeightMetersByColumn_[columnIndex] = topHeightMeters;
 
-    if (!thresholdExceeded || columns_.isEmpty()) {
+    if (!thresholdExceeded) {
         return false;
     }
 
-    rebuildLayersWithInterpolation(newLayerCount, topHeightMeters);
+    if (!rebuildColumnLayersWithInterpolation(columns_[columnIndex],
+                                              newLayerCount,
+                                              topHeightMeters)) {
+        return false;
+    }
+    updateMaxLayerCount();
     return true;
 }
 
-void AtmosphericGrid3D::rebuildLayersWithInterpolation(int newLayerCount,
-                                                       double topHeightMeters) {
+bool AtmosphericGrid3D::rebuildColumnLayersWithInterpolation(AtmosphericColumn &column,
+                                                             int newLayerCount,
+                                                             double topHeightMeters) {
     if (newLayerCount <= 0 || topHeightMeters <= 0.0) {
-        return;
+        return false;
     }
 
     int effectiveLayerCount = newLayerCount;
@@ -328,41 +384,54 @@ void AtmosphericGrid3D::rebuildLayersWithInterpolation(int newLayerCount,
         uniformThickness = 0.0;
     }
     if (bottomThickness <= 0.0 || (remainingLayers > 0 && uniformThickness <= 0.0)) {
+        return false;
+    }
+
+    const QVector<AtmosphericLayerState> oldLayers = column.layers();
+
+    QVector<AtmosphericLayerResampler::TargetLayer> targets;
+    targets.reserve(effectiveLayerCount);
+    double bottomEdgeMeters = 0.0;
+    targets.push_back(AtmosphericLayerResampler::TargetLayer{
+        bottomEdgeMeters + bottomThickness * 0.5, bottomThickness});
+    bottomEdgeMeters += bottomThickness;
+    for (int i = 0; i < remainingLayers; ++i) {
+        const double heightMeters = bottomEdgeMeters + uniformThickness * 0.5;
+        targets.push_back(AtmosphericLayerResampler::TargetLayer{
+            heightMeters, uniformThickness});
+        bottomEdgeMeters += uniformThickness;
+    }
+
+    const QVector<AtmosphericLayerState> newLayers =
+        AtmosphericLayerResampler::resample(oldLayers, targets);
+    if (newLayers.isEmpty()) {
+        // Если ресемплинг дал пустой результат, оставляем колонку без изменений.
+        return false;
+    }
+    column.resize(effectiveLayerCount);
+    auto &layers = column.layers();
+    for (int i = 0; i < layers.size(); ++i) {
+        layers[i] = newLayers.at(i);
+    }
+    return true;
+}
+
+void AtmosphericGrid3D::updateMaxLayerCount() {
+    int maxCount = 0;
+    for (const auto &column : columns_) {
+        maxCount = qMax(maxCount, column.layers().size());
+    }
+    layerCount_ = maxCount;
+}
+
+void AtmosphericGrid3D::ensureHistorySize() {
+    const int count = columns_.size();
+    if (lastScaleHeightMetersByColumn_.size() == count &&
+        lastSurfacePressureAtmByColumn_.size() == count &&
+        lastTopHeightMetersByColumn_.size() == count) {
         return;
     }
-
-    bool anyColumnRebuilt = false;
-    for (auto &column : columns_) {
-        const QVector<AtmosphericLayerState> oldLayers = column.layers();
-
-        QVector<AtmosphericLayerResampler::TargetLayer> targets;
-        targets.reserve(effectiveLayerCount);
-        double bottomEdgeMeters = 0.0;
-        targets.push_back(AtmosphericLayerResampler::TargetLayer{
-            bottomEdgeMeters + bottomThickness * 0.5, bottomThickness});
-        bottomEdgeMeters += bottomThickness;
-        for (int i = 0; i < remainingLayers; ++i) {
-            const double heightMeters = bottomEdgeMeters + uniformThickness * 0.5;
-            targets.push_back(AtmosphericLayerResampler::TargetLayer{
-                heightMeters, uniformThickness});
-            bottomEdgeMeters += uniformThickness;
-        }
-
-        const QVector<AtmosphericLayerState> newLayers =
-            AtmosphericLayerResampler::resample(oldLayers, targets);
-        if (newLayers.isEmpty()) {
-            // Если ресемплинг дал пустой результат, оставляем колонку без изменений.
-            continue;
-        }
-        column.resize(effectiveLayerCount);
-        auto &layers = column.layers();
-        for (int i = 0; i < layers.size(); ++i) {
-            layers[i] = newLayers.at(i);
-        }
-        anyColumnRebuilt = true;
-    }
-
-    if (anyColumnRebuilt) {
-        layerCount_ = effectiveLayerCount;
-    }
+    lastScaleHeightMetersByColumn_.fill(0.0, count);
+    lastSurfacePressureAtmByColumn_.fill(0.0, count);
+    lastTopHeightMetersByColumn_.fill(0.0, count);
 }

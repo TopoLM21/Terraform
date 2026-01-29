@@ -233,10 +233,13 @@ void AtmosphericDynamicsSolver::updateLayerWinds(const PlanetSurfaceGrid &grid,
         }
 
         for (int i = 0; i < pointCount; ++i) {
-            auto &layer = atmosphereGrid.columns()[i].layers()[layerIndex];
+            auto &layers = atmosphereGrid.columns()[i].layers();
+            if (layerIndex >= layers.size()) {
+                continue;
+            }
             const WindVector clamped = clampWind(nextWinds.at(i));
-            layer.setWindUMps(clamped.eastMps);
-            layer.setWindVMps(clamped.northMps);
+            layers[layerIndex].setWindUMps(clamped.eastMps);
+            layers[layerIndex].setWindVMps(clamped.northMps);
         }
     }
 }

@@ -76,18 +76,16 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
     const double minTopPressureAtm = input.atmosphereGrid.minTopPressureAtm();
     if (minTopPressureAtm > 0.0) {
-        double meanSurfacePressureAtm = 0.0;
-        double meanSurfaceTemperatureKelvin = 0.0;
-        int pressureSamples = 0;
-        int temperatureSamples = 0;
         for (int i = 0; i < processedCount; ++i) {
             const auto &point = input.surfaceGrid.points().at(i);
-            if (point.pressureAtm > 0.0) {
-                meanSurfacePressureAtm += point.pressureAtm;
-                ++pressureSamples;
+            const AtmosphericColumn &column = input.atmosphereGrid.columns().at(i);
+            // Пересчитываем сетку по колонке: давление берём с поверхности,
+            // а температуру — из нижнего слоя (если он есть), иначе из поверхности.
+            double surfacePressureAtm = point.pressureAtm;
+            if (surfacePressureAtm <= 0.0 && !column.layers().isEmpty()) {
+                surfacePressureAtm = column.layers().first().pressureAtm();
             }
 
-            const AtmosphericColumn &column = input.atmosphereGrid.columns().at(i);
             double surfaceTemperatureKelvin = 0.0;
             if (!column.layers().isEmpty()) {
                 surfaceTemperatureKelvin = column.layers().first().temperatureKelvin();
@@ -96,20 +94,17 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             } else {
                 surfaceTemperatureKelvin = point.temperatureK;
             }
-            if (surfaceTemperatureKelvin > 0.0) {
-                meanSurfaceTemperatureKelvin += surfaceTemperatureKelvin;
-                ++temperatureSamples;
-            }
-        }
 
-        if (pressureSamples > 0 && temperatureSamples > 0) {
-            input.atmosphereGrid.updateLayerCountForTopPressure(
-                meanSurfacePressureAtm / static_cast<double>(pressureSamples),
-                minTopPressureAtm,
-                meanSurfaceTemperatureKelvin / static_cast<double>(temperatureSamples),
-                gravityMps2_,
-                rSpecific_,
-                kLayerRegridThresholdFraction);
+            if (surfacePressureAtm > 0.0 && surfaceTemperatureKelvin > 0.0) {
+                input.atmosphereGrid.updateColumnLayerCountForTopPressure(
+                    i,
+                    surfacePressureAtm,
+                    minTopPressureAtm,
+                    surfaceTemperatureKelvin,
+                    gravityMps2_,
+                    rSpecific_,
+                    kLayerRegridThresholdFraction);
+            }
         }
     }
 
