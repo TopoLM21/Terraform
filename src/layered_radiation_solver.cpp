@@ -58,9 +58,17 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
     Q_UNUSED(surfaceShortwaveFlux);
 
     // Длинноволновое излучение: двухпоточная модель Eddington по слоям.
-    const double surfaceTemperature = qMax(0.0, surfaceTemperatureKelvin);
-    const double surfaceEmission =
-        kStefanBoltzmannConstant * std::pow(surfaceTemperature, 4.0);
+    double surfaceTemperature = surfaceTemperatureKelvin;
+    if (!std::isfinite(surfaceTemperature)) {
+        // Защита от переполнений из-за степенной зависимости T^4.
+        surfaceTemperature = 0.0;
+    }
+    surfaceTemperature = qMax(0.0, surfaceTemperature);
+    double surfaceEmission = kStefanBoltzmannConstant * std::pow(surfaceTemperature, 4.0);
+    if (!std::isfinite(surfaceEmission)) {
+        // Защита от переполнений из-за степенной зависимости T^4.
+        surfaceEmission = 0.0;
+    }
 
     const int layerCount = layers.size();
     QVector<double> upwardFlux;
@@ -71,19 +79,43 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
     upwardFlux[0] = surfaceEmission;
     for (int i = 0; i < layerCount; ++i) {
         const double emissivity = layerEmissivity(layers.at(i).opticalDepthLongwave());
-        const double emission =
-            emissivity * kStefanBoltzmannConstant *
-            std::pow(qMax(0.0, layers.at(i).temperatureKelvin()), 4.0);
+        double layerTemperature = layers.at(i).temperatureKelvin();
+        if (!std::isfinite(layerTemperature)) {
+            // Защита от переполнений из-за степенной зависимости T^4.
+            layerTemperature = 0.0;
+        }
+        layerTemperature = qMax(0.0, layerTemperature);
+        double emission = emissivity * kStefanBoltzmannConstant * std::pow(layerTemperature, 4.0);
+        if (!std::isfinite(emission)) {
+            // Защита от переполнений из-за степенной зависимости T^4.
+            emission = 0.0;
+        }
         upwardFlux[i + 1] = upwardFlux[i] * (1.0 - emissivity) + emission;
+        if (!std::isfinite(upwardFlux[i + 1])) {
+            // Защита от переполнений из-за степенной зависимости T^4.
+            upwardFlux[i + 1] = 0.0;
+        }
     }
 
     downwardFlux[layerCount] = 0.0;
     for (int i = layerCount - 1; i >= 0; --i) {
         const double emissivity = layerEmissivity(layers.at(i).opticalDepthLongwave());
-        const double emission =
-            emissivity * kStefanBoltzmannConstant *
-            std::pow(qMax(0.0, layers.at(i).temperatureKelvin()), 4.0);
+        double layerTemperature = layers.at(i).temperatureKelvin();
+        if (!std::isfinite(layerTemperature)) {
+            // Защита от переполнений из-за степенной зависимости T^4.
+            layerTemperature = 0.0;
+        }
+        layerTemperature = qMax(0.0, layerTemperature);
+        double emission = emissivity * kStefanBoltzmannConstant * std::pow(layerTemperature, 4.0);
+        if (!std::isfinite(emission)) {
+            // Защита от переполнений из-за степенной зависимости T^4.
+            emission = 0.0;
+        }
         downwardFlux[i] = downwardFlux[i + 1] * (1.0 - emissivity) + emission;
+        if (!std::isfinite(downwardFlux[i])) {
+            // Защита от переполнений из-за степенной зависимости T^4.
+            downwardFlux[i] = 0.0;
+        }
     }
 
     for (int i = 0; i < layerCount; ++i) {
@@ -92,8 +124,12 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
             continue;
         }
         // Баланс слоя: (F_up, F_down) на границах слоя -> изменение энергии слоя.
-        const double netLongwaveFlux =
+        double netLongwaveFlux =
             (upwardFlux[i] + downwardFlux[i + 1]) - (upwardFlux[i + 1] + downwardFlux[i]);
+        if (!std::isfinite(netLongwaveFlux)) {
+            // Защита от переполнений из-за степенной зависимости T^4.
+            netLongwaveFlux = 0.0;
+        }
         const double netFlux = shortwaveAbsorbed[i] + netLongwaveFlux;
         const double rawDelta = netFlux * timeStepSeconds_ / heatCapacity;
         // Ограничиваем шаг температуры для численной устойчивости в разрежённых слоях
