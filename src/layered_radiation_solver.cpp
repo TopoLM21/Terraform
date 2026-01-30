@@ -120,7 +120,7 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
 
     for (int i = 0; i < layerCount; ++i) {
         const double heatCapacity = layers.at(i).heatCapacityJPerM2K();
-        if (heatCapacity <= kMinHeatCapacityJPerM2K) {
+        if (heatCapacity <= 0.0) {
             continue;
         }
         // Баланс слоя: (F_up, F_down) на границах слоя -> изменение энергии слоя.
@@ -133,7 +133,8 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
         const double netFlux = shortwaveAbsorbed[i] + netLongwaveFlux;
         const double rawDelta = netFlux * timeStepSeconds_ / heatCapacity;
         // Ограничиваем шаг температуры для численной устойчивости в разрежённых слоях
-        // (особенно у верхней границы атмосферы с малой теплоёмкостью).
+        // (особенно у верхней границы атмосферы с малой теплоёмкостью), при этом
+        // тонкие слои всё равно должны откликаться на радиационные потоки.
         temperatureDeltas[i] = qBound(-kMaxDeltaKPerStep, rawDelta, kMaxDeltaKPerStep);
     }
 
