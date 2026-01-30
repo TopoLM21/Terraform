@@ -3986,7 +3986,7 @@ private:
                 message = QStringLiteral("Соотношение сторон не 2:1.");
                 break;
             case SurfaceHeightmap::LoadResult::DepthTooLow:
-                message = QStringLiteral("Depth < 16.");
+                message = QStringLiteral("Недостаточная глубина: нужен 16-битный grayscale или 8-битный grayscale/Indexed8.");
                 break;
             case SurfaceHeightmap::LoadResult::ConversionFailed:
                 message = QStringLiteral("Не удалось конвертировать в QImage::Format_Grayscale16.");
