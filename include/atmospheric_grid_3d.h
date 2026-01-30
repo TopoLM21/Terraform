@@ -37,12 +37,18 @@ public:
                                               double gravityMps2,
                                               double specificGasConstant,
                                               double changeThresholdFraction);
+    bool updateColumnLayerCountFixedThickness(int columnIndex,
+                                              int newLayerCount,
+                                              double newLayerThicknessMeters);
 
 private:
     void rebuildLayersWithInterpolation(int newLayerCount, double topHeightMeters);
     bool rebuildColumnLayersWithInterpolation(AtmosphericColumn &column,
                                               int newLayerCount,
                                               double topHeightMeters);
+    bool rebuildColumnLayersWithFixedThickness(AtmosphericColumn &column,
+                                               int newLayerCount,
+                                               double newLayerThicknessMeters);
     void updateMaxLayerCount();
     void ensureHistorySize();
 

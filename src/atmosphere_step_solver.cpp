@@ -66,7 +66,6 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
     if (processedCount <= 0) {
         return;
     }
-    constexpr double kLayerRegridThresholdFraction = 0.1;
     verticalWindMixingSolver_.setMixingCoefficient(input.verticalWindMixingCoefficientKz);
     int logPointIndex = input.logPointIndex;
     if (logPointIndex < 0 || logPointIndex >= processedCount) {
@@ -75,38 +74,6 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
     }
 
     const double minTopPressureAtm = input.atmosphereGrid.minTopPressureAtm();
-    if (minTopPressureAtm > 0.0) {
-        for (int i = 0; i < processedCount; ++i) {
-            const auto &point = input.surfaceGrid.points().at(i);
-            const AtmosphericColumn &column = input.atmosphereGrid.columns().at(i);
-            // Пересчитываем сетку по колонке: давление берём с поверхности,
-            // а температуру — из нижнего слоя (если он есть), иначе из поверхности.
-            double surfacePressureAtm = point.pressureAtm;
-            if (surfacePressureAtm <= 0.0 && !column.layers().isEmpty()) {
-                surfacePressureAtm = column.layers().first().pressureAtm();
-            }
-
-            double surfaceTemperatureKelvin = 0.0;
-            if (!column.layers().isEmpty()) {
-                surfaceTemperatureKelvin = column.layers().first().temperatureKelvin();
-            } else if (point.airTemperatureK > 0.0) {
-                surfaceTemperatureKelvin = point.airTemperatureK;
-            } else {
-                surfaceTemperatureKelvin = point.temperatureK;
-            }
-
-            if (surfacePressureAtm > 0.0 && surfaceTemperatureKelvin > 0.0) {
-                input.atmosphereGrid.updateColumnLayerCountForTopPressure(
-                    i,
-                    surfacePressureAtm,
-                    minTopPressureAtm,
-                    surfaceTemperatureKelvin,
-                    gravityMps2_,
-                    rSpecific_,
-                    kLayerRegridThresholdFraction);
-            }
-        }
-    }
 
     // Последовательность шага атмосферы:
     // (1) радиация по слоям, (2) конвективная коррекция,
@@ -158,6 +125,39 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         point.subsurfaceFluxWPerM2 += -surfaceAirFluxWPerM2;
 
         updateLayerPressures(point.pressureAtm, layers);
+
+        if (minTopPressureAtm > 0.0 && !layers.isEmpty()) {
+            const AtmosphericLayerState &topLayer = layers.last();
+            const double fixedLayerThicknessMeters = topLayer.thicknessMeters();
+            if (fixedLayerThicknessMeters > 0.0 &&
+                topLayer.temperatureKelvin() > 0.0 &&
+                topLayer.pressureAtm() > 0.0 &&
+                gravityMps2_ > 0.0 &&
+                rSpecific_ > 0.0) {
+                // Масштабная высота: H = R_specific * T / g, тогда
+                // P(z + dz) = P(z) * exp(-dz / H). Для нового слоя берём dz = толщину слоя.
+                // Толщины фиксируем, чтобы новые слои добавлялись без перерасчёта геометрии.
+                const double scaleHeightMeters =
+                    (rSpecific_ * topLayer.temperatureKelvin()) / gravityMps2_;
+                if (scaleHeightMeters > 0.0) {
+                    const double nextLayerPressureAtm =
+                        topLayer.pressureAtm() *
+                        qExp(-fixedLayerThicknessMeters / scaleHeightMeters);
+                    if (nextLayerPressureAtm > minTopPressureAtm) {
+                        input.atmosphereGrid.updateColumnLayerCountFixedThickness(
+                            i,
+                            layers.size() + 1,
+                            fixedLayerThicknessMeters);
+                    } else if (topLayer.pressureAtm() < minTopPressureAtm &&
+                               layers.size() > 1) {
+                        input.atmosphereGrid.updateColumnLayerCountFixedThickness(
+                            i,
+                            layers.size() - 1,
+                            fixedLayerThicknessMeters);
+                    }
+                }
+            }
+        }
 
         if (i == logPointIndex) {
             qCInfo(atmosphereProfileLog) << "Atmosphere profile (layered step)"

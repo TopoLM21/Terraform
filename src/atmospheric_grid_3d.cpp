@@ -350,6 +350,24 @@ bool AtmosphericGrid3D::updateColumnLayerCountForTopPressure(int columnIndex,
     return true;
 }
 
+bool AtmosphericGrid3D::updateColumnLayerCountFixedThickness(int columnIndex,
+                                                             int newLayerCount,
+                                                             double newLayerThicknessMeters) {
+    if (columnIndex < 0 || columnIndex >= columns_.size()) {
+        return false;
+    }
+    if (newLayerCount <= 0) {
+        return false;
+    }
+    if (!rebuildColumnLayersWithFixedThickness(columns_[columnIndex],
+                                               newLayerCount,
+                                               newLayerThicknessMeters)) {
+        return false;
+    }
+    updateMaxLayerCount();
+    return true;
+}
+
 bool AtmosphericGrid3D::rebuildColumnLayersWithInterpolation(AtmosphericColumn &column,
                                                              int newLayerCount,
                                                              double topHeightMeters) {
@@ -409,6 +427,55 @@ bool AtmosphericGrid3D::rebuildColumnLayersWithInterpolation(AtmosphericColumn &
         return false;
     }
     column.resize(effectiveLayerCount);
+    auto &layers = column.layers();
+    for (int i = 0; i < layers.size(); ++i) {
+        layers[i] = newLayers.at(i);
+    }
+    return true;
+}
+
+bool AtmosphericGrid3D::rebuildColumnLayersWithFixedThickness(AtmosphericColumn &column,
+                                                              int newLayerCount,
+                                                              double newLayerThicknessMeters) {
+    if (newLayerCount <= 0) {
+        return false;
+    }
+
+    const QVector<AtmosphericLayerState> oldLayers = column.layers();
+    if (oldLayers.isEmpty()) {
+        return false;
+    }
+
+    const int oldLayerCount = oldLayers.size();
+    const int retainedLayerCount = qMin(oldLayerCount, newLayerCount);
+
+    QVector<AtmosphericLayerResampler::TargetLayer> targets;
+    targets.reserve(newLayerCount);
+    double bottomEdgeMeters = 0.0;
+    for (int i = 0; i < retainedLayerCount; ++i) {
+        const double thicknessMeters = oldLayers.at(i).thicknessMeters();
+        if (thicknessMeters <= 0.0) {
+            return false;
+        }
+        targets.push_back(AtmosphericLayerResampler::TargetLayer{
+            bottomEdgeMeters + thicknessMeters * 0.5, thicknessMeters});
+        bottomEdgeMeters += thicknessMeters;
+    }
+    for (int i = retainedLayerCount; i < newLayerCount; ++i) {
+        if (newLayerThicknessMeters <= 0.0) {
+            return false;
+        }
+        targets.push_back(AtmosphericLayerResampler::TargetLayer{
+            bottomEdgeMeters + newLayerThicknessMeters * 0.5, newLayerThicknessMeters});
+        bottomEdgeMeters += newLayerThicknessMeters;
+    }
+
+    const QVector<AtmosphericLayerState> newLayers =
+        AtmosphericLayerResampler::resample(oldLayers, targets);
+    if (newLayers.isEmpty()) {
+        return false;
+    }
+    column.resize(newLayerCount);
     auto &layers = column.layers();
     for (int i = 0; i < layers.size(); ++i) {
         layers[i] = newLayers.at(i);
