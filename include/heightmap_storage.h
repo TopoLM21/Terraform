@@ -17,6 +17,9 @@ public:
                        double *scaleOut,
                        const QString &planetName,
                        int subdivisionLevel) const;
+    bool loadHeightmapImage(QImage *imageOut,
+                            double *scaleOut,
+                            const QString &filePath) const;
 
 private:
     static QString sanitizeName(const QString &planetName);

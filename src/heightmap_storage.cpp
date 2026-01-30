@@ -17,6 +17,48 @@ qint64 headerByteSize() {
            static_cast<qint64>(sizeof(quint32)) * 2 +
            static_cast<qint64>(sizeof(double));
 }
+
+struct HeightmapHeader {
+    quint16 version = 0;
+    quint32 width = 0;
+    quint32 height = 0;
+    double scaleKm = 0.0;
+};
+
+bool readHeightmapHeader(QDataStream &stream, HeightmapHeader *headerOut) {
+    if (!headerOut) {
+        return false;
+    }
+
+    char magic[kMagicSize] = {};
+    if (stream.readRawData(magic, kMagicSize) != kMagicSize) {
+        return false;
+    }
+
+    if (std::memcmp(magic, kMagic, kMagicSize) != 0) {
+        return false;
+    }
+
+    stream >> headerOut->version
+           >> headerOut->width
+           >> headerOut->height
+           >> headerOut->scaleKm;
+
+    if (stream.status() != QDataStream::Ok) {
+        return false;
+    }
+
+    if (headerOut->version != kFormatVersion) {
+        return false;
+    }
+
+    if (headerOut->width == 0 || headerOut->height == 0 ||
+        headerOut->width != headerOut->height * 2) {
+        return false;
+    }
+
+    return true;
+}
 } // namespace
 
 QString HeightmapStorage::storageDir() const {
@@ -121,35 +163,13 @@ bool HeightmapStorage::loadHeightmap(QString *pathOut,
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setVersion(QDataStream::Qt_5_15);
 
-    char magic[kMagicSize] = {};
-    if (stream.readRawData(magic, kMagicSize) != kMagicSize) {
-        return false;
-    }
-
-    if (std::memcmp(magic, kMagic, kMagicSize) != 0) {
-        return false;
-    }
-
-    quint16 version = 0;
-    quint32 width = 0;
-    quint32 height = 0;
-    double scaleKm = 0.0;
-    stream >> version >> width >> height >> scaleKm;
-
-    if (stream.status() != QDataStream::Ok) {
-        return false;
-    }
-
-    if (version != kFormatVersion) {
-        return false;
-    }
-
-    if (width == 0 || height == 0 || width != height * 2) {
+    HeightmapHeader header;
+    if (!readHeightmapHeader(stream, &header)) {
         return false;
     }
 
     const qint64 expectedSize = headerByteSize() +
-        static_cast<qint64>(width) * static_cast<qint64>(height) *
+        static_cast<qint64>(header.width) * static_cast<qint64>(header.height) *
             static_cast<qint64>(sizeof(quint16));
     if (file.size() < expectedSize) {
         return false;
@@ -159,8 +179,64 @@ bool HeightmapStorage::loadHeightmap(QString *pathOut,
         *pathOut = filePath;
     }
     if (scaleOut) {
-        *scaleOut = scaleKm;
+        *scaleOut = header.scaleKm;
     }
 
+    return true;
+}
+
+bool HeightmapStorage::loadHeightmapImage(QImage *imageOut,
+                                          double *scaleOut,
+                                          const QString &filePath) const {
+    if (!imageOut) {
+        return false;
+    }
+
+    QFile file(filePath);
+    if (!file.exists()) {
+        return false;
+    }
+
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+
+    QDataStream stream(&file);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setVersion(QDataStream::Qt_5_15);
+
+    HeightmapHeader header;
+    if (!readHeightmapHeader(stream, &header)) {
+        return false;
+    }
+
+    const qint64 expectedSize = headerByteSize() +
+        static_cast<qint64>(header.width) * static_cast<qint64>(header.height) *
+            static_cast<qint64>(sizeof(quint16));
+    if (file.size() < expectedSize) {
+        return false;
+    }
+
+    QImage image(static_cast<int>(header.width),
+                 static_cast<int>(header.height),
+                 QImage::Format_Grayscale16);
+    if (image.isNull()) {
+        return false;
+    }
+
+    for (int y = 0; y < image.height(); ++y) {
+        auto *line = reinterpret_cast<quint16 *>(image.scanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            stream >> line[x];
+        }
+        if (stream.status() != QDataStream::Ok) {
+            return false;
+        }
+    }
+
+    *imageOut = image;
+    if (scaleOut) {
+        *scaleOut = header.scaleKm;
+    }
     return true;
 }
