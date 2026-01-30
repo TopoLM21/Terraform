@@ -4114,6 +4114,7 @@ private:
         HeightSourceType heightSource = HeightSourceType::Procedural;
         QString heightmapPath;
         double heightmapScaleKm = 0.0;
+        HeightmapStorage storage;
         const QString comboHeightmapPath =
             planetComboBox_->currentData(kRoleHeightmapPath).toString();
         const double comboHeightmapScaleKm =
@@ -4125,7 +4126,6 @@ private:
         } else {
             const QString planetName =
                 planetComboBox_->currentData(kRolePlanetName).toString();
-            HeightmapStorage storage;
             bool loaded = false;
             if (!planetName.isEmpty()) {
                 loaded = storage.loadHeightmap(&heightmapPath, &heightmapScaleKm,
@@ -4137,6 +4137,14 @@ private:
             }
             if (loaded) {
                 heightSource = HeightSourceType::HeightmapEquirectangular;
+            }
+        }
+        if (heightSource == HeightSourceType::HeightmapEquirectangular &&
+            heightmapPath.endsWith(QStringLiteral(".h16"), Qt::CaseInsensitive)) {
+            QImage storedImage;
+            double storedScaleKm = 0.0;
+            if (storage.loadHeightmapImage(&storedImage, &storedScaleKm, heightmapPath)) {
+                heightmapScaleKm = storedScaleKm;
             }
         }
         const int index = planetComboBox_->currentIndex();

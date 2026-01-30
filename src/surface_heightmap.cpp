@@ -1,5 +1,7 @@
 #include "surface_heightmap.h"
 
+#include "heightmap_storage.h"
+
 #include <QtMath>
 
 #include <cmath>
@@ -16,6 +18,23 @@ SurfaceHeightmap::LoadResult SurfaceHeightmap::loadFromFile(const QString &path,
 
     if (path.trimmed().isEmpty()) {
         return LoadResult::EmptyPath;
+    }
+
+    // .h16 — локальный формат heightmap с заголовком и масштабом, не стандартное изображение.
+    if (path.endsWith(QStringLiteral(".h16"), Qt::CaseInsensitive)) {
+        HeightmapStorage storage;
+        QImage image;
+        double storedScaleKm = 0.0;
+        if (!storage.loadHeightmapImage(&image, &storedScaleKm, path)) {
+            return LoadResult::FileUnreadable;
+        }
+        if (image.isNull()) {
+            return LoadResult::FileUnreadable;
+        }
+        image_ = image;
+        heightScaleKm_ = storedScaleKm;
+        isValid_ = true;
+        return LoadResult::Ok;
     }
 
     QImage image(path);
