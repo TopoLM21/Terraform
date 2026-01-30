@@ -7,6 +7,8 @@
 namespace {
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kTwoStreamEddingtonFactor = 0.75;
+constexpr double kMinHeatCapacityJPerM2K = 1.0e-3;
+constexpr double kMaxDeltaKPerStep = 20.0;
 
 // Эмиссивность слоя в LW диапазоне для двухпоточной модели Eddington.
 // T_lw ≈ 1 / (1 + 3/4 * τ), ε = 1 - T_lw.
@@ -86,14 +88,17 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
 
     for (int i = 0; i < layerCount; ++i) {
         const double heatCapacity = layers.at(i).heatCapacityJPerM2K();
-        if (heatCapacity <= 0.0) {
+        if (heatCapacity <= kMinHeatCapacityJPerM2K) {
             continue;
         }
         // Баланс слоя: (F_up, F_down) на границах слоя -> изменение энергии слоя.
         const double netLongwaveFlux =
             (upwardFlux[i] + downwardFlux[i + 1]) - (upwardFlux[i + 1] + downwardFlux[i]);
         const double netFlux = shortwaveAbsorbed[i] + netLongwaveFlux;
-        temperatureDeltas[i] = netFlux * timeStepSeconds_ / heatCapacity;
+        const double rawDelta = netFlux * timeStepSeconds_ / heatCapacity;
+        // Ограничиваем шаг температуры для численной устойчивости в разрежённых слоях
+        // (особенно у верхней границы атмосферы с малой теплоёмкостью).
+        temperatureDeltas[i] = qBound(-kMaxDeltaKPerStep, rawDelta, kMaxDeltaKPerStep);
     }
 
     return temperatureDeltas;
