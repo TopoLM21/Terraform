@@ -39,6 +39,7 @@
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QFileInfo>
 #include <QtCore/QLocale>
 #include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
@@ -4113,12 +4114,30 @@ private:
         HeightSourceType heightSource = HeightSourceType::Procedural;
         QString heightmapPath;
         double heightmapScaleKm = 0.0;
-        const QString planetName =
-            planetComboBox_->currentData(kRolePlanetName).toString();
-        HeightmapStorage storage;
-        if (!planetName.isEmpty() &&
-            storage.loadHeightmap(&heightmapPath, &heightmapScaleKm, planetName, subdivisionLevel)) {
+        const QString comboHeightmapPath =
+            planetComboBox_->currentData(kRoleHeightmapPath).toString();
+        const double comboHeightmapScaleKm =
+            planetComboBox_->currentData(kRoleHeightmapScaleKm).toDouble();
+        if (!comboHeightmapPath.isEmpty() && QFileInfo::exists(comboHeightmapPath)) {
+            heightmapPath = comboHeightmapPath;
+            heightmapScaleKm = comboHeightmapScaleKm;
             heightSource = HeightSourceType::HeightmapEquirectangular;
+        } else {
+            const QString planetName =
+                planetComboBox_->currentData(kRolePlanetName).toString();
+            HeightmapStorage storage;
+            bool loaded = false;
+            if (!planetName.isEmpty()) {
+                loaded = storage.loadHeightmap(&heightmapPath, &heightmapScaleKm,
+                                               planetName, subdivisionLevel);
+                if (!loaded && subdivisionLevel > 0) {
+                    loaded = storage.loadHeightmap(&heightmapPath, &heightmapScaleKm,
+                                                   planetName, 0);
+                }
+            }
+            if (loaded) {
+                heightSource = HeightSourceType::HeightmapEquirectangular;
+            }
         }
         const int index = planetComboBox_->currentIndex();
         if (index >= 0) {
