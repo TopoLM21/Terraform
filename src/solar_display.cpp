@@ -3969,21 +3969,38 @@ private:
             QStringLiteral("Импорт heightmap"),
             QString(),
             QStringLiteral("Heightmap (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;Все файлы (*.*)"));
-        if (filePath.isEmpty()) {
-            return;
-        }
-
         const double scaleKm = heightmapScaleSpinBox_ ? heightmapScaleSpinBox_->value() : 0.0;
         SurfaceHeightmap validator;
-        if (!validator.loadFromFile(filePath, scaleKm)) {
-            showInputError(
-                QStringLiteral("Heightmap должен быть equirectangular (2:1) и 16-битным."));
+        const SurfaceHeightmap::LoadResult loadResult =
+            validator.loadFromFile(filePath, scaleKm);
+        if (loadResult != SurfaceHeightmap::LoadResult::Ok) {
+            QString message;
+            switch (loadResult) {
+            case SurfaceHeightmap::LoadResult::EmptyPath:
+                message = QStringLiteral("Пустой путь.");
+                break;
+            case SurfaceHeightmap::LoadResult::FileUnreadable:
+                message = QStringLiteral("Файл не читается.");
+                break;
+            case SurfaceHeightmap::LoadResult::InvalidAspectRatio:
+                message = QStringLiteral("Соотношение сторон не 2:1.");
+                break;
+            case SurfaceHeightmap::LoadResult::DepthTooLow:
+                message = QStringLiteral("Depth < 16.");
+                break;
+            case SurfaceHeightmap::LoadResult::ConversionFailed:
+                message = QStringLiteral("Не удалось конвертировать в QImage::Format_Grayscale16.");
+                break;
+            case SurfaceHeightmap::LoadResult::Ok:
+                break;
+            }
+            showInputError(message);
             return;
         }
 
         QImage image(filePath);
         if (image.isNull()) {
-            showInputError(QStringLiteral("Не удалось загрузить файл heightmap."));
+            showInputError(QStringLiteral("Файл не читается."));
             return;
         }
 
