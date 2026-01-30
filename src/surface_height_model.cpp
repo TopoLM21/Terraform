@@ -172,7 +172,8 @@ SurfaceHeightModel::SurfaceHeightModel(HeightSourceType sourceType,
       useContinentsHeight_(useContinentsHeight),
       hasSeaLevel_(hasSeaLevel) {
     if (sourceType_ == HeightSourceType::HeightmapEquirectangular) {
-        if (!heightmap_.loadFromFile(heightmapPath, heightmapScaleKm)) {
+        if (heightmap_.loadFromFile(heightmapPath, heightmapScaleKm) !=
+            SurfaceHeightmap::LoadResult::Ok) {
             sourceType_ = HeightSourceType::Procedural;
         }
     }

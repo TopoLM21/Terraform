@@ -5,7 +5,16 @@
 
 class SurfaceHeightmap {
 public:
-    bool loadFromFile(const QString &path, double heightScaleKm);
+    enum class LoadResult {
+        Ok,
+        EmptyPath,
+        FileUnreadable,
+        InvalidAspectRatio,
+        DepthTooLow,
+        ConversionFailed,
+    };
+
+    LoadResult loadFromFile(const QString &path, double heightScaleKm);
     bool isValid() const;
     double heightKmAt(double latitudeDeg, double longitudeDeg) const;
 

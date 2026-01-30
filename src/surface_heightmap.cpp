@@ -8,38 +8,39 @@ namespace {
 constexpr double kMaxU16 = 65535.0;
 } // namespace
 
-bool SurfaceHeightmap::loadFromFile(const QString &path, double heightScaleKm) {
+SurfaceHeightmap::LoadResult SurfaceHeightmap::loadFromFile(const QString &path,
+                                                            double heightScaleKm) {
     isValid_ = false;
     heightScaleKm_ = heightScaleKm;
     image_ = QImage();
 
     if (path.trimmed().isEmpty()) {
-        return false;
+        return LoadResult::EmptyPath;
     }
 
     QImage image(path);
     if (image.isNull()) {
-        return false;
+        return LoadResult::FileUnreadable;
     }
 
     if (image.width() != image.height() * 2) {
-        return false;
+        return LoadResult::InvalidAspectRatio;
     }
 
     if (image.depth() < 16) {
-        return false;
+        return LoadResult::DepthTooLow;
     }
 
     if (image.format() != QImage::Format_Grayscale16) {
         image = image.convertToFormat(QImage::Format_Grayscale16);
         if (image.isNull()) {
-            return false;
+            return LoadResult::ConversionFailed;
         }
     }
 
     image_ = image;
     isValid_ = true;
-    return true;
+    return LoadResult::Ok;
 }
 
 bool SurfaceHeightmap::isValid() const {
