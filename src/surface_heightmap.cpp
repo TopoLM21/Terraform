@@ -27,11 +27,15 @@ SurfaceHeightmap::LoadResult SurfaceHeightmap::loadFromFile(const QString &path,
         return LoadResult::InvalidAspectRatio;
     }
 
-    if (image.depth() < 16) {
+    if (image.format() == QImage::Format_Grayscale8 ||
+        image.format() == QImage::Format_Indexed8) {
+        image = image.convertToFormat(QImage::Format_Grayscale16);
+        if (image.isNull()) {
+            return LoadResult::ConversionFailed;
+        }
+    } else if (image.depth() < 16) {
         return LoadResult::DepthTooLow;
-    }
-
-    if (image.format() != QImage::Format_Grayscale16) {
+    } else if (image.format() != QImage::Format_Grayscale16) {
         image = image.convertToFormat(QImage::Format_Grayscale16);
         if (image.isNull()) {
             return LoadResult::ConversionFailed;
