@@ -38,8 +38,7 @@ void SurfaceHeightScaleWidget::paintEvent(QPaintEvent *event) {
     }
 
     QLinearGradient gradient(barRect.topLeft(), barRect.topRight());
-    // Нулевая отметка высоты визуально соответствует береговой линии,
-    // поэтому цветовая шкала построена симметрично относительно середины.
+    // Упрощенная двухцветная шкала высот: градиент строится по двум стопам.
     for (const auto &stop : heightColorStops()) {
         gradient.setColorAt(stop.position, stop.color);
     }

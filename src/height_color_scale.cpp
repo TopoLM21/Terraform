@@ -5,14 +5,8 @@
 namespace {
 const QVector<HeightColorStop> &defaultStops() {
     static const QVector<HeightColorStop> kStops = {
-        // Hypsometric tints: greens for lowlands, yellow/brown for hills, white for high peaks.
+        // Simplified two-color height scale: lowlands -> high peaks.
         {0.0, QColor(34, 90, 38)},
-        {0.25, QColor(72, 140, 70)},
-        {0.45, QColor(120, 180, 95)},
-        {0.58, QColor(200, 190, 120)},
-        {0.72, QColor(190, 150, 95)},
-        {0.85, QColor(150, 110, 75)},
-        {0.94, QColor(205, 200, 195)},
         {1.0, QColor(250, 250, 250)}
     };
     return kStops;
