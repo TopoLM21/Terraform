@@ -48,6 +48,7 @@ private:
     VerticalWindMixingSolver verticalWindMixingSolver_;
     double gravityMps2_ = 0.0;
     double rSpecific_ = 0.0;
+    double specificHeatCp_ = 0.0;
     double timeStepSeconds_ = 0.0;
     double dayLengthSeconds_ = 0.0;
     bool isRetrograde_ = false;

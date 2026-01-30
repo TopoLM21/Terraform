@@ -17,6 +17,7 @@ AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composit
     , convectiveSolver_(composition, gravityMps2)
     , gravityMps2_(gravityMps2)
     , rSpecific_(AtmosphericThermodynamics::specificGasConstant(composition))
+    , specificHeatCp_(AtmosphericThermodynamics::specificHeatCp(composition))
     , timeStepSeconds_(timeStepSeconds)
     , dayLengthSeconds_(dayLengthSeconds)
     , isRetrograde_(isRetrograde) {}
@@ -56,6 +57,22 @@ void AtmosphereStepSolver::updateLayerPressures(double surfacePressureAtm,
             }
         }
         layers[layerIndex].setPressureAtm(layerPressureAtm);
+
+        // Согласуем P–T–rho–C (давление–температура–плотность–теплоёмкость),
+        // чтобы термодинамика оставалась устойчивой при изменении профиля.
+        double densityKgPerM3 = 0.0;
+        if (layerPressureAtm > 0.0 && layerTemperatureKelvin > 0.0 && rSpecific_ > 0.0) {
+            const double pressurePa = layerPressureAtm * 101325.0;
+            // Уравнение состояния идеального газа: rho = P / (R_specific * T).
+            densityKgPerM3 = pressurePa / (rSpecific_ * layerTemperatureKelvin);
+        }
+        layers[layerIndex].setDensityKgPerM3(densityKgPerM3);
+
+        const double heatCapacityJPerM2K =
+            (densityKgPerM3 > 0.0 && specificHeatCp_ > 0.0 && layerThicknessMeters > 0.0)
+                ? densityKgPerM3 * specificHeatCp_ * layerThicknessMeters
+                : 0.0;
+        layers[layerIndex].setHeatCapacityJPerM2K(heatCapacityJPerM2K);
     }
 }
 
