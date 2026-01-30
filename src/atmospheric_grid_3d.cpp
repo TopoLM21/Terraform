@@ -157,11 +157,6 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
         }
     }
 
-    resizeColumns(columnCount, resolvedLayerCount);
-    if (columns_.isEmpty()) {
-        return;
-    }
-
     AtmosphericProfileInitializer initializer(composition);
     AtmosphericProfileInitializer::Settings profileSettings;
     profileSettings.surfaceTemperatureKelvin = resolvedBaseTemperatureKelvin;
@@ -176,6 +171,17 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
 
     const QVector<AtmosphericProfileLayer> profileLayers =
         initializer.buildProfile(profileSettings);
+    if (resolvedLayerCount > profileLayers.size()) {
+        // Обрезаем число слоёв, когда давление опустилось ниже порога, чтобы не оставлять
+        // «мертвые» уровни с нулевой теплоёмкостью и фиксированной температурой.
+        resolvedLayerCount = profileLayers.size();
+    }
+
+    resizeColumns(columnCount, resolvedLayerCount);
+    if (resolvedLayerCount <= 0 || columns_.isEmpty()) {
+        layerCount_ = 0;
+        return;
+    }
 
     // Оптическая толщина: увеличивается с долей парниковых газов и распределяется по слоям.
     const double greenhouseShare = greenhouseMassFraction(composition);
