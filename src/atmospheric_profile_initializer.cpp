@@ -100,6 +100,16 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
             pressureAtmAtBottom =
                 pressureAtmAtBottom * qExp(-layerThickness / scaleHeightLayer);
         }
+        if (pressureStopAtm > 0.0 && pressureAtm > 0.0 && pressureAtm <= pressureStopAtm) {
+            // Слой удаляется, если давление упало ниже порога — чтобы не плодить
+            // «мертвые» ячейки с нулевой теплоёмкостью и фиксированной температурой.
+            break;
+        }
+        if (pressureStopAtm > 0.0 && pressureAtm > 0.0) {
+            // Минимальный физический порог для защиты от численного ухода давления в ноль,
+            // иначе теплоёмкость слоя станет нулевой.
+            pressureAtm = qMax(pressureAtm, pressureStopAtm);
+        }
         const double pressurePa = pressureAtm * kStandardPressurePa;
         // Уравнение состояния идеального газа: rho = P / (R * T).
         const double densityKgPerM3 =
@@ -114,12 +124,6 @@ QVector<AtmosphericProfileLayer> AtmosphericProfileInitializer::buildProfile(
         layer.pressureAtm = pressureAtm;
         layer.densityKgPerM3 = densityKgPerM3;
         layers.append(layer);
-
-        if (pressureStopAtm > 0.0 && pressureAtm > 0.0 && pressureAtm <= pressureStopAtm) {
-            // Порог по давлению: выше этой доли от поверхностного давления атмосфера настолько
-            // разрежена, что её вклад в массу и визуальную толщину можно отбросить.
-            break;
-        }
     }
 
     return layers;
