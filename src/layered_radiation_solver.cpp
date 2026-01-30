@@ -25,7 +25,8 @@ LayeredRadiationSolver::LayeredRadiationSolver(double timeStepSeconds)
 QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
                                               double insolationWPerM2,
                                               double albedo,
-                                              double cloudShortwaveTransmission) const {
+                                              double cloudShortwaveTransmission,
+                                              double surfaceTemperatureKelvin) const {
     const auto &layers = column.layers();
     QVector<double> temperatureDeltas;
     temperatureDeltas.fill(0.0, layers.size());
@@ -55,7 +56,7 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
     Q_UNUSED(surfaceShortwaveFlux);
 
     // Длинноволновое излучение: двухпоточная модель Eddington по слоям.
-    const double surfaceTemperature = qMax(0.0, layers.first().temperatureKelvin());
+    const double surfaceTemperature = qMax(0.0, surfaceTemperatureKelvin);
     const double surfaceEmission =
         kStefanBoltzmannConstant * std::pow(surfaceTemperature, 4.0);
 
