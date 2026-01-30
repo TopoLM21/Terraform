@@ -12,7 +12,8 @@ public:
     QVector<double> solve(const AtmosphericColumn &column,
                           double insolationWPerM2,
                           double albedo,
-                          double cloudShortwaveTransmission) const;
+                          double cloudShortwaveTransmission,
+                          double surfaceTemperatureKelvin) const;
 
 private:
     double timeStepSeconds_ = 0.0;

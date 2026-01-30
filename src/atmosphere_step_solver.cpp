@@ -87,11 +87,14 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             materialForPoint(input.materialsById, input.defaultMaterial, point.materialId);
         const double surfaceAlbedo = qBound(0.0, material.albedo, 1.0);
 
+        // Поверхность и нижний слой — разные сущности: передаём температуру поверхности явно,
+        // чтобы не подменять её температурой слоя и не получать самоподогрев атмосферы.
         const QVector<double> layerDeltas =
             radiationSolver_.solve(column,
                                    localInsolation,
                                    surfaceAlbedo,
-                                   input.cloudShortwaveTransmission);
+                                   input.cloudShortwaveTransmission,
+                                   point.state.temperatureKelvin());
         auto &layers = column.layers();
         const int layerCount = qMin(layers.size(), layerDeltas.size());
         for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
