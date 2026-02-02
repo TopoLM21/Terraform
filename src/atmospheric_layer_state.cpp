@@ -11,7 +11,10 @@ AtmosphericLayerState::AtmosphericLayerState(double temperatureKelvin,
                                              double opticalDepthShortwave,
                                              double opticalDepthLongwave,
                                              bool convectionEnabled,
-                                             double convectionMixingCoefficient)
+                                             double convectionMixingCoefficient,
+                                             double waterVaporKgPerM2,
+                                             double liquidWaterKgPerM2,
+                                             double relativeHumidity)
     : temperatureKelvin_(temperatureKelvin)
     , pressureAtm_(pressureAtm)
     , densityKgPerM3_(densityKgPerM3)
@@ -23,7 +26,10 @@ AtmosphericLayerState::AtmosphericLayerState(double temperatureKelvin,
     , opticalDepthShortwave_(opticalDepthShortwave)
     , opticalDepthLongwave_(opticalDepthLongwave)
     , convectionEnabled_(convectionEnabled)
-    , convectionMixingCoefficient_(convectionMixingCoefficient) {}
+    , convectionMixingCoefficient_(convectionMixingCoefficient)
+    , waterVaporKgPerM2_(waterVaporKgPerM2)
+    , liquidWaterKgPerM2_(liquidWaterKgPerM2)
+    , relativeHumidity_(relativeHumidity) {}
 
 double AtmosphericLayerState::temperatureKelvin() const {
     return temperatureKelvin_;
@@ -119,4 +125,28 @@ double AtmosphericLayerState::convectionMixingCoefficient() const {
 
 void AtmosphericLayerState::setConvectionMixingCoefficient(double convectionMixingCoefficient) {
     convectionMixingCoefficient_ = convectionMixingCoefficient;
+}
+
+double AtmosphericLayerState::waterVaporKgPerM2() const {
+    return waterVaporKgPerM2_;
+}
+
+void AtmosphericLayerState::setWaterVaporKgPerM2(double waterVaporKgPerM2) {
+    waterVaporKgPerM2_ = waterVaporKgPerM2;
+}
+
+double AtmosphericLayerState::liquidWaterKgPerM2() const {
+    return liquidWaterKgPerM2_;
+}
+
+void AtmosphericLayerState::setLiquidWaterKgPerM2(double liquidWaterKgPerM2) {
+    liquidWaterKgPerM2_ = liquidWaterKgPerM2;
+}
+
+double AtmosphericLayerState::relativeHumidity() const {
+    return relativeHumidity_;
+}
+
+void AtmosphericLayerState::setRelativeHumidity(double relativeHumidity) {
+    relativeHumidity_ = relativeHumidity;
 }

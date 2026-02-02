@@ -14,7 +14,10 @@ public:
                           double opticalDepthShortwave,
                           double opticalDepthLongwave,
                           bool convectionEnabled,
-                          double convectionMixingCoefficient);
+                          double convectionMixingCoefficient,
+                          double waterVaporKgPerM2,
+                          double liquidWaterKgPerM2,
+                          double relativeHumidity);
 
     double temperatureKelvin() const;
     void setTemperatureKelvin(double temperatureKelvin);
@@ -52,6 +55,15 @@ public:
     double convectionMixingCoefficient() const;
     void setConvectionMixingCoefficient(double convectionMixingCoefficient);
 
+    double waterVaporKgPerM2() const;
+    void setWaterVaporKgPerM2(double waterVaporKgPerM2);
+
+    double liquidWaterKgPerM2() const;
+    void setLiquidWaterKgPerM2(double liquidWaterKgPerM2);
+
+    double relativeHumidity() const;
+    void setRelativeHumidity(double relativeHumidity);
+
 private:
     double temperatureKelvin_ = 0.0;
     double pressureAtm_ = 0.0;
@@ -67,4 +79,10 @@ private:
     double opticalDepthLongwave_ = 0.0;
     bool convectionEnabled_ = false;
     double convectionMixingCoefficient_ = 0.0;
+    // Масса водяного пара в слое, кг/м².
+    double waterVaporKgPerM2_ = 0.0;
+    // Масса жидкой воды (конденсата) в слое, кг/м².
+    double liquidWaterKgPerM2_ = 0.0;
+    // Относительная влажность слоя (0..1), вычисляется по насыщению.
+    double relativeHumidity_ = 0.0;
 };

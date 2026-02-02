@@ -101,9 +101,19 @@ AtmosphericLayerState AtmosphericLayerResampler::interpolateLayerState(
         lerp(perMeter(lower.opticalDepthLongwave(), lower.thicknessMeters()),
              perMeter(upper.opticalDepthLongwave(), upper.thicknessMeters()),
              t);
+    const double waterVaporPerMeter =
+        lerp(perMeter(lower.waterVaporKgPerM2(), lower.thicknessMeters()),
+             perMeter(upper.waterVaporKgPerM2(), upper.thicknessMeters()),
+             t);
+    const double liquidWaterPerMeter =
+        lerp(perMeter(lower.liquidWaterKgPerM2(), lower.thicknessMeters()),
+             perMeter(upper.liquidWaterKgPerM2(), upper.thicknessMeters()),
+             t);
 
     const double mixingCoefficient =
         lerp(lower.convectionMixingCoefficient(), upper.convectionMixingCoefficient(), t);
+    const double relativeHumidity =
+        lerp(lower.relativeHumidity(), upper.relativeHumidity(), t);
 
     result.setTemperatureKelvin(
         lerp(lower.temperatureKelvin(), upper.temperatureKelvin(), t));
@@ -117,6 +127,9 @@ AtmosphericLayerState AtmosphericLayerResampler::interpolateLayerState(
     result.setOpticalDepthLongwave(tauLwPerMeter * targetThicknessMeters);
     result.setConvectionMixingCoefficient(mixingCoefficient);
     result.setConvectionEnabled(mixingCoefficient > 0.0);
+    result.setWaterVaporKgPerM2(waterVaporPerMeter * targetThicknessMeters);
+    result.setLiquidWaterKgPerM2(liquidWaterPerMeter * targetThicknessMeters);
+    result.setRelativeHumidity(relativeHumidity);
 
     return result;
 }
