@@ -5047,6 +5047,47 @@ private:
                                              input.stateDefaults.material);
         result.resolvedSubsurfaceSettings = tileResult.resolvedSubsurfaceSettings;
 
+        // Инициализируем запас поверхностной влаги: распределяем общий объём воды
+        // (surfaceWaterGigatons) по площадям ниже уровня моря. Формула:
+        // water_kg_per_m2 = (M_water_gt * 1e12 кг/гт) / (A_wet_m2),
+        // где A_wet_m2 = N_wet * area_cell_km2 * 1e6. Если уровень моря задан,
+        // но масса воды не указана, считаем подводные ячейки насыщенными до
+        // maxStorageKgPerM2. Жидкую воду ограничиваем температурой поверхности:
+        // при T < 273.15 K жидкая доля = 0, в диапазоне 273.15–278.15 K
+        // наращиваем линейно, чтобы не «заливать» лёд.
+        const bool allowSurfaceWater = !input.disableWaterAndClouds;
+        const double surfaceWaterMassKg = qMax(0.0, input.surfaceWaterGigatons) * 1e12;
+        const double freezingPointK = 273.15;
+        const double meltRangeK = 5.0;
+        int wetPointCount = 0;
+        if (input.hasSeaLevel) {
+            for (const auto &point : result.grid.points()) {
+                if (point.heightKm < seaLevelKm) {
+                    ++wetPointCount;
+                }
+            }
+        } else {
+            wetPointCount = result.grid.points().size();
+        }
+        if (allowSurfaceWater && wetPointCount > 0 &&
+            (surfaceWaterMassKg > 0.0 || input.hasSeaLevel)) {
+            const double wetAreaM2 =
+                static_cast<double>(wetPointCount) * result.grid.pointAreaKm2() * 1e6;
+            const double distributedWaterKgPerM2 =
+                (surfaceWaterMassKg > 0.0 && wetAreaM2 > 0.0)
+                    ? surfaceWaterMassKg / wetAreaM2
+                    : result.grid.points().front().surfaceMoisture.settings().maxStorageKgPerM2;
+            for (auto &point : result.grid.points()) {
+                const bool isWetCandidate =
+                    !input.hasSeaLevel || (point.heightKm < seaLevelKm);
+                const double liquidFraction =
+                    qBound(0.0, (point.temperatureK - freezingPointK) / meltRangeK, 1.0);
+                const double targetWaterKgPerM2 =
+                    isWetCandidate ? distributedWaterKgPerM2 * liquidFraction : 0.0;
+                point.surfaceMoisture.setWaterKgPerM2(targetWaterKgPerM2);
+            }
+        }
+
         result.hasTemperatureRange = tileResult.hasTemperatureRange;
         result.minTemperatureK = tileResult.minSurfaceTemperatureK;
         result.maxTemperatureK = tileResult.maxSurfaceTemperatureK;
