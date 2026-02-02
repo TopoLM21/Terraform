@@ -13,6 +13,10 @@ public:
         double maxCloudAlbedo = 0.55;
         // Масштаб роста облачного альбедо по жидкой воде (кг/м²).
         double cloudAlbedoScaleKgPerM2 = 0.12;
+        // Характерное время выпадения осадков (с).
+        double precipitationTimeSeconds = 1800.0;
+        // Доля жидкой воды, уходящая в осадки за характерное время (0..1).
+        double precipitationEfficiency = 0.6;
     };
 
     EvaporationModel() = default;
@@ -26,6 +30,9 @@ public:
 
     // Обновить фазовый баланс (пар ↔ жидкость) внутри колонны.
     void updateColumn(AtmosphericColumn &column, double timeStepSeconds) const;
+    // Обновить фазовый баланс и вернуть выпавшие осадки (кг/м²), ушедшие на поверхность.
+    double updateColumnWithPrecipitation(AtmosphericColumn &column,
+                                         double timeStepSeconds) const;
 
     // Оценить вклад облаков в альбедо по суммарной массе конденсата.
     double cloudAlbedoFromCondensation(const AtmosphericColumn &column) const;

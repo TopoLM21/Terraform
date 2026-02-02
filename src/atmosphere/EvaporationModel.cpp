@@ -37,14 +37,25 @@ void EvaporationModel::initializeLayer(AtmosphericLayerState &layer,
 
 void EvaporationModel::updateColumn(AtmosphericColumn &column,
                                     double timeStepSeconds) const {
+    updateColumnWithPrecipitation(column, timeStepSeconds);
+}
+
+double EvaporationModel::updateColumnWithPrecipitation(AtmosphericColumn &column,
+                                                       double timeStepSeconds) const {
     auto &layers = column.layers();
     if (layers.isEmpty()) {
-        return;
+        return 0.0;
     }
 
     const double relaxation = (settings_.relaxationTimeSeconds > 0.0 && timeStepSeconds > 0.0)
         ? qBound(0.0, timeStepSeconds / settings_.relaxationTimeSeconds, 1.0)
         : 1.0;
+    const double precipitationRelaxation =
+        (settings_.precipitationTimeSeconds > 0.0 && timeStepSeconds > 0.0)
+            ? qBound(0.0, timeStepSeconds / settings_.precipitationTimeSeconds, 1.0)
+            : 1.0;
+
+    double precipitationKgPerM2 = 0.0;
 
     for (auto &layer : layers) {
         const double maxVaporKgPerM2 =
@@ -61,11 +72,24 @@ void EvaporationModel::updateColumn(AtmosphericColumn &column,
         }
 
         // Целевое равновесие: пар ограничен насыщением, остальное — конденсат.
+        // Масса сконденсированной влаги = max(0, W_total - W_sat).
         const double targetVaporKgPerM2 = qMin(totalWaterKgPerM2, maxVaporKgPerM2);
         const double updatedVaporKgPerM2 =
             lerp(vaporKgPerM2, targetVaporKgPerM2, relaxation);
-        const double updatedLiquidKgPerM2 =
+        double updatedLiquidKgPerM2 =
             qMax(0.0, totalWaterKgPerM2 - updatedVaporKgPerM2);
+
+        if (updatedLiquidKgPerM2 > 0.0 && settings_.precipitationEfficiency > 0.0) {
+            // Осадки как релаксация: P = L * eff * dt / tau_precip,
+            // где L — масса жидкой воды в слое (кг/м²).
+            const double precipitationShare =
+                qBound(0.0, settings_.precipitationEfficiency, 1.0) *
+                precipitationRelaxation;
+            const double layerPrecipitation =
+                qBound(0.0, updatedLiquidKgPerM2 * precipitationShare, updatedLiquidKgPerM2);
+            updatedLiquidKgPerM2 -= layerPrecipitation;
+            precipitationKgPerM2 += layerPrecipitation;
+        }
 
         layer.setWaterVaporKgPerM2(updatedVaporKgPerM2);
         layer.setLiquidWaterKgPerM2(updatedLiquidKgPerM2);
@@ -74,6 +98,8 @@ void EvaporationModel::updateColumn(AtmosphericColumn &column,
                 ? qBound(0.0, updatedVaporKgPerM2 / maxVaporKgPerM2, 1.0)
                 : 0.0);
     }
+
+    return precipitationKgPerM2;
 }
 
 double EvaporationModel::cloudAlbedoFromCondensation(const AtmosphericColumn &column) const {
@@ -103,6 +129,8 @@ double EvaporationModel::saturationVaporPressurePa(double temperatureKelvin) {
     }
 
     // Аппроксимация Тетенса для воды: e_s = 610.94 * exp(17.625 * T / (T + 243.04)).
+    // Формула даёт давление насыщения в зависимости от температуры и описывает,
+    // сколько пара может удерживать воздух без конденсации.
     // T в °C, диапазон подходит для тропосферы и визуализации облачности.
     const double temperatureC = temperatureKelvin - 273.15;
     const double exponent = 17.625 * temperatureC / (temperatureC + 243.04);
