@@ -1,5 +1,6 @@
 #include "atmospheric_grid_3d.h"
 
+#include "atmosphere/EvaporationModel.h"
 #include "atmospheric_layer_resampler.h"
 #include "atmospheric_profile_initializer.h"
 #include "atmospheric_thermodynamics.h"
@@ -14,6 +15,7 @@ constexpr int kDefaultLayerCount = 12;
 constexpr double kMinBottomLayerThicknessMeters = 250.0;
 constexpr double kMaxBottomLayerThicknessMeters = 500.0;
 constexpr double kDefaultBottomLayerThicknessMeters = 250.0;
+constexpr double kHumidityScaleHeightMeters = 2000.0;
 double greenhouseMassFraction(const AtmosphereComposition &composition) {
     const auto gases = availableGases();
     QHash<QString, bool> isGreenhouse;
@@ -194,6 +196,8 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
         topHeightMeters += profileLayer.thicknessMeters;
     }
 
+    EvaporationModel evaporationModel;
+    const double baseRelativeHumidity = evaporationModel.settings().baseRelativeHumidity;
     for (auto &column : columns_) {
         column.resize(resolvedLayerCount);
         auto &layers = column.layers();
@@ -230,6 +234,14 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
             layers[i].setOpticalDepthLongwave(baseTauLw * tauScale);
             layers[i].setConvectionEnabled(convectionEnabled);
             layers[i].setConvectionMixingCoefficient(convectionMixingCoefficient);
+
+            // Влажность уменьшается с высотой по экспоненте — приближенная
+            // форма типичного профиля водяного пара в тропосфере.
+            const double humidityScale =
+                (kHumidityScaleHeightMeters > 0.0) ? kHumidityScaleHeightMeters : 1.0;
+            const double relativeHumidity =
+                baseRelativeHumidity * qExp(-profileLayer.heightMeters / humidityScale);
+            evaporationModel.initializeLayer(layers[i], relativeHumidity);
         }
     }
 }

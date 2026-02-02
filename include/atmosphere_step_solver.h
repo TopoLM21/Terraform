@@ -1,6 +1,7 @@
 #pragma once
 
 #include "atmosphere_model.h"
+#include "atmosphere/EvaporationModel.h"
 #include "atmospheric_advection_solver.h"
 #include "atmospheric_dynamics_solver.h"
 #include "convective_adjustment_solver.h"
@@ -46,6 +47,7 @@ private:
     AtmosphericDynamicsSolver dynamicsSolver_;
     AtmosphericAdvectionSolver advectionSolver_;
     VerticalWindMixingSolver verticalWindMixingSolver_;
+    EvaporationModel evaporationModel_;
     double gravityMps2_ = 0.0;
     double rSpecific_ = 0.0;
     double specificHeatCp_ = 0.0;
