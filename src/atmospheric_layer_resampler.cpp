@@ -109,6 +109,10 @@ AtmosphericLayerState AtmosphericLayerResampler::interpolateLayerState(
         lerp(perMeter(lower.liquidWaterKgPerM2(), lower.thicknessMeters()),
              perMeter(upper.liquidWaterKgPerM2(), upper.thicknessMeters()),
              t);
+    const double iceWaterPerMeter =
+        lerp(perMeter(lower.iceWaterKgPerM2(), lower.thicknessMeters()),
+             perMeter(upper.iceWaterKgPerM2(), upper.thicknessMeters()),
+             t);
 
     const double mixingCoefficient =
         lerp(lower.convectionMixingCoefficient(), upper.convectionMixingCoefficient(), t);
@@ -129,6 +133,7 @@ AtmosphericLayerState AtmosphericLayerResampler::interpolateLayerState(
     result.setConvectionEnabled(mixingCoefficient > 0.0);
     result.setWaterVaporKgPerM2(waterVaporPerMeter * targetThicknessMeters);
     result.setLiquidWaterKgPerM2(liquidWaterPerMeter * targetThicknessMeters);
+    result.setIceWaterKgPerM2(iceWaterPerMeter * targetThicknessMeters);
     result.setRelativeHumidity(relativeHumidity);
 
     return result;
