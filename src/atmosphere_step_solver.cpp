@@ -2,11 +2,54 @@
 
 #include "atmospheric_thermodynamics.h"
 #include "surface_atmosphere_coupler.h"
+#include "atmosphere/EvaporationModel.h"
 
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QtMath>
 
 Q_LOGGING_CATEGORY(atmosphereProfileLog, "solar.atmosphere.profile")
+
+namespace {
+constexpr double kEvaporationTransferVelocityMps = 1.0e-4;
+constexpr double kEvaporationTempMinK = 260.0;
+constexpr double kEvaporationTempRangeK = 20.0;
+
+double potentialEvaporationKgPerM2(const SurfacePointState &surface,
+                                   const AtmosphericLayerState &layer,
+                                   double dtSeconds) {
+    if (dtSeconds <= 0.0) {
+        return 0.0;
+    }
+
+    const double surfaceTemperature = surface.temperatureKelvin();
+    if (surfaceTemperature <= 0.0) {
+        return 0.0;
+    }
+
+    // Температурный множитель: испарение растёт при переходе через диапазон 260–280 K.
+    const double temperatureFactor = qBound(0.0,
+                                            (surfaceTemperature - kEvaporationTempMinK) /
+                                                kEvaporationTempRangeK,
+                                            1.0);
+    if (temperatureFactor <= 0.0) {
+        return 0.0;
+    }
+
+    const double saturationDensity =
+        EvaporationModel::saturationVaporDensityKgPerM3(surfaceTemperature);
+    const double layerThickness = layer.thicknessMeters();
+    const double vaporDensity = (layerThickness > 0.0)
+        ? qMax(0.0, layer.waterVaporKgPerM2()) / layerThickness
+        : 0.0;
+    const double deficit = qMax(0.0, saturationDensity - vaporDensity);
+    // Упрощённый массообмен: E = C * (rho_sat - rho),
+    // где C — эффективная скорость переноса (м/с),
+    // rho — плотность водяного пара в приземном слое.
+    const double evaporationRateKgPerM2S =
+        kEvaporationTransferVelocityMps * deficit * temperatureFactor;
+    return evaporationRateKgPerM2S * dtSeconds;
+}
+} // namespace
 
 AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composition,
                                            double gravityMps2,
@@ -104,13 +147,25 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             materialForPoint(input.materialsById, input.defaultMaterial, point.materialId);
         const double surfaceAlbedo = qBound(0.0, material.albedo, 1.0);
 
+        auto &layers = column.layers();
+        if (!layers.isEmpty()) {
+            // Испарение из поверхностного слоя: переносим влагу в нижний слой атмосферы.
+            const double potentialEvaporation =
+                potentialEvaporationKgPerM2(point.state, layers.first(), timeStepSeconds_);
+            const double evaporationKgPerM2 =
+                point.surfaceMoisture.applyEvaporation(potentialEvaporation);
+            if (evaporationKgPerM2 > 0.0) {
+                layers[0].setWaterVaporKgPerM2(
+                    layers[0].waterVaporKgPerM2() + evaporationKgPerM2);
+            }
+        }
+
         // Фазовый баланс влаги обновляем до радиации, чтобы конденсация влияла
         // на альбедо облаков уже в текущем шаге.
         const double precipitationKgPerM2 =
-            evaporationModel_.updateColumnWithPrecipitation(column,
-                                                            timeStepSeconds_);
+            evaporationModel_.updateColumnWithPrecipitation(column, timeStepSeconds_);
         point.precipitationKgPerM2 += precipitationKgPerM2;
-        point.surfaceWaterKgPerM2 += precipitationKgPerM2;
+        point.surfaceMoisture.addPrecipitation(precipitationKgPerM2);
         const double condensationAlbedo =
             evaporationModel_.cloudAlbedoFromCondensation(column);
         const double cloudShortwaveTransmission =
@@ -126,7 +181,6 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                                    surfaceAlbedo,
                                    cloudShortwaveTransmission,
                                    point.state.temperatureKelvin());
-        auto &layers = column.layers();
         const int layerCount = qMin(layers.size(), layerDeltas.size());
         for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
             const double updatedTemperature =
