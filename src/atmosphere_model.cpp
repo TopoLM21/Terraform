@@ -2,12 +2,15 @@
 
 #include <QtCore/QtMath>
 
+#include "physics/Units.h"
+
 namespace {
+// Масса Земли для пересчёта планетарных масс в СИ.
 constexpr double kEarthMassKg = 5.9722e24;
+// Гравитационная постоянная Ньютона, СИ (м^3/(кг·с^2)).
 constexpr double kGravitationalConstant = 6.67430e-11;
+// 1 стандартная атмосфера в паскалях.
 constexpr double kPascalPerAtm = 101325.0;
-constexpr double kKgPerTon = 1000.0;
-constexpr double kKgPerGigaton = 1.0e12;
 } // namespace
 
 void AtmosphereComposition::setMassGigatons(const QString &gasId, double massGigatons) {
@@ -51,11 +54,11 @@ double AtmosphereComposition::totalMassGigatons() const {
 }
 
 double AtmosphereComposition::totalMassTons() const {
-    return totalMassGigatons() * 1.0e9;
+    return totalMassGigatons() * PhysicsUnits::kTonsPerGigaton;
 }
 
 double AtmosphereComposition::totalMassKg() const {
-    return totalMassGigatons() * kKgPerGigaton;
+    return totalMassGigatons() * PhysicsUnits::kKgPerGigaton;
 }
 
 double AtmosphereComposition::totalPressureAtm(double planetMassEarths, double radiusKm) const {
@@ -79,17 +82,18 @@ QVector<GasSpec> availableGases() {
 }
 
 double calculatePressureAtm(double massTons, double planetMassEarths, double radiusKm) {
-    return calculatePressureAtmFromKg(massTons * kKgPerTon, planetMassEarths, radiusKm);
+    return calculatePressureAtmFromKg(massTons * PhysicsUnits::kKgPerTon, planetMassEarths, radiusKm);
 }
 
 double calculatePressureAtmFromKg(double massKg, double planetMassEarths, double radiusKm) {
     const double radiusMeters = radiusKm * 1000.0;
     const double planetMassKg = planetMassEarths * kEarthMassKg;
 
-    // g = G * M / R^2
+    // g = G * M / R^2 — поверхностное ускорение свободного падения.
     const double surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
 
-    // P = (m_atm * g) / (4 * π * R^2)
+    // Давление от массы атмосферы, распределённой по сфере:
+    // P = (m_atm * g) / (4 * π * R^2).
     const double surfaceArea = 4.0 * M_PI * radiusMeters * radiusMeters;
     const double pressurePascal = (massKg * surfaceGravity) / surfaceArea;
 
@@ -108,14 +112,14 @@ double calculateCellPressureAtmFromKg(double totalMassKg,
     const double planetMassKg = planetMassEarths * kEarthMassKg;
     const double cellAreaMeters2 = cellAreaKm2 * 1e6;
 
-    // g = G * M / R^2
+    // g = G * M / R^2 — поверхностное ускорение свободного падения.
     const double surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
 
     // Масса столба над ячейкой пропорциональна площади: m_cell = m_total * (area_cell / total_area).
     const double totalArea = 4.0 * M_PI * radiusMeters * radiusMeters;
     const double cellMassKg = totalMassKg * (cellAreaMeters2 / totalArea);
 
-    // P = (m_cell * g) / area_cell
+    // P = (m_cell * g) / area_cell — давление над ячейкой.
     const double pressurePascal = (cellMassKg * surfaceGravity) / cellAreaMeters2;
     return pressurePascal / kPascalPerAtm;
 }
@@ -130,7 +134,7 @@ double calculateAtmosphereMassKgFromPressureAtm(double pressureAtm,
     const double radiusMeters = radiusKm * 1000.0;
     const double planetMassKg = planetMassEarths * kEarthMassKg;
 
-    // g = G * M / R^2
+    // g = G * M / R^2 — поверхностное ускорение свободного падения.
     const double surfaceGravity = kGravitationalConstant * planetMassKg / (radiusMeters * radiusMeters);
 
     // m_atm = (P * 4 * π * R^2) / g, где P задано в Па.

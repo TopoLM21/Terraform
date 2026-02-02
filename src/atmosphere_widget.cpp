@@ -1,6 +1,7 @@
 #include "atmosphere_widget.h"
 
 #include "atmosphere_chart_widget.h"
+#include "physics/Units.h"
 
 #include <QtCore/QLocale>
 #include <QtCore/QSignalBlocker>
@@ -21,7 +22,6 @@ constexpr int kColumnGas = 0;
 constexpr int kColumnMass = 1;
 constexpr int kColumnPressure = 2;
 constexpr int kColumnShare = 3;
-constexpr double kKgPerGigaton = 1.0e12;
 constexpr double kGramsPerKg = 1000.0;
 // 0.001–0.0001 атм соответствует уровню 1–0.1 гПа для верхней границы профиля.
 constexpr double kDefaultMinTopPressureAtm = 0.001;
@@ -319,7 +319,7 @@ void AtmosphereWidget::updateAllPressures() {
             continue;
         }
 
-        const double massKg = rowMassGigatons(row) * kKgPerGigaton;
+        const double massKg = rowMassGigatons(row) * PhysicsUnits::kKgPerGigaton;
         const double pressureAtm = calculatePressureAtmFromKg(massKg, planetMassEarths_, planetRadiusKm_);
         pressureItem->setText(formatNumber(pressureAtm, 4));
     }
@@ -334,7 +334,7 @@ void AtmosphereWidget::updateSummary() {
     for (int row = 0; row < table_->rowCount(); ++row) {
         const double massGigatons = rowMassGigatons(row);
         // Массы хранятся в гигатоннах (Gt), для физических расчетов переводим в кг и г.
-        const double massKg = massGigatons * kKgPerGigaton;
+        const double massKg = massGigatons * PhysicsUnits::kKgPerGigaton;
         const double massGrams = massKg * kGramsPerKg;
 
         totalMassGigatons += massGigatons;
@@ -399,7 +399,7 @@ void AtmosphereWidget::normalizePressureItem(int row) {
     // P [атм] -> P [Па], m_atm [кг] = (P * 4πR^2) / g, где g = G*M/R^2.
     const double massKg = calculateAtmosphereMassKgFromPressureAtm(
         pressureAtm, planetMassEarths_, planetRadiusKm_);
-    const double massGigatons = massKg / kKgPerGigaton;
+    const double massGigatons = massKg / PhysicsUnits::kKgPerGigaton;
 
     const QSignalBlocker blocker(table_);
     item->setText(formatNumber(pressureAtm, 4));

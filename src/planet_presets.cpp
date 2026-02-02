@@ -1,5 +1,7 @@
 #include "planet_presets.h"
 
+#include "physics/Units.h"
+
 #include "rotation_period_utils.h"
 
 #include "geothermal_flux_model.h"
@@ -8,7 +10,6 @@
 #include <QtCore/QtGlobal>
 
 namespace {
-constexpr double kKgPerGigaton = 1.0e12;
 constexpr double kEarthMassKg = 5.972e24;
 // Для пресетов используем эталонные параметры звезд: расстояние держим равным 1 а.е.,
 // так как реальная дистанция до планеты задаётся отдельно через большую полуось орбиты.
@@ -64,7 +65,7 @@ AtmosphereComposition atmosphereByPressureAtm(double pressureAtm,
     }
 
     for (const auto &entry : shares) {
-        composition.setMassGigatons(entry.first, totalMassKg * entry.second / kKgPerGigaton);
+        composition.setMassGigatons(entry.first, totalMassKg * entry.second / PhysicsUnits::kKgPerGigaton);
     }
     return composition;
 }
