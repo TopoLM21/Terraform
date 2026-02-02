@@ -5516,6 +5516,9 @@ private:
             planetComboBox_->currentData(kRoleHasSeaLevel).toBool();
         const QString baseMaterialId =
             resolveSurfaceMaterialIdForPoint(atmosphere, massEarths, radiusKm);
+        SurfaceGridComputationInput input;
+        input.surfaceWaterGigatons = surfaceWaterGigatons;
+        input.hasSeaLevel = hasSeaLevel;
 
         QHash<QString, SurfaceMaterial> materialsById;
         const auto materials = surfaceMaterials();
@@ -5598,8 +5601,8 @@ private:
                                               stateDefaults->material,
                                               cloudAlbedo,
                                               disableWaterAndClouds,
-                                              surfaceWaterGigatons,
-                                              hasSeaLevel,
+                                              input.surfaceWaterGigatons,
+                                              input.hasSeaLevel,
                                               qMax(0.0, atmospherePressureAtm),
                                               radiusKm,
                                               gravity,
@@ -5656,7 +5659,6 @@ private:
                                                currentAtmosphereBottomLayerThicknessMeters(),
                                                currentMinTopPressureAtm());
 
-        SurfaceGridComputationInput input;
         input.grid = surfaceGrid_;
         input.atmosphere = atmosphere;
         input.stateDefaults = *stateDefaults;
@@ -5666,8 +5668,6 @@ private:
         input.radiusKm = radiusKm;
         input.cloudAlbedo = cloudAlbedo;
         input.disableWaterAndClouds = disableWaterAndClouds;
-        input.surfaceWaterGigatons = surfaceWaterGigatons;
-        input.hasSeaLevel = hasSeaLevel;
         input.dayLengthDays = dayLengthDays;
         input.yearLengthDays = yearLengthDays;
         input.elapsedDays = surfaceTime_.surfaceElapsedDays();
@@ -5811,6 +5811,11 @@ private:
             qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
         const bool disableWaterAndClouds =
             planetComboBox_->currentData(kRoleDisableWaterAndClouds).toBool();
+        SurfaceGridComputationInput input;
+        input.surfaceWaterGigatons =
+            planetComboBox_->currentData(kRoleSurfaceWaterGigatons).toDouble();
+        input.hasSeaLevel =
+            planetComboBox_->currentData(kRoleHasSeaLevel).toBool();
 
         QHash<QString, SurfaceMaterial> materialsById;
         const auto materials = surfaceMaterials();
@@ -6043,8 +6048,8 @@ private:
                                               material,
                                               cloudAlbedo,
                                               disableWaterAndClouds,
-                                              surfaceWaterGigatons,
-                                              hasSeaLevel,
+                                              input.surfaceWaterGigatons,
+                                              input.hasSeaLevel,
                                               point.pressureAtm,
                                               radiusKm,
                                               gravity,
