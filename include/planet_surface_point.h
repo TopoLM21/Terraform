@@ -2,6 +2,7 @@
 
 #include "surface_point_state.h"
 #include "surface/SurfaceMoisture.h"
+#include "fluids/PhaseModel.h"
 
 #include <QVector>
 #include <QString>
@@ -39,5 +40,7 @@ struct SurfacePoint {
     double windSpeedMps = 0.0;
     QVector<double> layerHeightsKm;
     QString materialId;
+    // Фаза воды для океанических точек (используется для льда/альбедо/отрисовки).
+    PhaseModel::Phase waterPhase = PhaseModel::Phase::Liquid;
     QVector<int> neighborIndices;
 };

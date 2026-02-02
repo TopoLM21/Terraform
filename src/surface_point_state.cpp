@@ -66,6 +66,10 @@ void SurfacePointState::setGreenhouseOpacity(double greenhouseOpacity) {
     greenhouseOpacity_ = qBound(0.0, greenhouseOpacity, 0.999);
 }
 
+void SurfacePointState::setAlbedo(double albedo) {
+    albedo_ = qBound(0.0, albedo, 1.0);
+}
+
 const SubsurfaceTemperatureSolver &SurfacePointState::solver() const {
     return solver_;
 }
