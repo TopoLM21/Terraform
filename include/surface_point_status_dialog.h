@@ -14,7 +14,10 @@ class SurfacePointStatusDialog : public QDialog {
 public:
     explicit SurfacePointStatusDialog(QWidget *parent = nullptr);
 
-    void setPoint(const SurfacePoint &point, double tileAreaKm2, double tileEdgeLengthKm);
+    void setPoint(const SurfacePoint &point,
+                  double seaLevelKm,
+                  double tileAreaKm2,
+                  double tileEdgeLengthKm);
     void setAtmosphereProfile(const AtmosphericColumn *column);
     void clearPoint();
     void clearAtmosphereProfile();

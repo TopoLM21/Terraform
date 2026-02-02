@@ -1172,7 +1172,10 @@ public:
                     selectedSurfacePointIndex_ = pointIndex;
                     const double tileAreaKm2 = surfaceGrid_.tileAreaKm2(pointIndex);
                     const double tileEdgeLengthKm = surfaceGrid_.tileEdgeLengthKm(pointIndex);
-                    surfacePointStatusDialog_->setPoint(*point, tileAreaKm2, tileEdgeLengthKm);
+                    surfacePointStatusDialog_->setPoint(*point,
+                                                        surfaceGrid_.seaLevelKm(),
+                                                        tileAreaKm2,
+                                                        tileEdgeLengthKm);
                     surfacePointStatusDialog_->show();
                     surfacePointStatusDialog_->raise();
                     surfacePointStatusDialog_->activateWindow();
@@ -2564,7 +2567,10 @@ private:
         }
         const double tileAreaKm2 = surfaceGrid_.tileAreaKm2(selectedSurfacePointIndex_);
         const double tileEdgeLengthKm = surfaceGrid_.tileEdgeLengthKm(selectedSurfacePointIndex_);
-        surfacePointStatusDialog_->setPoint(*point, tileAreaKm2, tileEdgeLengthKm);
+        surfacePointStatusDialog_->setPoint(*point,
+                                            surfaceGrid_.seaLevelKm(),
+                                            tileAreaKm2,
+                                            tileEdgeLengthKm);
         const auto &atmosphereGrid = surfaceGrid_.atmosphericGrid();
         const AtmosphericColumn *column = nullptr;
         if (selectedSurfacePointIndex_ >= 0 &&
