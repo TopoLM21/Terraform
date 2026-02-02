@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.175 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.176 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -69,6 +69,7 @@ add_executable(solar_constant
     include/surface_point_status_dialog.h
     include/surface_atmosphere_coupler.h
     include/temperature_color_scale.h
+    include/terrain/HeightMap.h
     include/physics/Units.h
     src/atmospheric_pressure_model.h
     src/fluids/FluidBody.h
@@ -145,6 +146,7 @@ add_executable(solar_constant
     src/temperature_color_scale.cpp
     src/wind_field_model.cpp
     src/wind_field_model.h
+    src/terrain/HeightMap.cpp
 )
 
 target_include_directories(solar_constant PRIVATE include src)
