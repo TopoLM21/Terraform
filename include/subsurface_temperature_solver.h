@@ -5,6 +5,8 @@
 
 #include <QtCore/QVector>
 
+#include <functional>
+
 enum class SubsurfaceBottomBoundaryCondition {
     Insulating,
     FixedTemperature
@@ -15,13 +17,26 @@ struct SubsurfaceModelSettings {
     // Верхний слой ~5 см: ближе к типичной суточной глубине прогрева лунного реголита.
     double topLayerThicknessMeters = 0.05;
     double bottomDepthMeters = 2.0;
+    // Граница фазовой стратификации океана: слои выше этой глубины могут быть льдом,
+    // слои ниже считаются жидкой водой вне зависимости от температуры.
+    double oceanPhaseBoundaryDepthMeters = 1.0;
     SubsurfaceBottomBoundaryCondition bottomBoundary =
         SubsurfaceBottomBoundaryCondition::Insulating;
     double geothermalFluxWPerM2 = 0.0;
 };
 
+struct SubsurfaceLayerProperties {
+    double thermalConductivity = 1.0;
+    ThermalConductivityModel thermalConductivityModel{};
+    double density = 1.0;
+    double specificHeat = 1.0;
+};
+
 class SubsurfaceTemperatureSolver {
 public:
+    using LayerPropertiesProvider =
+        std::function<SubsurfaceLayerProperties(int layerIndex, double temperatureKelvin)>;
+
     SubsurfaceTemperatureSolver() = default;
     SubsurfaceTemperatureSolver(const SubsurfaceGrid &grid,
                                 double thermalConductivity,
@@ -44,6 +59,8 @@ public:
     void setInitialTemperature(double temperatureKelvin);
     void setSurfaceLayerTemperatureKelvin(double temperatureKelvin);
     void setTemperatures(const QVector<double> &temperatures);
+    void setLayerProperties(const QVector<SubsurfaceLayerProperties> &layerProperties);
+    void setLayerPropertiesProvider(LayerPropertiesProvider provider);
 
     const QVector<double> &temperatures() const;
     const QVector<double> &layerThicknessesMeters() const;
@@ -59,7 +76,9 @@ public:
                            double bottomTemperatureKelvin);
 
 private:
-    double conductivityAtTemperature(double temperatureKelvin) const;
+    SubsurfaceLayerProperties layerPropertiesFor(int layerIndex, double temperatureKelvin) const;
+    double conductivityAtTemperature(const SubsurfaceLayerProperties &properties,
+                                     double temperatureKelvin) const;
     void solveTridiagonal(QVector<double> &a,
                           QVector<double> &b,
                           QVector<double> &c,
@@ -72,6 +91,8 @@ private:
     double density_ = 1.0;
     double specificHeat_ = 1.0;
     double alpha_ = 1.0;
+    QVector<SubsurfaceLayerProperties> layerProperties_;
+    LayerPropertiesProvider layerPropertiesProvider_{};
     SubsurfaceBottomBoundaryCondition bottomBoundary_ =
         SubsurfaceBottomBoundaryCondition::Insulating;
     double bottomTemperatureKelvin_ = 3.0;

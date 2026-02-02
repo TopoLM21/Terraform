@@ -10,6 +10,15 @@
 
 namespace {
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
+constexpr double kWaterFreezeTemperatureKelvin = 273.15;
+// Параметры льда: λ ≈ 2.2 Вт/(м·К), ρ ≈ 920 кг/м³, c ≈ 2100 Дж/(кг·К).
+constexpr double kIceThermalConductivity = 2.2;
+constexpr double kIceDensity = 920.0;
+constexpr double kIceSpecificHeat = 2100.0;
+// Параметры воды: λ ≈ 0.6 Вт/(м·К), ρ ≈ 1000 кг/м³, c ≈ 4180 Дж/(кг·К).
+constexpr double kWaterThermalConductivity = 0.6;
+constexpr double kWaterDensity = 1000.0;
+constexpr double kWaterSpecificHeat = 4180.0;
 }
 
 SurfacePointState::SurfacePointState(double initialTemperatureKelvin,
@@ -35,6 +44,35 @@ SurfacePointState::SurfacePointState(double initialTemperatureKelvin,
                   subsurfaceSettings.bottomBoundary,
                   initialTemperatureKelvin,
                   subsurfaceSettings.geothermalFluxWPerM2);
+    if (material.id == QStringLiteral("ocean")) {
+        const QVector<double> layerDepths = grid.layerDepthsMeters();
+        const double phaseBoundaryDepth =
+            qMax(subsurfaceSettings.topLayerThicknessMeters,
+                 subsurfaceSettings.oceanPhaseBoundaryDepthMeters);
+        // Верхние слои океана (по глубине центров слоёв) могут замерзать при T < 273.15 K.
+        // Граница задаётся как характерная глубина сезонного промерзания: ниже неё
+        // считаем воду всегда жидкой, чтобы не фиксировать весь столбик как лёд.
+        solver_.setLayerPropertiesProvider(
+            [layerDepths, phaseBoundaryDepth](int layerIndex, double temperatureKelvin) {
+                const bool isUpperLayer =
+                    (layerIndex >= 0 && layerIndex < layerDepths.size())
+                        ? (layerDepths.at(layerIndex) <= phaseBoundaryDepth)
+                        : true;
+                const bool isIce = isUpperLayer && temperatureKelvin < kWaterFreezeTemperatureKelvin;
+                if (isIce) {
+                    return SubsurfaceLayerProperties{
+                        kIceThermalConductivity,
+                        {ThermalConductivityModelType::Constant, kWaterFreezeTemperatureKelvin, 0.0},
+                        kIceDensity,
+                        kIceSpecificHeat};
+                }
+                return SubsurfaceLayerProperties{
+                    kWaterThermalConductivity,
+                    {ThermalConductivityModelType::Constant, kWaterFreezeTemperatureKelvin, 0.0},
+                    kWaterDensity,
+                    kWaterSpecificHeat};
+            });
+    }
     solver_.setInitialTemperature(qMax(minTemperatureKelvin_, initialTemperatureKelvin));
 }
 
