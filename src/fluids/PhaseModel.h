@@ -35,7 +35,8 @@ public:
     static double albedoForPhase(Phase phase);
 
     // Добавляет/убирает энергию и корректирует фазы с учетом сохранения массы и энергии.
-    void applyEnergyJ(PhaseState &state, double energyJ) const;
+    // pressurePa трактуется как локальное (атмосферное/поверхностное) давление для кипения.
+    void applyEnergyJ(PhaseState &state, double energyJ, double pressurePa) const;
 
     double totalMassKg(const PhaseState &state) const;
 

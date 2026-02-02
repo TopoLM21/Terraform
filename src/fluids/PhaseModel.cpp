@@ -43,15 +43,17 @@ double PhaseModel::albedoForPhase(PhaseModel::Phase phase) {
     return table.liquid;
 }
 
-void PhaseModel::applyEnergyJ(PhaseState &state, double energyJ) const {
+void PhaseModel::applyEnergyJ(PhaseState &state, double energyJ, double pressurePa) const {
     // Алгоритм двигает температуру к фазовым порогам, затем тратит энергию
     // на скрытую теплоту переходов. Масса не создается и не исчезает, а энергия
     // распределяется между нагревом и фазовыми превращениями.
+    // Температура кипения зависит от давления, поэтому используем boilingTemperatureK().
     double energyRemaining = energyJ;
     if (energyRemaining == 0.0) {
         return;
     }
 
+    const double boilingTempK = boilingTemperatureK(pressurePa);
     if (energyRemaining > 0.0) {
         if (state.temperatureK < kMeltingTempK) {
             const double heatCapacity = heatCapacityJPerK(state);
@@ -73,15 +75,16 @@ void PhaseModel::applyEnergyJ(PhaseState &state, double energyJ) const {
             energyRemaining -= meltMass * kLatentHeatFusion;
         }
 
-        if (energyRemaining > 0.0 && state.temperatureK < kBoilingTempK) {
+        if (energyRemaining > 0.0 && state.temperatureK < boilingTempK) {
             const double heatCapacity = heatCapacityJPerK(state);
             if (heatCapacity > 0.0) {
-                const double energyToBoilTemp = (kBoilingTempK - state.temperatureK) * heatCapacity;
+                const double energyToBoilTemp =
+                    (boilingTempK - state.temperatureK) * heatCapacity;
                 if (energyRemaining < energyToBoilTemp) {
                     state.temperatureK += energyRemaining / heatCapacity;
                     return;
                 }
-                state.temperatureK = kBoilingTempK;
+                state.temperatureK = boilingTempK;
                 energyRemaining -= energyToBoilTemp;
             }
         }
@@ -104,15 +107,16 @@ void PhaseModel::applyEnergyJ(PhaseState &state, double energyJ) const {
     }
 
     energyRemaining = -energyRemaining;
-    if (state.temperatureK > kBoilingTempK) {
+    if (state.temperatureK > boilingTempK) {
         const double heatCapacity = heatCapacityJPerK(state);
         if (heatCapacity > 0.0) {
-            const double energyToCoolTemp = (state.temperatureK - kBoilingTempK) * heatCapacity;
+            const double energyToCoolTemp =
+                (state.temperatureK - boilingTempK) * heatCapacity;
             if (energyRemaining < energyToCoolTemp) {
                 state.temperatureK -= energyRemaining / heatCapacity;
                 return;
             }
-            state.temperatureK = kBoilingTempK;
+            state.temperatureK = boilingTempK;
             energyRemaining -= energyToCoolTemp;
         }
     }
