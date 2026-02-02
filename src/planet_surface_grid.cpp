@@ -253,6 +253,10 @@ double PlanetSurfaceGrid::tileEdgeLengthKm(int pointIndex) const {
     return qSqrt(pointAreaKm2_ / hexFactor);
 }
 
+double PlanetSurfaceGrid::seaLevelKm() const {
+    return seaLevelKm_;
+}
+
 const QVector<SurfacePoint> &PlanetSurfaceGrid::points() const {
     return points_;
 }
@@ -455,8 +459,11 @@ void PlanetSurfaceGrid::applyHeightModel() {
     if (minHeight < 0.0) {
         // Global shift enforces "negative heights forbidden" so pressure model stays stable.
         const double heightShift = -minHeight;
+        seaLevelKm_ = heightShift;
         for (auto &point : points_) {
             point.heightKm += heightShift;
         }
+    } else {
+        seaLevelKm_ = 0.0;
     }
 }
