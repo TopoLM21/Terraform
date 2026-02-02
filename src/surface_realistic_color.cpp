@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QtGlobal>
 #include <QtCore/QString>
+#include <cmath>
 
 namespace {
 const QHash<QString, QColor> &materialBaseColors() {
@@ -28,14 +29,20 @@ QColor baseColorForMaterialId(const QString &materialId) {
 }
 
 QColor applyHeightTint(const QColor &baseColor, double normalizedHeight) {
+    const QColor lowAltitudeTint(210, 190, 170);
     const QColor highAltitudeTint(230, 235, 255);
-    // Нормируем высоту и смешиваем в пределах 5–10%: так подчёркиваем высоту,
-    // но сохраняем доминирующий материал (слишком сильное смешивание смывает текстуру).
-    const double mixFactor = 0.05 + 0.05 * normalizedHeight;
+    // Используем кривую pow с гаммой > 1, чтобы усилить различия в средних высотах.
+    // Диапазон смешивания 15–35% выбран как компромисс: оттенок заметнее,
+    // но материалы остаются различимыми даже на контрастных текстурах.
+    const double gamma = 1.4;
+    const double curvedHeight = std::pow(qBound(0.0, normalizedHeight, 1.0), gamma);
+    const double centered = (curvedHeight - 0.5) * 2.0;
+    const double mixFactor = 0.15 + 0.20 * std::abs(centered);
+    const QColor tint = centered >= 0.0 ? highAltitudeTint : lowAltitudeTint;
     const double invMix = 1.0 - mixFactor;
-    return QColor::fromRgbF(invMix * baseColor.redF() + mixFactor * highAltitudeTint.redF(),
-                            invMix * baseColor.greenF() + mixFactor * highAltitudeTint.greenF(),
-                            invMix * baseColor.blueF() + mixFactor * highAltitudeTint.blueF(),
+    return QColor::fromRgbF(invMix * baseColor.redF() + mixFactor * tint.redF(),
+                            invMix * baseColor.greenF() + mixFactor * tint.greenF(),
+                            invMix * baseColor.blueF() + mixFactor * tint.blueF(),
                             baseColor.alphaF());
 }
 } // namespace
