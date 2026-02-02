@@ -146,15 +146,25 @@ double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
     // составу и (для сверхплотных атмосфер) отдельный коэффициент.
     const double safePressureAtm = qMax(0.0, pressureAtm);
     const double co2Fraction = qBound(0.0, co2Share, 1.0);
-    const double pressureBoost = 1.0 + 0.035 * std::log1p(safePressureAtm);
+    const double rawPressureBoost = 1.0 + 0.035 * std::log1p(safePressureAtm);
+    const double mildPressureBoost = 1.0 + 0.015 * std::log1p(safePressureAtm);
+    const double pressureBoost =
+        (safePressureAtm >= 0.1 && safePressureAtm <= 2.0) ? mildPressureBoost : rawPressureBoost;
     const double greenhouseBoost = 1.0 + 0.2 * qBound(0.0, greenhouseOpacity, 1.0);
     const double compositionBoost = 1.0 + 0.8 * co2Fraction;
     const double superDenseBoost =
         (safePressureAtm > 10.0)
             ? (1.0 + 0.25 * std::log1p(safePressureAtm / 10.0))
             : 1.0;
-    double minTemperature =
-        effectiveTemperatureKelvin * pressureBoost * greenhouseBoost * compositionBoost * superDenseBoost;
+    double combinedBoost = pressureBoost * greenhouseBoost * compositionBoost;
+    // В области ~0.1–2 атм рост парникового эффекта по давлению и составу
+    // уже замедляется: сильное уширение линий не линейно, а часть энергии
+    // «уходит» в более высокие слои. Поэтому ограничиваем суммарный буст,
+    // чтобы «землеподобные» условия стартовали около 280–320 K.
+    if (safePressureAtm >= 0.1 && safePressureAtm <= 2.0) {
+        combinedBoost = qBound(1.0, combinedBoost, 1.4);
+    }
+    double minTemperature = effectiveTemperatureKelvin * combinedBoost * superDenseBoost;
     if (minDenseAtmosphereTemperatureK > 0.0) {
         minTemperature = qMax(minTemperature, minDenseAtmosphereTemperatureK);
     }
