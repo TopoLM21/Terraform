@@ -35,6 +35,19 @@ struct ClippedSegment {
     QVector3D end;
 };
 
+QColor mixCloudColor(const QColor &baseColor, double opacity) {
+    const double t = qBound(0.0, opacity, 1.0);
+    const QColor cloudColor(240, 240, 240);
+    const auto blend = [t](int baseChannel, int cloudChannel) {
+        return qBound(0,
+                      static_cast<int>(qRound(baseChannel * (1.0 - t) + cloudChannel * t)),
+                      255);
+    };
+    return QColor(blend(baseColor.red(), cloudColor.red()),
+                  blend(baseColor.green(), cloudColor.green()),
+                  blend(baseColor.blue(), cloudColor.blue()));
+}
+
 QVector3D latLonToCartesian(double latitudeDeg, double longitudeDeg) {
     const double latRad = qDegreesToRadians(latitudeDeg);
     const double lonRad = qDegreesToRadians(longitudeDeg);
@@ -248,6 +261,15 @@ void SurfaceGlobeWidget::setStarAngularDiameterDegrees(double angularDiameterDeg
     update();
 }
 
+void SurfaceGlobeWidget::setCloudOpacityBoost(double boost) {
+    const double clampedBoost = qBound(0.0, boost, 2.0);
+    if (qFuzzyCompare(cloudOpacityBoost_ + 1.0, clampedBoost + 1.0)) {
+        return;
+    }
+    cloudOpacityBoost_ = clampedBoost;
+    update();
+}
+
 void SurfaceGlobeWidget::updateStarAngularDiameter() {
     if (starRadiusSolar_ <= 0.0 || starDistanceAu_ <= 0.0) {
         starAngularDiameterDeg_ = 0.0;
@@ -332,8 +354,12 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         } else if (mapMode_ == SurfaceMapMode::Pressure) {
             globePoint.color = pressureToColor(point.pressureAtm);
         } else if (mapMode_ == SurfaceMapMode::Realistic) {
-            globePoint.color = applyLighting(
-                realisticSurfaceColor(point, minHeightKm_, maxHeightKm_), lightFactor);
+            const QColor baseColor =
+                realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
+            const double cloudOpacity =
+                qBound(0.0, point.cloudOpacity * cloudOpacityBoost_, 1.0);
+            const QColor cloudyColor = mixCloudColor(baseColor, cloudOpacity);
+            globePoint.color = applyLighting(cloudyColor, lightFactor);
         } else {
             globePoint.color = windToColor(point.windSpeedMps);
         }
@@ -398,8 +424,12 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             } else if (mapMode_ == SurfaceMapMode::Pressure) {
                 cellDraw.color = pressureToColor(cellPoint.pressureAtm);
             } else if (mapMode_ == SurfaceMapMode::Realistic) {
-                cellDraw.color = applyLighting(
-                    realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_), lightFactor);
+                const QColor baseColor =
+                    realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_);
+                const double cloudOpacity =
+                    qBound(0.0, cellPoint.cloudOpacity * cloudOpacityBoost_, 1.0);
+                const QColor cloudyColor = mixCloudColor(baseColor, cloudOpacity);
+                cellDraw.color = applyLighting(cloudyColor, lightFactor);
             } else {
                 cellDraw.color = windToColor(cellPoint.windSpeedMps);
             }

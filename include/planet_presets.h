@@ -60,6 +60,8 @@ struct PlanetPreset {
     bool manualGreenhouseOnTopOfAtmosphere = false;
     // Отражательная способность облаков (0..1), учитывает даже неводные облака.
     double cloudAlbedo = 0.0;
+    // Множитель визуальной непрозрачности облаков в отрисовке (0..2).
+    double cloudOpacityBoost = 1.0;
     // Временный режим "без воды и облаков" для последующей детальной модели.
     bool disableWaterAndClouds = false;
     // Масса поверхностной воды (гигатонны, 1 гт = 10^9 кг): используется для оценки океанского

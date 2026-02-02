@@ -29,6 +29,7 @@ public:
     void setStarLightDirection(const QVector3D &direction);
     void setStarColor(const QColor &color);
     void setStarAngularDiameterDegrees(double angularDiameterDeg);
+    void setCloudOpacityBoost(double boost);
 
 signals:
     void pointClicked(int pointIndex);
@@ -76,4 +77,5 @@ private:
     double starAngularDiameterDeg_ = 0.5;
     double starRadiusSolar_ = 0.0;
     double starDistanceAu_ = 0.0;
+    double cloudOpacityBoost_ = 1.0;
 };

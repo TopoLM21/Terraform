@@ -202,6 +202,8 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         point.surfaceMoisture.addPrecipitation(precipitationKgPerM2);
         const double condensationAlbedo =
             evaporationModel_.cloudAlbedoFromCondensation(column);
+        // Используем индикатор конденсации как визуальную непрозрачность облаков.
+        point.cloudOpacity = qBound(0.0, condensationAlbedo, 1.0);
         const double cloudShortwaveTransmission =
             qBound(0.0,
                    input.cloudShortwaveTransmission * (1.0 - condensationAlbedo),
