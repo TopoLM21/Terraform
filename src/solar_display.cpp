@@ -749,6 +749,7 @@ struct SurfaceGridComputationInput {
     bool disableWaterAndClouds = false;
     double surfaceWaterGigatons = 0.0;
     bool hasSeaLevel = false;
+    double seaLevelKm = 0.0;
     double dayLengthDays = 0.0;
     double yearLengthDays = 0.0;
     double elapsedDays = 0.0;
@@ -4988,21 +4989,15 @@ private:
             return result;
         }
 
-        double maxHeightKm = 0.0;
-        for (const auto &point : result.grid.points()) {
-            maxHeightKm = qMax(maxHeightKm, point.heightKm);
-        }
-
+        const double seaLevelKm = input.hasSeaLevel ? input.seaLevelKm : 0.0;
         for (int i = 0; i < result.grid.points().size(); ++i) {
             if ((i % 64) == 0 && shouldCancel()) {
                 result.cancelled = true;
                 return result;
             }
             auto &point = result.grid.points()[i];
-            if (maxHeightKm > 0.0 && point.heightKm >= 0.75 * maxHeightKm) {
-                // Высотный порог для скальных пород: доля от максимума дает масштабируемый
-                // критерий для разных планетных рельефов.
-                point.materialId = QStringLiteral("rocky");
+            if (input.hasSeaLevel && point.heightKm < seaLevelKm) {
+                point.materialId = QStringLiteral("ocean");
             } else {
                 point.materialId = input.baseMaterialId;
             }
@@ -5519,6 +5514,7 @@ private:
         SurfaceGridComputationInput input;
         input.surfaceWaterGigatons = surfaceWaterGigatons;
         input.hasSeaLevel = hasSeaLevel;
+        input.seaLevelKm = surfaceGrid_.seaLevelKm();
 
         QHash<QString, SurfaceMaterial> materialsById;
         const auto materials = surfaceMaterials();
@@ -5816,6 +5812,7 @@ private:
             planetComboBox_->currentData(kRoleSurfaceWaterGigatons).toDouble();
         input.hasSeaLevel =
             planetComboBox_->currentData(kRoleHasSeaLevel).toBool();
+        input.seaLevelKm = surfaceGrid_.seaLevelKm();
 
         QHash<QString, SurfaceMaterial> materialsById;
         const auto materials = surfaceMaterials();

@@ -19,6 +19,7 @@ public:
     double pointAreaKm2() const;
     double tileAreaKm2(int pointIndex) const;
     double tileEdgeLengthKm(int pointIndex) const;
+    double seaLevelKm() const;
 
     const QVector<SurfacePoint> &points() const;
     QVector<SurfacePoint> &points();
@@ -55,6 +56,7 @@ private:
     quint32 heightSeed_ = 0;
     bool useContinentsHeight_ = false;
     bool hasSeaLevel_ = true;
+    double seaLevelKm_ = 0.0;
     QVector<SurfacePoint> points_;
     QVector<SurfaceCell> cells_;
     AtmosphericGrid3D atmosphericGrid_;
