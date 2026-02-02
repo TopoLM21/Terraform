@@ -27,6 +27,7 @@
 #include "rotation_period_utils.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
+#include "fluids/PhaseModel.h"
 #include "orbit_segment_calculator.h"
 #include "radiation_model.h"
 #include "layered_radiation_model.h"
@@ -5880,8 +5881,13 @@ private:
         for (const auto &material : materials) {
             materialsById.insert(material.id, material);
         }
-        const auto materialForPoint = [&materialsById, &defaultMaterial](const QString &materialId) {
-            const auto it = materialsById.constFind(materialId);
+        const auto materialForPoint = [&materialsById, &defaultMaterial](const SurfacePoint &point) {
+            const QString effectiveMaterialId =
+                (point.materialId == QLatin1String("ocean") &&
+                 point.waterPhase == PhaseModel::Phase::Ice)
+                    ? QStringLiteral("ice")
+                    : point.materialId;
+            const auto it = materialsById.constFind(effectiveMaterialId);
             return it != materialsById.cend() ? *it : *defaultMaterial;
         };
 
@@ -5945,6 +5951,27 @@ private:
 
         QVector<double> localInsolations;
         localInsolations.reserve(surfaceGrid_.points().size());
+        const PhaseModel phaseModel;
+        const auto updateOceanPhaseAndAlbedo = [&phaseModel](SurfacePoint &point) {
+            if (point.materialId != QLatin1String("ocean")) {
+                point.waterPhase = PhaseModel::Phase::Liquid;
+                return;
+            }
+            // Порог замерзания воды: 273.15 K (0 °C).
+            constexpr double kFreezingTemperatureK = 273.15;
+            if (point.temperatureK < kFreezingTemperatureK) {
+                const double pressurePa = qMax(0.0, point.pressureAtm) * kStandardPressurePa;
+                point.waterPhase =
+                    phaseModel.phaseForTemperaturePressure(point.temperatureK, pressurePa);
+            } else {
+                point.waterPhase = PhaseModel::Phase::Liquid;
+            }
+            // Альбедо льда/воды берём из таблицы PhaseModel, чтобы совпадать с фазовой моделью.
+            const auto &albedoTable = PhaseModel::albedoTable();
+            const double oceanAlbedo =
+                (point.waterPhase == PhaseModel::Phase::Ice) ? albedoTable.ice : albedoTable.liquid;
+            point.state.setAlbedo(oceanAlbedo);
+        };
         for (auto &point : surfaceGrid_.points()) {
             const double localHourAngle = point.longitudeRadians - substellarLongitudeRadians;
             const double cosZenith =
@@ -6008,6 +6035,7 @@ private:
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             // Обновляем поверхностную температуру до переноса в соседние точки.
             point.temperatureK = point.state.temperatureKelvin();
+            updateOceanPhaseAndAlbedo(point);
         }
 
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
@@ -6097,7 +6125,7 @@ private:
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
-            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const SurfaceMaterial material = materialForPoint(point);
             const bool logDetails = shouldLogRadiationForPoint(i);
             const double greenhouseBaseTemperature =
                 (radiationModelType == RadiationModelType::Layered && point.airTemperatureK > 0.0)
@@ -6152,6 +6180,7 @@ private:
             point.state.setSurfaceLayerTemperatureKelvin(advectedTemperatures.at(i));
             // Температура после переноса хранится как поверхностная величина.
             point.temperatureK = point.state.temperatureKelvin();
+            updateOceanPhaseAndAlbedo(point);
         }
 
         if (useLayeredAtmosphere) {
@@ -6183,7 +6212,7 @@ private:
                 (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
-            const SurfaceMaterial material = materialForPoint(point.materialId);
+            const SurfaceMaterial material = materialForPoint(point);
             const bool logDetails = shouldLogRadiationForPoint(i);
             if (logDetails) {
                 qCInfo(solarRadiationLog) << "Radiation inputs (tick)"

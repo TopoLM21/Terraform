@@ -23,6 +23,7 @@ public:
     void setProfileTemperatureKelvin(double temperatureKelvin);
     void setSurfaceLayerTemperatureKelvin(double temperatureKelvin);
     void setGreenhouseOpacity(double greenhouseOpacity);
+    void setAlbedo(double albedo);
     const SubsurfaceTemperatureSolver &solver() const;
 
     double absorbedFlux(double solarIrradiance) const;

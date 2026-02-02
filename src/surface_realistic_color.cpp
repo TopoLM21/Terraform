@@ -56,7 +56,11 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
         normalizedHeight = qBound(0.0, (point.heightKm - minHeightKm) / heightRangeKm, 1.0);
     }
 
-    const QColor materialColor = baseColorForMaterialId(point.materialId);
+    const QString effectiveMaterialId =
+        (point.materialId == QLatin1String("ocean") && point.waterPhase == PhaseModel::Phase::Ice)
+            ? QStringLiteral("ice")
+            : point.materialId;
+    const QColor materialColor = baseColorForMaterialId(effectiveMaterialId);
     if (materialColor.isValid()) {
         return applyHeightTint(materialColor, normalizedHeight);
     }

@@ -3,6 +3,7 @@
 #include "atmospheric_thermodynamics.h"
 #include "surface_atmosphere_coupler.h"
 #include "atmosphere/EvaporationModel.h"
+#include "fluids/PhaseModel.h"
 
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QtMath>
@@ -160,7 +161,12 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             (i < input.localInsolations.size()) ? input.localInsolations.at(i) : 0.0;
         const SurfaceMaterial &material =
             materialForPoint(input.materialsById, input.defaultMaterial, point.materialId);
-        const double surfaceAlbedo = qBound(0.0, material.albedo, 1.0);
+        double surfaceAlbedo = qBound(0.0, material.albedo, 1.0);
+        if (point.materialId == QStringLiteral("ocean")) {
+            const auto &albedoTable = PhaseModel::albedoTable();
+            surfaceAlbedo =
+                (point.waterPhase == PhaseModel::Phase::Ice) ? albedoTable.ice : albedoTable.liquid;
+        }
 
         auto &layers = column.layers();
         if (!layers.isEmpty()) {
