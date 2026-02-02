@@ -42,5 +42,7 @@ struct SurfacePoint {
     QString materialId;
     // Фаза воды для океанических точек (используется для льда/альбедо/отрисовки).
     PhaseModel::Phase waterPhase = PhaseModel::Phase::Liquid;
+    // Визуальная непрозрачность облаков над точкой (0..1), используется в отрисовке.
+    double cloudOpacity = 0.0;
     QVector<int> neighborIndices;
 };

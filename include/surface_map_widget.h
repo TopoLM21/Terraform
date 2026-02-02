@@ -24,6 +24,7 @@ public:
     void setRenderScale(double scale);
     void setInterpolationNeighborCount(int neighborCount);
     void setInterpolationPower(double power);
+    void setCloudOpacityBoost(double boost);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -65,4 +66,5 @@ private:
     double renderScale_ = 1.0;
     int neighborCount_ = 8;
     double interpolationPower_ = 2.0;
+    double cloudOpacityBoost_ = 1.0;
 };

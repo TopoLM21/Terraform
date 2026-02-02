@@ -102,6 +102,19 @@ QPointF projectToPixel(const QPointF &projected, const QSize &imageSize) {
                    normalizedY * (imageSize.height() - 1));
 }
 
+QColor mixCloudColor(const QColor &baseColor, double opacity) {
+    const double t = qBound(0.0, opacity, 1.0);
+    const QColor cloudColor(240, 240, 240);
+    const auto blend = [t](int baseChannel, int cloudChannel) {
+        return qBound(0,
+                      static_cast<int>(qRound(baseChannel * (1.0 - t) + cloudChannel * t)),
+                      255);
+    };
+    return QColor(blend(baseColor.red(), cloudColor.red()),
+                  blend(baseColor.green(), cloudColor.green()),
+                  blend(baseColor.blue(), cloudColor.blue()));
+}
+
 QVector<QPainterPath> buildCellPaths(const SurfaceCell &cell,
                                      const MollweideProjection &projection,
                                      const QSize &imageSize) {
@@ -234,6 +247,15 @@ void SurfaceMapWidget::setInterpolationPower(double power) {
     rebuildImages();
 }
 
+void SurfaceMapWidget::setCloudOpacityBoost(double boost) {
+    const double clampedBoost = qBound(0.0, boost, 2.0);
+    if (qFuzzyCompare(cloudOpacityBoost_ + 1.0, clampedBoost + 1.0)) {
+        return;
+    }
+    cloudOpacityBoost_ = clampedBoost;
+    rebuildImages();
+}
+
 void SurfaceMapWidget::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event)
     QPainter painter(this);
@@ -358,9 +380,12 @@ void SurfaceMapWidget::rebuildImages() {
                         if (pointIndex < 0 || pointIndex >= points.size()) {
                             continue;
                         }
-                        const QColor color = realisticSurfaceColor(points[pointIndex],
-                                                                   minHeightKm_,
-                                                                   maxHeightKm_);
+                        const SurfacePoint &point = points[pointIndex];
+                        const QColor baseColor =
+                            realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
+                        const double cloudOpacity =
+                            qBound(0.0, point.cloudOpacity * cloudOpacityBoost_, 1.0);
+                        const QColor color = mixCloudColor(baseColor, cloudOpacity);
                         const double weight = pixelWeights.weights[i];
                         red += weight * color.red();
                         green += weight * color.green();
@@ -434,7 +459,11 @@ void SurfaceMapWidget::rebuildImages() {
                 } else if (mapMode_ == SurfaceMapMode::Pressure) {
                     color = pressureToColor(point.pressureAtm);
                 } else if (mapMode_ == SurfaceMapMode::Realistic) {
-                    color = realisticSurfaceColor(point, minHeightKm_, maxHeightKm_).rgb();
+                    const QColor baseColor =
+                        realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
+                    const double cloudOpacity =
+                        qBound(0.0, point.cloudOpacity * cloudOpacityBoost_, 1.0);
+                    color = mixCloudColor(baseColor, cloudOpacity).rgb();
                 } else {
                     color = windToColor(point.windSpeedMps);
                 }
@@ -475,7 +504,11 @@ void SurfaceMapWidget::rebuildImages() {
                     } else if (mapMode_ == SurfaceMapMode::Pressure) {
                         color = pressureToColor(point.pressureAtm);
                     } else if (mapMode_ == SurfaceMapMode::Realistic) {
-                        color = realisticSurfaceColor(point, minHeightKm_, maxHeightKm_).rgb();
+                        const QColor baseColor =
+                            realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
+                        const double cloudOpacity =
+                            qBound(0.0, point.cloudOpacity * cloudOpacityBoost_, 1.0);
+                        color = mixCloudColor(baseColor, cloudOpacity).rgb();
                     } else {
                         color = windToColor(point.windSpeedMps);
                     }

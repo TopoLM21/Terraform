@@ -210,6 +210,7 @@ constexpr int kRoleVerticalWindMixingCoefficient = Qt::UserRole + 45;
 constexpr int kRoleMinTopPressureAtm = Qt::UserRole + 46;
 constexpr int kRoleDisableWaterAndClouds = Qt::UserRole + 47;
 constexpr int kRoleSurfaceWaterGigatons = Qt::UserRole + 48;
+constexpr int kRoleCloudOpacityBoost = Qt::UserRole + 49;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -968,6 +969,13 @@ public:
         cloudAlbedoSpinBox_->setRange(0.0, 1.0);
         cloudAlbedoSpinBox_->setDecimals(2);
         cloudAlbedoSpinBox_->setSingleStep(0.05);
+        cloudOpacityBoostSpinBox_ = new QDoubleSpinBox(this);
+        cloudOpacityBoostSpinBox_->setRange(0.0, 2.0);
+        cloudOpacityBoostSpinBox_->setDecimals(2);
+        cloudOpacityBoostSpinBox_->setSingleStep(0.1);
+        cloudOpacityBoostSpinBox_->setValue(1.0);
+        cloudOpacityBoostSpinBox_->setToolTip(
+            QStringLiteral("Усиление визуальной непрозрачности облаков (0..2)."));
         diurnalCoolingBiasSpinBox_ = new QDoubleSpinBox(this);
         diurnalCoolingBiasSpinBox_->setRange(0.0, 200.0);
         diurnalCoolingBiasSpinBox_->setDecimals(1);
@@ -1062,6 +1070,8 @@ public:
         heightAtmosphereLayout->addStretch();
         planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), heightAtmosphereButtons);
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
+        planetControlsLayout->addRow(QStringLiteral("Интенсивность облаков (0..2):"),
+                                     cloudOpacityBoostSpinBox_);
         planetControlsLayout->addRow(QStringLiteral("Поправка суточного охлаждения (К):"),
                                      diurnalCoolingBiasSpinBox_);
         planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
@@ -1437,6 +1447,7 @@ public:
             syncFlatHeightWithPlanet();
             syncAtmosphereDisableWithPlanet();
             syncCloudAlbedoWithPlanet();
+            syncCloudOpacityBoostWithPlanet();
             syncDiurnalCoolingBiasWithPlanet();
             syncManualGreenhouseOnTopWithPlanet();
             syncAdvancedRadiationWithPlanet();
@@ -1562,6 +1573,18 @@ public:
             updateTemperaturePlot();
             updateSurfaceGridTemperatures();
         });
+
+        connect(cloudOpacityBoostSpinBox_,
+                QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this,
+                [this](double) {
+                    if (planetComboBox_->currentIndex() < 0) {
+                        return;
+                    }
+                    syncPlanetCloudOpacityBoostWithSelection();
+                    applySurfaceCloudOpacityBoost(
+                        cloudOpacityBoostSpinBox_ ? cloudOpacityBoostSpinBox_->value() : 1.0);
+                });
 
         connect(diurnalCoolingBiasSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                 this, [this](double) {
@@ -1866,6 +1889,7 @@ private:
     QPushButton *flatHeightButton_ = nullptr;
     QPushButton *disableAtmosphereButton_ = nullptr;
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
+    QDoubleSpinBox *cloudOpacityBoostSpinBox_ = nullptr;
     QDoubleSpinBox *diurnalCoolingBiasSpinBox_ = nullptr;
     QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
     QCheckBox *advancedRadiationCheckBox_ = nullptr;
@@ -2673,6 +2697,10 @@ private:
             const QSignalBlocker cloudBlocker(cloudAlbedoSpinBox_);
             cloudAlbedoSpinBox_->setValue(0.0);
         }
+        if (cloudOpacityBoostSpinBox_) {
+            const QSignalBlocker cloudBlocker(cloudOpacityBoostSpinBox_);
+            cloudOpacityBoostSpinBox_->setValue(1.0);
+        }
         if (diurnalCoolingBiasSpinBox_) {
             const QSignalBlocker diurnalBlocker(diurnalCoolingBiasSpinBox_);
             diurnalCoolingBiasSpinBox_->setValue(0.0);
@@ -3186,6 +3214,7 @@ private:
                                      static_cast<int>(RadiationModelType::Layered),
                                      kRoleAdvancedRadiationModel);
         planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
+        planetComboBox_->setItemData(index, planet.cloudOpacityBoost, kRoleCloudOpacityBoost);
         planetComboBox_->setItemData(index, planet.disableWaterAndClouds, kRoleDisableWaterAndClouds);
         planetComboBox_->setItemData(index, planet.surfaceWaterGigatons, kRoleSurfaceWaterGigatons);
         planetComboBox_->setItemData(index, 0.0, kRoleDiurnalCoolingBiasK);
@@ -3329,6 +3358,14 @@ private:
         cloudAlbedoInput->setDecimals(2);
         cloudAlbedoInput->setSingleStep(0.05);
 
+        auto *cloudOpacityBoostInput = new QDoubleSpinBox(&dialog);
+        cloudOpacityBoostInput->setRange(0.0, 2.0);
+        cloudOpacityBoostInput->setDecimals(2);
+        cloudOpacityBoostInput->setSingleStep(0.1);
+        cloudOpacityBoostInput->setValue(1.0);
+        cloudOpacityBoostInput->setToolTip(
+            QStringLiteral("Усиление визуальной непрозрачности облаков (0..2)."));
+
         auto *diurnalCoolingBiasInput = new QDoubleSpinBox(&dialog);
         diurnalCoolingBiasInput->setRange(0.0, 200.0);
         diurnalCoolingBiasInput->setDecimals(1);
@@ -3362,6 +3399,8 @@ private:
         formLayout->addRow(QStringLiteral("Парниковая непрозрачность поверх атмосферы:"),
                            manualGreenhouseOnTopInput);
         formLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoInput);
+        formLayout->addRow(QStringLiteral("Интенсивность облаков (0..2):"),
+                           cloudOpacityBoostInput);
         formLayout->addRow(QStringLiteral("Поправка суточного охлаждения (К):"),
                            diurnalCoolingBiasInput);
         formLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedInput);
@@ -3433,7 +3472,7 @@ private:
                 [&dialog, nameInput, axisInput, dayLengthInput, yearLengthInput, massInput, radiusInput,
                  eccentricityInput, obliquityInput, perihelionArgumentInput,
                  greenhouseOpacityInput, manualGreenhouseOnTopInput, cloudAlbedoInput,
-                 diurnalCoolingBiasInput,
+                 cloudOpacityBoostInput, diurnalCoolingBiasInput,
                  heightSeedInput, materialInput,
                  rotationModeInput, spinOrbitPInput, spinOrbitQInput, atmosphereInput, this]() {
             const QString name = nameInput->text().trimmed();
@@ -3507,6 +3546,7 @@ private:
             }
             const bool manualGreenhouseOnTop = manualGreenhouseOnTopInput->isChecked();
             const double cloudAlbedo = cloudAlbedoInput->value();
+            const double cloudOpacityBoost = cloudOpacityBoostInput->value();
             const double diurnalCoolingBiasK = diurnalCoolingBiasInput->value();
             const double geothermalFlux =
                 subsurfaceGeothermalFluxSpinBox_ ? subsurfaceGeothermalFluxSpinBox_->value() : 0.0;
@@ -3561,6 +3601,7 @@ private:
                                 disableWaterAndClouds,
                                 surfaceWaterGigatons,
                                 geothermalFlux, spinOrbitP, spinOrbitQ, tidallyLocked};
+            preset.cloudOpacityBoost = cloudOpacityBoost;
             preset.rotationModeOverride = true;
             preset.heightSeed = heightSeed;
             preset.hasSeaLevel = existingHasSeaLevel;
@@ -3607,6 +3648,9 @@ private:
                     advancedRadiationValue.isValid() ? advancedRadiationValue : fallbackRadiation,
                     kRoleAdvancedRadiationModel);
                 planetComboBox_->setItemData(existingIndex, preset.cloudAlbedo, kRoleCloudAlbedo);
+                planetComboBox_->setItemData(existingIndex,
+                                             preset.cloudOpacityBoost,
+                                             kRoleCloudOpacityBoost);
                 planetComboBox_->setItemData(existingIndex,
                                              disableWaterAndClouds,
                                              kRoleDisableWaterAndClouds);
@@ -3856,6 +3900,21 @@ private:
         cloudAlbedoSpinBox_->setValue(cloudAlbedo);
     }
 
+    void syncCloudOpacityBoostWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !cloudOpacityBoostSpinBox_) {
+            return;
+        }
+
+        const QVariant cloudOpacityValue =
+            planetComboBox_->itemData(index, kRoleCloudOpacityBoost);
+        const double cloudOpacityBoost =
+            cloudOpacityValue.isValid() ? cloudOpacityValue.toDouble() : 1.0;
+        const QSignalBlocker blocker(cloudOpacityBoostSpinBox_);
+        cloudOpacityBoostSpinBox_->setValue(qBound(0.0, cloudOpacityBoost, 2.0));
+        applySurfaceCloudOpacityBoost(cloudOpacityBoostSpinBox_->value());
+    }
+
     void syncDiurnalCoolingBiasWithPlanet() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0 || !diurnalCoolingBiasSpinBox_) {
@@ -4061,6 +4120,16 @@ private:
             return;
         }
         planetComboBox_->setItemData(index, cloudAlbedoSpinBox_->value(), kRoleCloudAlbedo);
+    }
+
+    void syncPlanetCloudOpacityBoostWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0 || !cloudOpacityBoostSpinBox_) {
+            return;
+        }
+        planetComboBox_->setItemData(index,
+                                     cloudOpacityBoostSpinBox_->value(),
+                                     kRoleCloudOpacityBoost);
     }
 
     void syncPlanetDiurnalCoolingBiasWithSelection() {
@@ -4567,6 +4636,15 @@ private:
         }
         if (surfaceGlobeWidget_) {
             surfaceGlobeWidget_->setPressureRange(minPressureAtm, maxPressureAtm);
+        }
+    }
+
+    void applySurfaceCloudOpacityBoost(double boost) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setCloudOpacityBoost(boost);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setCloudOpacityBoost(boost);
         }
     }
 
