@@ -6156,17 +6156,29 @@ private:
         SurfaceAdvectionModel advectionModel;
         constexpr double kMinAtmospherePressureAtm = 1e-6;
         QVector<double> advectedTemperatures;
+        QVector<bool> isFrozenOcean;
+        isFrozenOcean.resize(surfaceGrid_.points().size());
+        for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
+            const auto &point = surfaceGrid_.points().at(i);
+            isFrozenOcean[i] =
+                (point.materialId == QLatin1String("ocean") &&
+                 point.waterPhase == PhaseModel::Phase::Ice);
+        }
         if (atmospherePressureAtm <= kMinAtmospherePressureAtm ||
             atmosphere.totalMassGigatons() <= 0.0) {
             // На безатмосферных телах нет ветрового переноса тепла.
             advectedTemperatures = temperatures;
         } else {
+            // Здесь «диффузией» считаем перенос температуры по ветру и сглаживание по соседям.
+            // Для замёрзшего океана перенос выключаем: лёд слабо перемешивается и сохраняет
+            // локальную температуру без примеси соседних ячеек.
             advectedTemperatures =
                 advectionModel.advectTemperature(surfaceGrid_,
                                                  temperatures,
                                                  windEast,
                                                  windNorth,
                                                  timeStepSeconds,
+                                                 isFrozenOcean,
                                                  1,
                                                  1.0);
         }

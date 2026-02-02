@@ -80,6 +80,25 @@ QVector<double> SurfaceAdvectionModel::advectTemperature(const PlanetSurfaceGrid
                                                          double dtSeconds,
                                                          int smoothingIterations,
                                                          double minTemperatureK) const {
+    const QVector<bool> emptyMask;
+    return advectTemperature(grid,
+                             temperatureK,
+                             windEastMps,
+                             windNorthMps,
+                             dtSeconds,
+                             emptyMask,
+                             smoothingIterations,
+                             minTemperatureK);
+}
+
+QVector<double> SurfaceAdvectionModel::advectTemperature(const PlanetSurfaceGrid &grid,
+                                                         const QVector<double> &temperatureK,
+                                                         const QVector<double> &windEastMps,
+                                                         const QVector<double> &windNorthMps,
+                                                         double dtSeconds,
+                                                         const QVector<bool> &isFrozenOcean,
+                                                         int smoothingIterations,
+                                                         double minTemperatureK) const {
     const int pointCount = grid.pointCount();
     if (pointCount <= 0 || temperatureK.size() != pointCount ||
         windEastMps.size() != pointCount || windNorthMps.size() != pointCount) {
@@ -99,8 +118,14 @@ QVector<double> SurfaceAdvectionModel::advectTemperature(const PlanetSurfaceGrid
 
     QVector<double> advected;
     advected.resize(pointCount);
+    const bool useFrozenMask = (isFrozenOcean.size() == pointCount);
 
     for (int i = 0; i < pointCount; ++i) {
+        if (useFrozenMask && isFrozenOcean.at(i)) {
+            // Лёд закрепляем локально: температура не переносится ветром.
+            advected[i] = temperatureK.at(i);
+            continue;
+        }
         const SurfacePoint &point = grid.points().at(i);
         // Полулагранжева схема: назад по ветру на шаг dt.
         // dφ = v_n / R * dt, dλ = v_e / (R cos φ) * dt.
@@ -148,6 +173,11 @@ QVector<double> SurfaceAdvectionModel::advectTemperature(const PlanetSurfaceGrid
         QVector<double> smoothed = advected;
         for (int iter = 0; iter < iterations; ++iter) {
             for (int i = 0; i < pointCount; ++i) {
+                if (useFrozenMask && isFrozenOcean.at(i)) {
+                    // Для льда отключаем «диффузию» (сглаживание по соседям).
+                    smoothed[i] = advected.at(i);
+                    continue;
+                }
                 const QVector<int> &neighbors = neighborIndices_.at(i);
                 if (neighbors.isEmpty()) {
                     smoothed[i] = advected.at(i);

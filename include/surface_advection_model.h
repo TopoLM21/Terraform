@@ -13,6 +13,14 @@ public:
                                       double dtSeconds,
                                       int smoothingIterations = 1,
                                       double minTemperatureK = 1.0) const;
+    QVector<double> advectTemperature(const PlanetSurfaceGrid &grid,
+                                      const QVector<double> &temperatureK,
+                                      const QVector<double> &windEastMps,
+                                      const QVector<double> &windNorthMps,
+                                      double dtSeconds,
+                                      const QVector<bool> &isFrozenOcean,
+                                      int smoothingIterations = 1,
+                                      double minTemperatureK = 1.0) const;
 
 private:
     void ensureNeighbors(const PlanetSurfaceGrid &grid) const;
