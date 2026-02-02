@@ -4359,6 +4359,7 @@ private:
         }
 
         const auto material = currentMaterial();
+        const bool isOcean = material && material->id == QStringLiteral("ocean");
         const double thermalConductivity = material ? material->thermalConductivity : 1.0;
         const double density = material ? material->density : 1.0;
         const double specificHeat = material ? material->specificHeat : 1.0;
@@ -4377,11 +4378,23 @@ private:
             std::sqrt(thermalDiffusivity * dayLengthSeconds / kPi);
         // Берём запас по глубине ~ 6δ, чтобы ночные минимумы не занижались
         // из-за слишком близкой нижней границы.
-        const double targetBottomDepthMeters =
-            qBound(2.5, 6.0 * thermalSkinDepthMeters, 12.0);
-        const int targetLayerCount = qBound(
-            24, static_cast<int>(qRound(24.0 + (targetBottomDepthMeters - 2.5) * (16.0 / 9.5))),
-            40);
+        double targetBottomDepthMeters = qBound(2.5, 6.0 * thermalSkinDepthMeters, 12.0);
+        int targetLayerCount =
+            qBound(24,
+                   static_cast<int>(qRound(24.0 + (targetBottomDepthMeters - 2.5) * (16.0 / 9.5))),
+                   40);
+        double minAutoTopThicknessMeters = qBound(0.15, 0.15 * thermalSkinDepthMeters, 0.2);
+        double maxAutoTopThicknessMeters = 0.2;
+        if (isOcean) {
+            // Для океана берём более глубокую модель: большая тепловая инерция воды и
+            // характерная толща перемешанного слоя (~30–100 м) требуют крупного масштаба.
+            targetBottomDepthMeters = 60.0;
+            // Увеличиваем число слоёв, чтобы сохранить разумный шаг по глубине.
+            targetLayerCount = 64;
+            // Минимальная толщина верхнего слоя 0.5–1.0 м предотвращает сверхтонкую сетку.
+            minAutoTopThicknessMeters = 0.75;
+            maxAutoTopThicknessMeters = 1.0;
+        }
         // Глубина модели ~ несколько δ обеспечивает корректную амплитуду ночных температур.
         if (useAutoBottomDepth) {
             settings.bottomDepthMeters = targetBottomDepthMeters;
@@ -4394,8 +4407,7 @@ private:
                 settings.bottomDepthMeters / qMax(1, settings.layerCount);
             // При авто-режиме не делаем верхний слой тоньше 0.15 м,
             // чтобы избежать слишком агрессивной дискретизации возле поверхности.
-            const double minTopThicknessFromSkin =
-                qBound(0.15, 0.15 * thermalSkinDepthMeters, 0.2);
+            const double minTopThicknessFromSkin = minAutoTopThicknessMeters;
             // Верхний слой должен сохранять минимальную толщину, даже если
             // равномерный шаг сетки получается меньше половины верхнего слоя.
             const double maxTopThickness =
@@ -4422,8 +4434,7 @@ private:
                 if (useAutoTopThickness) {
                     const double uniformThickness =
                         settings.bottomDepthMeters / qMax(1, settings.layerCount);
-                    const double minTopThicknessFromSkin =
-                        qBound(0.15, 0.15 * thermalSkinDepthMeters, 0.2);
+                    const double minTopThicknessFromSkin = minAutoTopThicknessMeters;
                     const double maxTopThickness =
                         qMax(uniformThickness * 0.5, minTopThicknessFromSkin);
                     const double desiredTopThickness =
@@ -4450,8 +4461,7 @@ private:
                 : 0.0;
         const double dzFromHeatCapacity = qMax(dzFromDelta, dzMinFromHeatCapacity);
         // Ограничиваем рост верхнего слоя в авто-режиме, чтобы dz_min не раздувал
-        // толщину выше физически желаемого диапазона 0.15–0.2 м.
-        const double maxAutoTopThicknessMeters = 0.2;
+        // толщину выше физически желаемого диапазона 0.15–0.2 м (или до 1 м для океана).
         // Если пользователь задал толщину вручную, сохраняем её — иначе верхний слой
         // может «раздуваться» из-за грубого шага по времени (1 час).
         settings.topLayerThicknessMeters = useAutoTopThickness
