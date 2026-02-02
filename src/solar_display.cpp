@@ -4487,7 +4487,8 @@ private:
         double minAutoTopThicknessMeters = qBound(0.15, 0.15 * thermalSkinDepthMeters, 0.2);
         double maxAutoTopThicknessMeters = 0.2;
         if (isOcean) {
-            // Для океана берём более глубокую модель: большая тепловая инерция воды и
+            // Для океана сетка описывает толщу воды, а не грунт.
+            // Берём более глубокую модель: большая тепловая инерция воды и
             // характерная толща перемешанного слоя (~30–100 м) требуют крупного масштаба.
             targetBottomDepthMeters = 60.0;
             // Увеличиваем число слоёв, чтобы сохранить разумный шаг по глубине.
@@ -4518,6 +4519,15 @@ private:
             settings.topLayerThicknessMeters =
                 qMin(desiredTopThickness, maxTopThickness);
             dzFromDelta = settings.topLayerThicknessMeters;
+        }
+        if (isOcean) {
+            const double minOceanBottomDepthMeters = 30.0;
+            const double minOceanTopThicknessMeters = 0.5;
+            settings.bottomDepthMeters =
+                qMax(settings.bottomDepthMeters, minOceanBottomDepthMeters);
+            settings.topLayerThicknessMeters =
+                qMax(settings.topLayerThicknessMeters, minOceanTopThicknessMeters);
+            dzFromDelta = qMax(dzFromDelta, minOceanTopThicknessMeters);
         }
         const auto adjustBottomDepthForTopThickness = [&](double requiredBottomDepthMeters) {
             if (requiredBottomDepthMeters <= settings.bottomDepthMeters) {
