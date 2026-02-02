@@ -208,6 +208,7 @@ constexpr int kRoleMinDenseAtmosphereTemperature = Qt::UserRole + 44;
 constexpr int kRoleVerticalWindMixingCoefficient = Qt::UserRole + 45;
 constexpr int kRoleMinTopPressureAtm = Qt::UserRole + 46;
 constexpr int kRoleDisableWaterAndClouds = Qt::UserRole + 47;
+constexpr int kRoleSurfaceWaterGigatons = Qt::UserRole + 48;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -452,7 +453,11 @@ QVector3D resolveStarDirection(double declinationDegrees,
     return directionFromLatLonRadians(declinationRadians, substellarLongitude);
 }
 
-double estimateSurfaceWaterGigatons(const SurfaceMaterial &material) {
+double estimateSurfaceWaterGigatons(const SurfaceMaterial &material,
+                                    double presetSurfaceWaterGigatons) {
+    if (presetSurfaceWaterGigatons > 0.0) {
+        return presetSurfaceWaterGigatons;
+    }
     // В текущем UI нет явного управления гидросферой, поэтому применяем мягкую эвристику:
     // океаническую поверхность считаем водной, остальные материалы — сухими.
     if (material.id == QLatin1String("ocean")) {
@@ -564,6 +569,8 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                      const SurfaceMaterial &material,
                                      double cloudAlbedo,
                                      bool disableWaterAndClouds,
+                                     double presetSurfaceWaterGigatons,
+                                     bool hasSeaLevel,
                                      double pressureAtm,
                                      double planetRadiusKm,
                                      double surfaceGravity,
@@ -579,7 +586,10 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
     const double safeRadiusKm = qMax(0.1, planetRadiusKm);
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
 
-    const double waterGigatons = estimateSurfaceWaterGigatons(material);
+    const double estimatedWaterGigatons =
+        estimateSurfaceWaterGigatons(material, presetSurfaceWaterGigatons);
+    const double waterGigatons =
+        (disableWaterAndClouds || !hasSeaLevel) ? 0.0 : estimatedWaterGigatons;
     const double planetAreaKm2 = kEarthAreaKm2 * areaScale;
     const double avgDepth = (planetAreaKm2 > 0.0) ? waterGigatons / planetAreaKm2 : 0.0;
     double potentialCoverage = 0.0;
@@ -737,6 +747,8 @@ struct SurfaceGridComputationInput {
     double radiusKm = 0.0;
     double cloudAlbedo = 0.0;
     bool disableWaterAndClouds = false;
+    double surfaceWaterGigatons = 0.0;
+    bool hasSeaLevel = false;
     double dayLengthDays = 0.0;
     double yearLengthDays = 0.0;
     double elapsedDays = 0.0;
@@ -3167,6 +3179,7 @@ private:
                                      kRoleAdvancedRadiationModel);
         planetComboBox_->setItemData(index, planet.cloudAlbedo, kRoleCloudAlbedo);
         planetComboBox_->setItemData(index, planet.disableWaterAndClouds, kRoleDisableWaterAndClouds);
+        planetComboBox_->setItemData(index, planet.surfaceWaterGigatons, kRoleSurfaceWaterGigatons);
         planetComboBox_->setItemData(index, 0.0, kRoleDiurnalCoolingBiasK);
         planetComboBox_->setItemData(index, planet.geothermalFluxWPerM2, kRoleGeothermalFlux);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
@@ -3529,11 +3542,16 @@ private:
                 existingIndex >= 0
                     ? planetComboBox_->itemData(existingIndex, kRoleDisableWaterAndClouds).toBool()
                     : false;
+            const double surfaceWaterGigatons =
+                existingIndex >= 0
+                    ? planetComboBox_->itemData(existingIndex, kRoleSurfaceWaterGigatons).toDouble()
+                    : 0.0;
             PlanetPreset preset{name, axis, dayLength, yearLength, eccentricity, obliquity,
                                 perihelionArgument, massEarths, radiusKm, materialId,
                                 composition, QStringLiteral("custom"), primaryStar, secondaryStar,
                                 greenhouseOpacity, manualGreenhouseOnTop, cloudAlbedo,
                                 disableWaterAndClouds,
+                                surfaceWaterGigatons,
                                 geothermalFlux, spinOrbitP, spinOrbitQ, tidallyLocked};
             preset.rotationModeOverride = true;
             preset.heightSeed = heightSeed;
@@ -3584,6 +3602,9 @@ private:
                 planetComboBox_->setItemData(existingIndex,
                                              disableWaterAndClouds,
                                              kRoleDisableWaterAndClouds);
+                planetComboBox_->setItemData(existingIndex,
+                                             surfaceWaterGigatons,
+                                             kRoleSurfaceWaterGigatons);
                 planetComboBox_->setItemData(existingIndex,
                                              diurnalCoolingBiasK,
                                              kRoleDiurnalCoolingBiasK);
@@ -5148,6 +5169,8 @@ private:
                                               material,
                                               input.cloudAlbedo,
                                               input.disableWaterAndClouds,
+                                              input.surfaceWaterGigatons,
+                                              input.hasSeaLevel,
                                               point.pressureAtm,
                                               input.radiusKm,
                                               gravity,
@@ -5487,6 +5510,10 @@ private:
             qBound(0.0, planetComboBox_->currentData(kRoleCloudAlbedo).toDouble(), 1.0);
         const bool disableWaterAndClouds =
             planetComboBox_->currentData(kRoleDisableWaterAndClouds).toBool();
+        const double surfaceWaterGigatons =
+            planetComboBox_->currentData(kRoleSurfaceWaterGigatons).toDouble();
+        const bool hasSeaLevel =
+            planetComboBox_->currentData(kRoleHasSeaLevel).toBool();
         const QString baseMaterialId =
             resolveSurfaceMaterialIdForPoint(atmosphere, massEarths, radiusKm);
 
@@ -5571,6 +5598,8 @@ private:
                                               stateDefaults->material,
                                               cloudAlbedo,
                                               disableWaterAndClouds,
+                                              surfaceWaterGigatons,
+                                              hasSeaLevel,
                                               qMax(0.0, atmospherePressureAtm),
                                               radiusKm,
                                               gravity,
@@ -5637,6 +5666,8 @@ private:
         input.radiusKm = radiusKm;
         input.cloudAlbedo = cloudAlbedo;
         input.disableWaterAndClouds = disableWaterAndClouds;
+        input.surfaceWaterGigatons = surfaceWaterGigatons;
+        input.hasSeaLevel = hasSeaLevel;
         input.dayLengthDays = dayLengthDays;
         input.yearLengthDays = yearLengthDays;
         input.elapsedDays = surfaceTime_.surfaceElapsedDays();
@@ -6012,6 +6043,8 @@ private:
                                               material,
                                               cloudAlbedo,
                                               disableWaterAndClouds,
+                                              surfaceWaterGigatons,
+                                              hasSeaLevel,
                                               point.pressureAtm,
                                               radiusKm,
                                               gravity,

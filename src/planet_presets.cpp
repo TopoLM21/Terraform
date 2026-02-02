@@ -161,7 +161,7 @@ QVector<PlanetPreset> solarSystemPresets() {
         {QStringLiteral("Меркурий"), 0.39, mercurySolarDayDays, mercuryOrbitalPeriodDays, 0.2056, 0.03,
          29.12, 0.0553, 2439.7,
          QStringLiteral("regolith_mercury"), AtmosphereComposition{}, kSolarStarPresetId,
-         kSolarPrimary, std::nullopt, 0.0, false, 0.0, false, mercuryGeothermalFlux,
+         kSolarPrimary, std::nullopt, 0.0, false, 0.0, false, 0.0, mercuryGeothermalFlux,
          // Резонанс 3:2 задан по сидерическому периоду (~58.65 суток), а не по солнечным суткам.
          3, 2, false,
          HeightSourceType::Procedural,
@@ -176,6 +176,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          false,
          0.75,
          false,
+         0.0,
          venusGeothermalFlux,
          // Свободное вращение: резонанс 1:1 задаётся в сидерическом смысле.
          1,
@@ -201,6 +202,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          false,
          0.0,
          true,
+         1.4e9,
          earthGeothermalFlux,
          // Свободное вращение: резонанс 1:1 задаётся в сидерическом смысле.
          1,
@@ -219,7 +221,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          0.0167, // Эксцентриситет солнечной орбиты, не лунной.
          6.68, 0.0, 0.0123, 1737.4,
          QStringLiteral("regolith_moon"), AtmosphereComposition{}, kSolarStarPresetId,
-         kSolarPrimary, std::nullopt, 0.0, false, 0.0, false, moonGeothermalFlux,
+         kSolarPrimary, std::nullopt, 0.0, false, 0.0, false, 0.0, moonGeothermalFlux,
          1, 1, false, HeightSourceType::Procedural, QString(), 0.0, 1004u, false, true},
         {QStringLiteral("Марс"), 1.52, 1.03, 686.98, 0.0934, 25.19, 286.5, 0.107, 3389.5,
          QStringLiteral("desert"),
@@ -231,6 +233,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          false,
          0.0,
          false,
+         0.0,
          marsGeothermalFlux,
          // Свободное вращение: резонанс 1:1 задаётся в сидерическом смысле.
          1,
@@ -244,7 +247,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          true},
         {QStringLiteral("Церрера"), 2.77, 0.38, 1681.63, 0.0758, 4.0, 73.6, 0.00015, 473.0,
          QStringLiteral("ice"), AtmosphereComposition{}, kSolarStarPresetId, kSolarPrimary,
-         std::nullopt, 0.0, false, 0.0, false, ceresGeothermalFlux, 1, 1, false,
+         std::nullopt, 0.0, false, 0.0, false, 0.0, ceresGeothermalFlux, 1, 1, false,
          HeightSourceType::Procedural,
          QString(), 0.0, 1006u, false, true},
     };
@@ -278,6 +281,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          false,
          0.0,
          false,
+         0.0,
          0.0,
          1,
          1,
@@ -315,6 +319,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          0.0,
          false,
          0.0,
+         0.0,
          1,
          1,
          false,
@@ -351,6 +356,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          0.0,
          false,
          0.0,
+         0.0,
          1,
          1,
          false,
@@ -382,6 +388,7 @@ QVector<PlanetPreset> sweetSkyPresets() {
          false,
          0.0,
          false,
+         0.0,
          0.0,
          1,
          1,
