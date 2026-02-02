@@ -38,6 +38,9 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     surfaceAirFluxValueLabel_ = new QLabel(QStringLiteral("—"), this);
     subsurfaceFluxInValueLabel_ = new QLabel(QStringLiteral("—"), this);
     subsurfaceFluxOutValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    surfaceMoistureFractionValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    surfaceMoistureWaterValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    surfacePrecipitationValueLabel_ = new QLabel(QStringLiteral("—"), this);
     bottomBoundaryValueLabel_ = new QLabel(QStringLiteral("—"), this);
     bottomTemperatureValueLabel_ = new QLabel(QStringLiteral("—"), this);
     materialValueLabel_ = new QLabel(QStringLiteral("—"), this);
@@ -45,12 +48,16 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     tileEdgeLengthValueLabel_ = new QLabel(QStringLiteral("—"), this);
 
     profileTable_ = new QTableWidget(this);
-    profileTable_->setColumnCount(4);
+    profileTable_->setColumnCount(8);
     profileTable_->setHorizontalHeaderLabels({
         QStringLiteral("Слой"),
         QStringLiteral("Высота (км)"),
         QStringLiteral("Температура (K)"),
-        QStringLiteral("Давление (атм)")
+        QStringLiteral("Давление (атм)"),
+        QStringLiteral("Relative Humidity"),
+        QStringLiteral("Water Vapor (kg/m²)"),
+        QStringLiteral("Liquid Water (kg/m²)"),
+        QStringLiteral("Ice Water (kg/m²)")
     });
     profileTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     profileTable_->setSelectionMode(QAbstractItemView::NoSelection);
@@ -100,6 +107,10 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Поток поверхность→воздух (Вт/м²):"), surfaceAirFluxValueLabel_);
     layout->addRow(QStringLiteral("Поток в грунт (Вт/м²):"), subsurfaceFluxInValueLabel_);
     layout->addRow(QStringLiteral("Поток из грунта (Вт/м²):"), subsurfaceFluxOutValueLabel_);
+    layout->addRow(QStringLiteral("Доля влаги поверхности (0..1):"),
+                   surfaceMoistureFractionValueLabel_);
+    layout->addRow(QStringLiteral("Вода на поверхности (кг/м²):"), surfaceMoistureWaterValueLabel_);
+    layout->addRow(QStringLiteral("Осадки (кг/м²):"), surfacePrecipitationValueLabel_);
     const QString bottomBoundaryTooltip = QStringLiteral(
         "Фиксированная температура задаёт «глубинный резервуар», который может "
         "подогревать профиль.");
@@ -137,6 +148,11 @@ void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
     const double fluxFromGround = qMax(0.0, -point.subsurfaceFluxWPerM2);
     subsurfaceFluxInValueLabel_->setText(formatNumber(fluxIntoGround));
     subsurfaceFluxOutValueLabel_->setText(formatNumber(fluxFromGround));
+    surfaceMoistureFractionValueLabel_->setText(
+        formatNumber(point.surfaceMoisture.moistureFraction(), 3));
+    surfaceMoistureWaterValueLabel_->setText(
+        formatNumber(point.surfaceMoisture.waterKgPerM2(), 3));
+    surfacePrecipitationValueLabel_->setText(formatNumber(point.precipitationKgPerM2, 3));
     materialValueLabel_->setText(point.materialId.isEmpty() ? QStringLiteral("—") : point.materialId);
     tileAreaValueLabel_->setText(formatNumber(tileAreaKm2));
     tileEdgeLengthValueLabel_->setText(formatNumber(tileEdgeLengthKm));
@@ -230,6 +246,26 @@ void SurfacePointStatusDialog::setAtmosphereProfile(const AtmosphericColumn *col
             isValidLayer ? formatNumber(layer.pressureAtm(), 4) : invalidMarker);
         pressureItem->setFlags(pressureItem->flags() & ~Qt::ItemIsEditable);
         profileTable_->setItem(i, 3, pressureItem);
+
+        auto *humidityItem = new QTableWidgetItem(
+            isValidLayer ? formatNumber(layer.relativeHumidity(), 3) : invalidMarker);
+        humidityItem->setFlags(humidityItem->flags() & ~Qt::ItemIsEditable);
+        profileTable_->setItem(i, 4, humidityItem);
+
+        auto *waterVaporItem = new QTableWidgetItem(
+            isValidLayer ? formatNumber(layer.waterVaporKgPerM2(), 4) : invalidMarker);
+        waterVaporItem->setFlags(waterVaporItem->flags() & ~Qt::ItemIsEditable);
+        profileTable_->setItem(i, 5, waterVaporItem);
+
+        auto *liquidWaterItem = new QTableWidgetItem(
+            isValidLayer ? formatNumber(layer.liquidWaterKgPerM2(), 4) : invalidMarker);
+        liquidWaterItem->setFlags(liquidWaterItem->flags() & ~Qt::ItemIsEditable);
+        profileTable_->setItem(i, 6, liquidWaterItem);
+
+        auto *iceWaterItem = new QTableWidgetItem(
+            isValidLayer ? formatNumber(layer.iceWaterKgPerM2(), 4) : invalidMarker);
+        iceWaterItem->setFlags(iceWaterItem->flags() & ~Qt::ItemIsEditable);
+        profileTable_->setItem(i, 7, iceWaterItem);
     }
 }
 
@@ -248,6 +284,9 @@ void SurfacePointStatusDialog::clearPoint() {
     surfaceAirFluxValueLabel_->setText(QStringLiteral("—"));
     subsurfaceFluxInValueLabel_->setText(QStringLiteral("—"));
     subsurfaceFluxOutValueLabel_->setText(QStringLiteral("—"));
+    surfaceMoistureFractionValueLabel_->setText(QStringLiteral("—"));
+    surfaceMoistureWaterValueLabel_->setText(QStringLiteral("—"));
+    surfacePrecipitationValueLabel_->setText(QStringLiteral("—"));
     bottomBoundaryValueLabel_->setText(QStringLiteral("—"));
     bottomTemperatureValueLabel_->setText(QStringLiteral("—"));
     materialValueLabel_->setText(QStringLiteral("—"));
