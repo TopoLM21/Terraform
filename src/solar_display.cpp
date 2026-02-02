@@ -5308,11 +5308,14 @@ private:
             // Для масштаба высоты нужен воздушный профиль, а не температура грунта.
             // Ожидаемый контроль: для Земли ~0.7 атм на 3 км при 280–290 K.
             // Высоту считаем относительно уровня моря (ниже моря может быть отрицательная).
-            const double heightAboveSeaLevelMeters =
-                (point.heightKm - (input.hasSeaLevel ? input.seaLevelKm : 0.0)) * 1000.0;
+            const double seaLevelKm = input.hasSeaLevel ? input.seaLevelKm : 0.0;
+            const double heightAboveSeaLevelMeters = (point.heightKm - seaLevelKm) * 1000.0;
+            // Атмосферное давление считается от поверхности воды, а не от дна океана.
+            const double atmosphereHeightMeters =
+                input.hasSeaLevel ? qMax(0.0, heightAboveSeaLevelMeters) : heightAboveSeaLevelMeters;
             const double pressureAtm =
                 AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
-                                                              heightAboveSeaLevelMeters,
+                                                              atmosphereHeightMeters,
                                                               airColumnTemperatureK,
                                                               input.atmosphere,
                                                               gravity);
