@@ -106,7 +106,11 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         // Фазовый баланс влаги обновляем до радиации, чтобы конденсация влияла
         // на альбедо облаков уже в текущем шаге.
-        evaporationModel_.updateColumn(column, timeStepSeconds_);
+        const double precipitationKgPerM2 =
+            evaporationModel_.updateColumnWithPrecipitation(column,
+                                                            timeStepSeconds_);
+        point.precipitationKgPerM2 += precipitationKgPerM2;
+        point.surfaceWaterKgPerM2 += precipitationKgPerM2;
         const double condensationAlbedo =
             evaporationModel_.cloudAlbedoFromCondensation(column);
         const double cloudShortwaveTransmission =
@@ -218,4 +222,7 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                                       dayLengthSeconds_,
                                       timeStepSeconds_,
                                       1);
+    advectionSolver_.advectLayerMoisture(input.surfaceGrid,
+                                         input.atmosphereGrid,
+                                         timeStepSeconds_);
 }

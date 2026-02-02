@@ -1,6 +1,7 @@
 #include "atmospheric_advection_solver.h"
 
 #include "wind_field_model.h"
+#include "atmosphere/EvaporationModel.h"
 
 #include <QVector3D>
 #include <QtMath>
@@ -83,6 +84,44 @@ WindVector clampWind(const WindVector &wind) {
     const double scale = kMaxWindSpeedMps / speed;
     return {wind.eastMps * scale, wind.northMps * scale};
 }
+
+int findBestSourceIndex(const PlanetSurfaceGrid &grid,
+                        const QVector<QVector<int>> &neighborIndices,
+                        int pointIndex,
+                        double sourceLat,
+                        double sourceLon) {
+    const int pointCount = grid.pointCount();
+    const double sinSource = qSin(sourceLat);
+    const double cosSource = qCos(sourceLat);
+    const QVector<int> &neighbors =
+        (pointIndex < neighborIndices.size()) ? neighborIndices.at(pointIndex) : QVector<int>();
+    int bestIndex = pointIndex;
+    double bestCos = -1.0;
+    for (const int neighborIndex : neighbors) {
+        if (neighborIndex < 0 || neighborIndex >= pointCount) {
+            continue;
+        }
+        const SurfacePoint &candidate = grid.points().at(neighborIndex);
+        const double cosDistance = sinSource * candidate.sinLatitude +
+            cosSource * candidate.cosLatitude *
+            qCos(sourceLon - candidate.longitudeRadians);
+        if (cosDistance > bestCos) {
+            bestCos = cosDistance;
+            bestIndex = neighborIndex;
+        }
+    }
+    if (pointIndex >= 0 && pointIndex < pointCount) {
+        const SurfacePoint &candidate = grid.points().at(pointIndex);
+        const double cosDistance = sinSource * candidate.sinLatitude +
+            cosSource * candidate.cosLatitude *
+            qCos(sourceLon - candidate.longitudeRadians);
+        if (cosDistance > bestCos) {
+            bestCos = cosDistance;
+            bestIndex = pointIndex;
+        }
+    }
+    return bestIndex;
+}
 } // namespace
 
 void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
@@ -148,37 +187,11 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
             const double sourceLat = qBound(-kHalfPi, point.latitudeRadians - dLat, kHalfPi);
             const double sourceLon = normalizeLongitude(point.longitudeRadians - dLon);
 
-            const double sinSource = qSin(sourceLat);
-            const double cosSource = qCos(sourceLat);
-            const QVector<int> &neighbors = (i < neighborIndices_.size())
-                                                ? neighborIndices_.at(i)
-                                                : QVector<int>();
-            int bestIndex = i;
-            double bestCos = -1.0;
-            for (const int neighborIndex : neighbors) {
-                if (neighborIndex < 0 || neighborIndex >= pointCount) {
-                    continue;
-                }
-                const SurfacePoint &candidate = grid.points().at(neighborIndex);
-                const double cosDistance = sinSource * candidate.sinLatitude +
-                    cosSource * candidate.cosLatitude *
-                    qCos(sourceLon - candidate.longitudeRadians);
-                if (cosDistance > bestCos) {
-                    bestCos = cosDistance;
-                    bestIndex = neighborIndex;
-                }
-            }
-            if (i >= 0 && i < pointCount) {
-                const SurfacePoint &candidate = grid.points().at(i);
-                const double cosDistance = sinSource * candidate.sinLatitude +
-                    cosSource * candidate.cosLatitude *
-                    qCos(sourceLon - candidate.longitudeRadians);
-                if (cosDistance > bestCos) {
-                    bestCos = cosDistance;
-                    bestIndex = i;
-                }
-            }
-
+            const int bestIndex = findBestSourceIndex(grid,
+                                                      neighborIndices_,
+                                                      i,
+                                                      sourceLat,
+                                                      sourceLon);
             advected[i] = wind.at(bestIndex);
         }
 
@@ -229,6 +242,88 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
             const WindVector clamped = clampWind(advected.at(i));
             layers[layerIndex].setWindUMps(clamped.eastMps);
             layers[layerIndex].setWindVMps(clamped.northMps);
+        }
+    }
+}
+
+void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &grid,
+                                                     AtmosphericGrid3D &atmosphereGrid,
+                                                     double dtSeconds) const {
+    const int pointCount = grid.pointCount();
+    if (pointCount <= 0 || dtSeconds <= 0.0) {
+        return;
+    }
+
+    if (atmosphereGrid.columnCount() != pointCount || atmosphereGrid.layerCount() <= 0) {
+        return;
+    }
+
+    const double radiusMeters = grid.radiusKm() * 1000.0;
+    if (radiusMeters <= 0.0) {
+        return;
+    }
+
+    ensureNeighbors(grid);
+
+    const int layerCount = atmosphereGrid.layerCount();
+    for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
+        QVector<double> vaporAdvected;
+        QVector<double> liquidAdvected;
+        vaporAdvected.resize(pointCount);
+        liquidAdvected.resize(pointCount);
+
+        for (int i = 0; i < pointCount; ++i) {
+            const auto &layers = atmosphereGrid.columns().at(i).layers();
+            if (layerIndex >= layers.size()) {
+                vaporAdvected[i] = 0.0;
+                liquidAdvected[i] = 0.0;
+                continue;
+            }
+
+            const SurfacePoint &point = grid.points().at(i);
+            const AtmosphericLayerState &layer = layers.at(layerIndex);
+            // Полулагранжева адвекция влаги: ищем точку источника, откуда приходит
+            // воздух за шаг dt, и переносим состав (пар/капли) без явного диффузионного
+            // сглаживания — это стабильнее для больших dt на сферической сетке.
+            const double cosLat = qMax(kMinCosLatitude, std::abs(point.cosLatitude));
+            const double dLat = (layer.windVMps() * dtSeconds) / radiusMeters;
+            const double dLon = (layer.windUMps() * dtSeconds) / (radiusMeters * cosLat);
+            const double sourceLat = qBound(-kHalfPi, point.latitudeRadians - dLat, kHalfPi);
+            const double sourceLon = normalizeLongitude(point.longitudeRadians - dLon);
+
+            const int bestIndex = findBestSourceIndex(grid,
+                                                      neighborIndices_,
+                                                      i,
+                                                      sourceLat,
+                                                      sourceLon);
+            const auto &sourceLayers = atmosphereGrid.columns().at(bestIndex).layers();
+            if (layerIndex >= sourceLayers.size()) {
+                vaporAdvected[i] = 0.0;
+                liquidAdvected[i] = 0.0;
+                continue;
+            }
+
+            const AtmosphericLayerState &sourceLayer = sourceLayers.at(layerIndex);
+            vaporAdvected[i] = sourceLayer.waterVaporKgPerM2();
+            liquidAdvected[i] = sourceLayer.liquidWaterKgPerM2();
+        }
+
+        for (int i = 0; i < pointCount; ++i) {
+            auto &layers = atmosphereGrid.columns()[i].layers();
+            if (layerIndex >= layers.size()) {
+                continue;
+            }
+            const double vapor = qMax(0.0, vaporAdvected.at(i));
+            const double liquid = qMax(0.0, liquidAdvected.at(i));
+            layers[layerIndex].setWaterVaporKgPerM2(vapor);
+            layers[layerIndex].setLiquidWaterKgPerM2(liquid);
+            const double maxVapor =
+                EvaporationModel::saturationWaterVaporKgPerM2(
+                    layers[layerIndex].temperatureKelvin(),
+                    layers[layerIndex].thicknessMeters());
+            const double relativeHumidity =
+                (maxVapor > 0.0) ? qBound(0.0, vapor / maxVapor, 1.0) : 0.0;
+            layers[layerIndex].setRelativeHumidity(relativeHumidity);
         }
     }
 }

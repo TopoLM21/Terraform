@@ -12,6 +12,9 @@ public:
                           double dayLengthSeconds,
                           double dtSeconds,
                           int smoothingIterations = 1) const;
+    void advectLayerMoisture(const PlanetSurfaceGrid &grid,
+                             AtmosphericGrid3D &atmosphereGrid,
+                             double dtSeconds) const;
 
 private:
     void ensureNeighbors(const PlanetSurfaceGrid &grid) const;

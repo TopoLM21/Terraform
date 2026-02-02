@@ -25,6 +25,9 @@ struct SurfacePoint {
     double longwaveDownWPerM2 = 0.0;
     double surfaceAirFluxWPerM2 = 0.0;
     double subsurfaceFluxWPerM2 = 0.0;
+    // Осадки и накопленная вода на поверхности, кг/м².
+    double precipitationKgPerM2 = 0.0;
+    double surfaceWaterKgPerM2 = 0.0;
     // Состояние хранится отдельно для каждой точки, чтобы учитывать локальную
     // тепловую инерцию и парниковую поправку без глобального пересчёта.
     SurfacePointState state;
