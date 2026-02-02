@@ -5187,9 +5187,12 @@ private:
             // Масса газового столба в ячейке пропорциональна её площади, поэтому P = (m_cell * g) / area_cell.
             // Для масштаба высоты нужен воздушный профиль, а не температура грунта.
             // Ожидаемый контроль: для Земли ~0.7 атм на 3 км при 280–290 K.
+            // Высоту считаем относительно уровня моря (ниже моря может быть отрицательная).
+            const double heightAboveSeaLevelMeters =
+                (point.heightKm - (input.hasSeaLevel ? input.seaLevelKm : 0.0)) * 1000.0;
             const double pressureAtm =
                 AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
-                                                              point.heightKm * 1000.0,
+                                                              heightAboveSeaLevelMeters,
                                                               airColumnTemperatureK,
                                                               input.atmosphere,
                                                               gravity);
@@ -6071,9 +6074,12 @@ private:
             // Барометрическая релаксация возвращает поле давления к
             // физически согласованному профилю P(z) при температуре столба воздуха
             // (а не поверхности), чтобы ночное охлаждение не схлопывало давление.
+            // Высоту считаем относительно уровня моря (ниже моря может быть отрицательная).
+            const double heightAboveSeaLevelMeters =
+                (point.heightKm - (input.hasSeaLevel ? input.seaLevelKm : 0.0)) * 1000.0;
             const double barometricAtm =
                 AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
-                                                              point.heightKm * 1000.0,
+                                                              heightAboveSeaLevelMeters,
                                                               airColumnTemperatureK,
                                                               atmosphere,
                                                               gravity);
