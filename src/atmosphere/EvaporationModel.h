@@ -15,8 +15,12 @@ public:
         double cloudAlbedoScaleKgPerM2 = 0.12;
         // Характерное время выпадения осадков (с).
         double precipitationTimeSeconds = 1800.0;
-        // Доля жидкой воды, уходящая в осадки за характерное время (0..1).
+        // Доля конденсата (жидкость+лёд), уходящая в осадки за характерное время (0..1).
         double precipitationEfficiency = 0.6;
+        // Температура замерзания воды (K), по которой делим конденсат на лёд и жидкость.
+        double freezingTemperatureKelvin = 273.15;
+        // Диапазон сглаживания (K) для смешанной фазы вокруг точки замерзания.
+        double freezingRangeKelvin = 8.0;
     };
 
     EvaporationModel() = default;
@@ -28,7 +32,7 @@ public:
     // Инициализировать слой по заданной относительной влажности.
     void initializeLayer(AtmosphericLayerState &layer, double relativeHumidity) const;
 
-    // Обновить фазовый баланс (пар ↔ жидкость) внутри колонны.
+    // Обновить фазовый баланс (пар ↔ жидкость ↔ лёд) внутри колонны.
     void updateColumn(AtmosphericColumn &column, double timeStepSeconds) const;
     // Обновить фазовый баланс и вернуть выпавшие осадки (кг/м²), ушедшие на поверхность.
     double updateColumnWithPrecipitation(AtmosphericColumn &column,

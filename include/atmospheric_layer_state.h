@@ -17,6 +17,7 @@ public:
                           double convectionMixingCoefficient,
                           double waterVaporKgPerM2,
                           double liquidWaterKgPerM2,
+                          double iceWaterKgPerM2,
                           double relativeHumidity);
 
     double temperatureKelvin() const;
@@ -61,6 +62,9 @@ public:
     double liquidWaterKgPerM2() const;
     void setLiquidWaterKgPerM2(double liquidWaterKgPerM2);
 
+    double iceWaterKgPerM2() const;
+    void setIceWaterKgPerM2(double iceWaterKgPerM2);
+
     double relativeHumidity() const;
     void setRelativeHumidity(double relativeHumidity);
 
@@ -83,6 +87,8 @@ private:
     double waterVaporKgPerM2_ = 0.0;
     // Масса жидкой воды (конденсата) в слое, кг/м².
     double liquidWaterKgPerM2_ = 0.0;
+    // Масса льда (конденсата) в слое, кг/м².
+    double iceWaterKgPerM2_ = 0.0;
     // Относительная влажность слоя (0..1), вычисляется по насыщению.
     double relativeHumidity_ = 0.0;
 };

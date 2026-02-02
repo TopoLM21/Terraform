@@ -14,6 +14,7 @@ AtmosphericLayerState::AtmosphericLayerState(double temperatureKelvin,
                                              double convectionMixingCoefficient,
                                              double waterVaporKgPerM2,
                                              double liquidWaterKgPerM2,
+                                             double iceWaterKgPerM2,
                                              double relativeHumidity)
     : temperatureKelvin_(temperatureKelvin)
     , pressureAtm_(pressureAtm)
@@ -29,6 +30,7 @@ AtmosphericLayerState::AtmosphericLayerState(double temperatureKelvin,
     , convectionMixingCoefficient_(convectionMixingCoefficient)
     , waterVaporKgPerM2_(waterVaporKgPerM2)
     , liquidWaterKgPerM2_(liquidWaterKgPerM2)
+    , iceWaterKgPerM2_(iceWaterKgPerM2)
     , relativeHumidity_(relativeHumidity) {}
 
 double AtmosphericLayerState::temperatureKelvin() const {
@@ -141,6 +143,14 @@ double AtmosphericLayerState::liquidWaterKgPerM2() const {
 
 void AtmosphericLayerState::setLiquidWaterKgPerM2(double liquidWaterKgPerM2) {
     liquidWaterKgPerM2_ = liquidWaterKgPerM2;
+}
+
+double AtmosphericLayerState::iceWaterKgPerM2() const {
+    return iceWaterKgPerM2_;
+}
+
+void AtmosphericLayerState::setIceWaterKgPerM2(double iceWaterKgPerM2) {
+    iceWaterKgPerM2_ = iceWaterKgPerM2;
 }
 
 double AtmosphericLayerState::relativeHumidity() const {

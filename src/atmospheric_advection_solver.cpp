@@ -269,14 +269,17 @@ void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &gr
     for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
         QVector<double> vaporAdvected;
         QVector<double> liquidAdvected;
+        QVector<double> iceAdvected;
         vaporAdvected.resize(pointCount);
         liquidAdvected.resize(pointCount);
+        iceAdvected.resize(pointCount);
 
         for (int i = 0; i < pointCount; ++i) {
             const auto &layers = atmosphereGrid.columns().at(i).layers();
             if (layerIndex >= layers.size()) {
                 vaporAdvected[i] = 0.0;
                 liquidAdvected[i] = 0.0;
+                iceAdvected[i] = 0.0;
                 continue;
             }
 
@@ -300,12 +303,14 @@ void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &gr
             if (layerIndex >= sourceLayers.size()) {
                 vaporAdvected[i] = 0.0;
                 liquidAdvected[i] = 0.0;
+                iceAdvected[i] = 0.0;
                 continue;
             }
 
             const AtmosphericLayerState &sourceLayer = sourceLayers.at(layerIndex);
             vaporAdvected[i] = sourceLayer.waterVaporKgPerM2();
             liquidAdvected[i] = sourceLayer.liquidWaterKgPerM2();
+            iceAdvected[i] = sourceLayer.iceWaterKgPerM2();
         }
 
         for (int i = 0; i < pointCount; ++i) {
@@ -315,8 +320,10 @@ void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &gr
             }
             const double vapor = qMax(0.0, vaporAdvected.at(i));
             const double liquid = qMax(0.0, liquidAdvected.at(i));
+            const double ice = qMax(0.0, iceAdvected.at(i));
             layers[layerIndex].setWaterVaporKgPerM2(vapor);
             layers[layerIndex].setLiquidWaterKgPerM2(liquid);
+            layers[layerIndex].setIceWaterKgPerM2(ice);
             const double maxVapor =
                 EvaporationModel::saturationWaterVaporKgPerM2(
                     layers[layerIndex].temperatureKelvin(),

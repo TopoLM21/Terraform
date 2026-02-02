@@ -7,12 +7,16 @@
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QtMath>
 
+#include <cmath>
+
 Q_LOGGING_CATEGORY(atmosphereProfileLog, "solar.atmosphere.profile")
+Q_LOGGING_CATEGORY(atmosphereMassLog, "solar.atmosphere.mass")
 
 namespace {
 constexpr double kEvaporationTransferVelocityMps = 1.0e-4;
 constexpr double kEvaporationTempMinK = 260.0;
 constexpr double kEvaporationTempRangeK = 20.0;
+constexpr double kWaterMassTolerance = 1.0e-6;
 
 double potentialEvaporationKgPerM2(const SurfacePointState &surface,
                                    const AtmosphericLayerState &layer,
@@ -48,6 +52,17 @@ double potentialEvaporationKgPerM2(const SurfacePointState &surface,
     const double evaporationRateKgPerM2S =
         kEvaporationTransferVelocityMps * deficit * temperatureFactor;
     return evaporationRateKgPerM2S * dtSeconds;
+}
+
+double columnWaterMassKgPerM2(const AtmosphericColumn &column) {
+    double total = 0.0;
+    const auto &layers = column.layers();
+    for (const auto &layer : layers) {
+        total += qMax(0.0, layer.waterVaporKgPerM2());
+        total += qMax(0.0, layer.liquidWaterKgPerM2());
+        total += qMax(0.0, layer.iceWaterKgPerM2());
+    }
+    return total;
 }
 } // namespace
 
@@ -162,8 +177,21 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         // Фазовый баланс влаги обновляем до радиации, чтобы конденсация влияла
         // на альбедо облаков уже в текущем шаге.
+        const double columnWaterBefore = columnWaterMassKgPerM2(column);
         const double precipitationKgPerM2 =
             evaporationModel_.updateColumnWithPrecipitation(column, timeStepSeconds_);
+        const double columnWaterAfter =
+            columnWaterMassKgPerM2(column) + precipitationKgPerM2;
+        const double massDelta = columnWaterAfter - columnWaterBefore;
+        const double massScale = qMax(1.0, columnWaterBefore);
+        if (std::abs(massDelta) > kWaterMassTolerance * massScale) {
+            qCWarning(atmosphereMassLog)
+                << "Mass balance warning"
+                << "index=" << i
+                << "before=" << columnWaterBefore
+                << "after=" << columnWaterAfter
+                << "delta=" << massDelta;
+        }
         point.precipitationKgPerM2 += precipitationKgPerM2;
         point.surfaceMoisture.addPrecipitation(precipitationKgPerM2);
         const double condensationAlbedo =
