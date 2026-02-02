@@ -97,7 +97,7 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Долгота (°):"), longitudeValueLabel_);
     layout->addRow(QStringLiteral("Температура поверхности (K):"), temperatureValueLabel_);
     layout->addRow(QStringLiteral("Температура воздуха (K):"), airTemperatureValueLabel_);
-    layout->addRow(QStringLiteral("Высота (км):"), heightValueLabel_);
+    layout->addRow(QStringLiteral("Высота над ур. моря (км):"), heightValueLabel_);
     layout->addRow(QStringLiteral("Поверхностное давление (атм):"), pressureValueLabel_);
     layout->addRow(QStringLiteral("Скорость ветра (м/с):"), windValueLabel_);
     layout->addRow(QStringLiteral("Солнечная инсоляция (Вт/м²):"), insolationValueLabel_);
@@ -129,13 +129,15 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
 }
 
 void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
+                                        double seaLevelKm,
                                         double tileAreaKm2,
                                         double tileEdgeLengthKm) {
     latitudeValueLabel_->setText(formatNumber(point.latitudeDeg));
     longitudeValueLabel_->setText(formatNumber(point.longitudeDeg));
     temperatureValueLabel_->setText(formatNumber(point.temperatureK));
     airTemperatureValueLabel_->setText(formatNumber(point.airTemperatureK));
-    heightValueLabel_->setText(formatNumber(point.heightKm));
+    const double heightAboveSeaLevelKm = point.heightKm - seaLevelKm;
+    heightValueLabel_->setText(formatNumber(heightAboveSeaLevelKm));
     pressureValueLabel_->setText(formatNumber(point.pressureAtm, 3));
     windValueLabel_->setText(formatNumber(point.windSpeedMps));
     insolationValueLabel_->setText(formatNumber(point.solarFluxWPerM2));
