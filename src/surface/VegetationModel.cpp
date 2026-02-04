@@ -44,13 +44,20 @@ void VegetationModel::update(QVector<SurfacePoint> &points,
             continue;
         }
 
+        // Парциальное давление CO₂: P_CO2 = P_total * x_CO2.
+        // P_total берём из SurfacePoint, x_CO2 задаётся составом атмосферы.
         const double co2PartialAtm = qMax(0.0, point.pressureAtm) * qMax(0.0, co2Share);
+        // Ограничивающие коэффициенты (0..1) для CO₂ и света.
+        // Эти множители дополнительно "душат" рост при дефиците углекислого газа
+        // или освещённости и участвуют в расчёте смертности через климатический стресс.
+        const double co2Limit = co2Factor(co2PartialAtm);
+        const double lightLimit = lightFactor(point.solarFluxWPerM2);
         const double climateFactor =
             temperatureFactor(point.temperatureK) *
             moistureFactor(point.surfaceMoisture.moistureFraction()) *
             pressureFactor(point.pressureAtm) *
-            co2Factor(co2PartialAtm) *
-            lightFactor(point.solarFluxWPerM2);
+            co2Limit *
+            lightLimit;
 
         // Рост модели: логистическая формула с ограничением биомассы.
         // dB/dt = r * F_climate * B * (1 - B/B_max) - m * B,
@@ -170,7 +177,8 @@ double VegetationModel::lightFactor(double solarFluxWPerM2) const {
     if (solarFluxWPerM2 <= 0.0) {
         return 0.0;
     }
-    // Гиперболическое насыщение: F = 1 - exp(-I / I_sat).
+    // Гиперболическое насыщение: F = 1 - exp(-I / I_sat),
+    // где I_sat задаёт поток света, при котором рост близок к максимуму.
     const double saturation = qMax(1.0, settings_.lightSaturationWPerM2);
     return 1.0 - qExp(-solarFluxWPerM2 / saturation);
 }
