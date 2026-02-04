@@ -5578,8 +5578,7 @@ private:
         } else {
             wetPointCount = result.grid.points().size();
         }
-        if (allowSurfaceWater && wetPointCount > 0 &&
-            (surfaceWaterMassKg > 0.0 || input.hasSeaLevel)) {
+        if (allowSurfaceWater && wetPointCount > 0 && surfaceWaterMassKg > 0.0) {
             const double wetAreaM2 =
                 static_cast<double>(wetPointCount) * result.grid.pointAreaKm2() * 1e6;
             const double distributedWaterKgPerM2 =
