@@ -44,5 +44,11 @@ struct SurfacePoint {
     PhaseModel::Phase waterPhase = PhaseModel::Phase::Liquid;
     // Визуальная непрозрачность облаков над точкой (0..1), используется в отрисовке.
     double cloudOpacity = 0.0;
+    // Доля площади, покрытой растительностью (0..1), обновляется моделью биома.
+    double vegetationFraction = 0.0;
+    // Биомасса растительности (кг/м²), учитывается в росте/диффузии.
+    double vegetationBiomass = 0.0;
+    // Маска/вес для визуального смешивания растительности (0..1).
+    double vegetationBlendMask = 0.0;
     QVector<int> neighborIndices;
 };

@@ -8,6 +8,7 @@
 #include "layered_radiation_solver.h"
 #include "planet_presets.h"
 #include "planet_surface_grid.h"
+#include "surface/VegetationModel.h"
 #include "vertical_wind_mixing_solver.h"
 
 #include <QtCore/QHash>
@@ -48,6 +49,8 @@ private:
     AtmosphericAdvectionSolver advectionSolver_;
     VerticalWindMixingSolver verticalWindMixingSolver_;
     EvaporationModel evaporationModel_;
+    VegetationModel vegetationModel_;
+    double co2Share_ = 0.0;
     double gravityMps2_ = 0.0;
     double rSpecific_ = 0.0;
     double specificHeatCp_ = 0.0;

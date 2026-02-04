@@ -45,6 +45,17 @@ QColor applyHeightTint(const QColor &baseColor, double normalizedHeight) {
                             invMix * baseColor.blueF() + mixFactor * tint.blueF(),
                             baseColor.alphaF());
 }
+
+QColor applyVegetationTint(const QColor &baseColor, double vegetationBlend) {
+    const QColor vegetationTint(52, 120, 68);
+    // Смешиваем не более чем на 55%, чтобы материал оставался различимым.
+    const double mixFactor = qBound(0.0, vegetationBlend * 0.55, 0.55);
+    const double invMix = 1.0 - mixFactor;
+    return QColor::fromRgbF(invMix * baseColor.redF() + mixFactor * vegetationTint.redF(),
+                            invMix * baseColor.greenF() + mixFactor * vegetationTint.greenF(),
+                            invMix * baseColor.blueF() + mixFactor * vegetationTint.blueF(),
+                            baseColor.alphaF());
+}
 } // namespace
 
 QColor realisticSurfaceColor(const SurfacePoint &point,
@@ -62,12 +73,24 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
             : point.materialId;
     const QColor materialColor = baseColorForMaterialId(effectiveMaterialId);
     if (materialColor.isValid()) {
-        return applyHeightTint(materialColor, normalizedHeight);
+        const QColor heightTinted = applyHeightTint(materialColor, normalizedHeight);
+        if (point.materialId != QLatin1String("ocean")) {
+            const double vegetationBlend =
+                qBound(0.0, point.vegetationFraction * point.vegetationBlendMask, 1.0);
+            return applyVegetationTint(heightTinted, vegetationBlend);
+        }
+        return heightTinted;
     }
 
     // Если материал не распознан, используем нейтральный тон,
     // чтобы реалистичный режим зависел только от типа материала, а не от высоты/температуры.
     const QColor fallbackMaterial = baseColorForMaterialId(QStringLiteral("rocky"));
     const QColor fallbackBase = fallbackMaterial.isValid() ? fallbackMaterial : QColor(128, 128, 128);
-    return applyHeightTint(fallbackBase, normalizedHeight);
+    const QColor heightTinted = applyHeightTint(fallbackBase, normalizedHeight);
+    if (point.materialId != QLatin1String("ocean")) {
+        const double vegetationBlend =
+            qBound(0.0, point.vegetationFraction * point.vegetationBlendMask, 1.0);
+        return applyVegetationTint(heightTinted, vegetationBlend);
+    }
+    return heightTinted;
 }
