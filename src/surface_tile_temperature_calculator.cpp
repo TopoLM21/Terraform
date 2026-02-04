@@ -1,11 +1,13 @@
 #include "surface_tile_temperature_calculator.h"
 
 #include "radiation_model_utils.h"
+#include <QtCore/QLoggingCategory>
 #include <QtCore/QtMath>
 
 #include <cmath>
 
 namespace {
+Q_LOGGING_CATEGORY(solarRadiationLog, "solar.radiation")
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kMeanInsolationFactor = 0.25;
 constexpr double kTwoThirds = 2.0 / 3.0;
@@ -61,6 +63,12 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
     const SurfaceTileTemperatureDefaults &defaults,
     const QHash<QString, SurfaceMaterial> &materialsById,
     const SurfaceMaterial &fallbackMaterial) const {
+    qCInfo(solarRadiationLog) << "Surface tile defaults"
+                              << "segmentSolarConstant=" << settings.segmentSolarConstant
+                              << "cloudAlbedo=" << settings.cloudAlbedo
+                              << "greenhouseOpacity=" << defaults.greenhouseOpacity
+                              << "minTemperatureKelvin=" << defaults.minTemperatureKelvin
+                              << "diurnalCoolingBiasK=" << defaults.diurnalCoolingBiasK;
     SurfaceTileTemperatureResult result;
     const int pointCount = grid.points().size();
     if (pointCount == 0) {
@@ -115,6 +123,9 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         qMax(defaults.minTemperatureKelvin,
              baseEquilibriumTemperature * limitedGreenhouseFactor);
     const double diurnalCoolingBiasK = qMax(0.0, defaults.diurnalCoolingBiasK);
+    // Эти параметры (segmentSolarConstant, cloudAlbedo, greenhouseOpacity,
+    // minTemperatureKelvin, diurnalCoolingBiasK) задают единый стартовый
+    // adjustedGlobalTemperature: без их изменения стартовая температура не меняется.
     // Грубая поправка на суточное охлаждение: компенсируем отсутствие суточного цикла
     // и инерции грунта в стартовой оценке, чтобы не переоценивать среднюю T.
     const double adjustedGlobalTemperature =
