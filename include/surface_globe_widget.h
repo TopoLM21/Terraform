@@ -2,6 +2,7 @@
 
 #include "planet_surface_grid.h"
 #include "surface_map_mode.h"
+#include "StarBackgroundRenderer.h"
 
 #include <QColor>
 #include <QPointF>
@@ -72,9 +73,8 @@ private:
     double lastPointRadiusPx_ = 0.0;
     bool markupVisible_ = false;
     double axisTiltDegrees_ = 0.0;
-    QVector3D starLightDirection_ = QVector3D(0.0f, 0.0f, 1.0f);
+    StarBackgroundRenderer starBackgroundRenderer_;
     QColor starColor_ = QColor(255, 244, 234);
-    double starAngularDiameterDeg_ = 0.5;
     double starRadiusSolar_ = 0.0;
     double starDistanceAu_ = 0.0;
     double cloudOpacityBoost_ = 1.0;

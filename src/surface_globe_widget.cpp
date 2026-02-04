@@ -240,11 +240,7 @@ void SurfaceGlobeWidget::setStarRadiusSolar(double radiusSolar) {
 }
 
 void SurfaceGlobeWidget::setStarLightDirection(const QVector3D &direction) {
-    if (direction.lengthSquared() < 1e-6f) {
-        starLightDirection_ = QVector3D(0.0f, 0.0f, 1.0f);
-    } else {
-        starLightDirection_ = direction.normalized();
-    }
+    starBackgroundRenderer_.setLightDirection(direction);
     update();
 }
 
@@ -254,10 +250,10 @@ void SurfaceGlobeWidget::setStarColor(const QColor &color) {
 }
 
 void SurfaceGlobeWidget::setStarAngularDiameterDegrees(double angularDiameterDeg) {
-    if (qFuzzyCompare(starAngularDiameterDeg_, angularDiameterDeg)) {
+    if (qFuzzyCompare(starBackgroundRenderer_.angularDiameterDegrees(), angularDiameterDeg)) {
         return;
     }
-    starAngularDiameterDeg_ = qMax(0.0, angularDiameterDeg);
+    starBackgroundRenderer_.setAngularDiameterDegrees(angularDiameterDeg);
     update();
 }
 
@@ -272,7 +268,7 @@ void SurfaceGlobeWidget::setCloudOpacityBoost(double boost) {
 
 void SurfaceGlobeWidget::updateStarAngularDiameter() {
     if (starRadiusSolar_ <= 0.0 || starDistanceAu_ <= 0.0) {
-        starAngularDiameterDeg_ = 0.0;
+        starBackgroundRenderer_.setAngularDiameterDegrees(0.0);
         update();
         return;
     }
@@ -281,7 +277,7 @@ void SurfaceGlobeWidget::updateStarAngularDiameter() {
     const double distanceMeters = starDistanceAu_ * kAstronomicalUnitMeters;
     // Угловой диаметр: θ = 2 * atan(R / d).
     const double angularDiameterRad = 2.0 * std::atan(radiusMeters / distanceMeters);
-    starAngularDiameterDeg_ = qRadiansToDegrees(angularDiameterRad);
+    starBackgroundRenderer_.setAngularDiameterDegrees(qRadiansToDegrees(angularDiameterRad));
     update();
 }
 
@@ -303,25 +299,14 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         return;
     }
 
-    const QVector3D baseLightDir = starLightDirection_.lengthSquared() < 1e-6f
-        ? QVector3D(0.0f, 0.0f, 1.0f)
-        : starLightDirection_.normalized();
+    const QVector3D baseLightDir = starBackgroundRenderer_.lightDirection();
     // Световое направление хранится в мировых координатах, поэтому поворачиваем его
     // тем же поворотом камеры, что и геометрию, чтобы освещение и диск звезды
     // оставались синхронизированы при вращении.
     const QVector3D lightDir = applyRotation(baseLightDir).normalized();
     const double ambientFactor = 0.18;
 
-    if (starAngularDiameterDeg_ > 0.0) {
-        // Угловой радиус = половина диаметра; линейный размер на экране r ≈ R * tan(angularRadius).
-        const double angularRadiusRad = qDegreesToRadians(starAngularDiameterDeg_ * 0.5);
-        const double starRadius = sphereRadius * qTan(angularRadiusRad);
-        const QPointF starCenter(center.x() + lightDir.x() * sphereRadius,
-                                 center.y() - lightDir.y() * sphereRadius);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(starColor_);
-        painter.drawEllipse(starCenter, starRadius, starRadius);
-    }
+    starBackgroundRenderer_.draw(painter, center, sphereRadius, yawDeg_, pitchDeg_, starColor_);
 
     QVector<GlobePoint> visiblePoints;
     visiblePoints.reserve(grid_->pointCount());
