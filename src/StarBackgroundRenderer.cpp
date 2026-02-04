@@ -36,10 +36,6 @@ void StarBackgroundRenderer::draw(QPainter &painter,
     }
 
     const QVector3D lightDir = rotatedDirection(yawDeg, pitchDeg).normalized();
-    // Если звезда находится за планетой (z <= 0), скрываем фон.
-    if (lightDir.z() <= 0.0f) {
-        return;
-    }
 
     // Угловой радиус = половина диаметра; линейный размер на экране r ≈ R * tan(angularRadius).
     const double angularRadiusRad = qDegreesToRadians(angularDiameterDeg_ * 0.5);
@@ -48,10 +44,13 @@ void StarBackgroundRenderer::draw(QPainter &painter,
         return;
     }
 
-    const QPointF starCenter(screenCenter.x() + lightDir.x() * sphereRadiusPx,
-                             screenCenter.y() - lightDir.y() * sphereRadiusPx);
+    const StarOcclusionGeometry::Result occlusion =
+        occlusionGeometry_.evaluate(screenCenter, sphereRadiusPx, lightDir, starRadius);
+    if (occlusion.hidden) {
+        return;
+    }
 
-    QRadialGradient gradient(starCenter, starRadius);
+    QRadialGradient gradient(occlusion.starCenter, starRadius);
     QColor coreColor = starColor;
     coreColor.setAlpha(220);
     QColor edgeColor = starColor;
@@ -61,7 +60,14 @@ void StarBackgroundRenderer::draw(QPainter &painter,
 
     painter.setPen(Qt::NoPen);
     painter.setBrush(gradient);
-    painter.drawEllipse(starCenter, starRadius, starRadius);
+    if (occlusion.hasClip) {
+        painter.save();
+        painter.setClipPath(occlusion.clipPath);
+        painter.drawEllipse(occlusion.starCenter, starRadius, starRadius);
+        painter.restore();
+    } else {
+        painter.drawEllipse(occlusion.starCenter, starRadius, starRadius);
+    }
 }
 
 QVector3D StarBackgroundRenderer::rotatedDirection(float yawDeg, float pitchDeg) const {

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.200 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.201 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -60,6 +60,7 @@ add_executable(solar_constant
     include/star_color.h
     include/StarSystemTopView.h
     include/StarBackgroundRenderer.h
+    include/StarOcclusionGeometry.h
     include/rotation_period_utils.h
     include/surface_cell.h
     include/surface_advection_model.h
@@ -118,6 +119,7 @@ add_executable(solar_constant
     src/orbit_animation_model.h
     src/orbit_segment_calculator.cpp
     src/planet_surface_grid.cpp
+    src/StarOcclusionGeometry.cpp
     src/planet_presets.cpp
     src/segment_selector_widget.cpp
     src/solar_calculator.cpp
