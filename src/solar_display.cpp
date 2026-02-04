@@ -5644,6 +5644,30 @@ private:
         tileSettings.cloudAlbedo = input.cloudAlbedo;
         tileSettings.hasSolarConstant = input.hasSolarConstant;
 
+        // Эти параметры задают единую стартовую adjustedGlobalTemperature для тайлов;
+        // если стартовая температура не меняется, проверьте их значения до и после
+        // initializeSurface(). Если segmentSolarConstant уже завышен, проверьте путь
+        // вычисления computeSurfaceFluxBreakdown() и возможное устаревание lastSolarConstant_.
+        const double planetaryAlbedo = input.cloudAlbedo;
+        const double meanToaFlux =
+            input.segmentSolarConstant * qMax(0.0, 1.0 - planetaryAlbedo) / 4.0;
+        const double effectiveTemperatureKelvin =
+            std::pow(qMax(0.0, meanToaFlux) / kStefanBoltzmannConstant, 0.25);
+        qCInfo(solarRadiationLog) << "Surface tile init inputs"
+                                  << "segmentSolarConstant=" << input.segmentSolarConstant
+                                  << "cloudAlbedo=" << input.cloudAlbedo
+                                  << "meanToaFlux=" << meanToaFlux
+                                  << "effectiveTemperatureKelvin="
+                                  << effectiveTemperatureKelvin
+                                  << "greenhouseOpacity="
+                                  << input.stateDefaults.greenhouseOpacity
+                                  << "manualGreenhouseOpacity="
+                                  << input.stateDefaults.manualGreenhouseOpacity
+                                  << "diurnalCoolingBiasK="
+                                  << input.stateDefaults.diurnalCoolingBiasK
+                                  << "minTemperatureKelvin="
+                                  << input.stateDefaults.minTemperatureKelvin;
+
         SurfaceTileTemperatureCalculator tileCalculator;
         SurfaceTileTemperatureResult tileResult =
             tileCalculator.initializeSurface(result.grid,
@@ -5720,12 +5744,6 @@ private:
         // Радиационный профиль должен опираться на средний ТОА-поток, а не на локальную
         // инсоляцию: вертикальная структура атмосферы задаётся глобальным балансом энергии
         // (суточно-усреднённый приток), а локальная инсоляция влияет только на SW-поток внизу.
-        const double planetaryAlbedo = input.cloudAlbedo;
-        const double meanToaFlux =
-            input.segmentSolarConstant * qMax(0.0, 1.0 - planetaryAlbedo) / 4.0;
-        const double effectiveTemperatureKelvin =
-            std::pow(qMax(0.0, meanToaFlux) / kStefanBoltzmannConstant, 0.25);
-
         double minPressureAtm = std::numeric_limits<double>::max();
         double maxPressureAtm = std::numeric_limits<double>::lowest();
         const int logPointIndex = qBound(0, input.logPointIndex, result.grid.points().size() - 1);
