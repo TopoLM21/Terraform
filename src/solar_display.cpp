@@ -585,24 +585,24 @@ double resolveAirTemperatureKelvin(const SurfacePointState &surfaceState,
                                         timeStepSeconds);
 }
 
-double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
-                                     const SurfaceMaterial &material,
-                                     double cloudAlbedo,
-                                     bool disableWaterAndClouds,
-                                     double presetSurfaceWaterGigatons,
-                                     bool hasSeaLevel,
-                                     double pressureAtm,
-                                     double planetRadiusKm,
-                                     double surfaceGravity,
-                                     double blendedInsolation,
-                                     double meanToaFlux,
-                                     double baseTemperatureKelvin,
-                                     double manualGreenhouseOpacity,
-                                     double minDenseAtmosphereTemperatureK,
-                                     bool useAtmosphericModel,
-                                     RadiationModelType radiationModelType,
-                                     bool manualGreenhouseOnTopOfAtmosphere,
-                                     bool logDetails) {
+double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere,
+                                         const SurfaceMaterial &material,
+                                         double cloudAlbedo,
+                                         bool disableWaterAndClouds,
+                                         double presetSurfaceWaterGigatons,
+                                         bool hasSeaLevel,
+                                         double pressureAtm,
+                                         double planetRadiusKm,
+                                         double surfaceGravity,
+                                         double blendedInsolation,
+                                         double meanToaFlux,
+                                         double baseTemperatureKelvin,
+                                         double manualGreenhouseOpacity,
+                                         double minDenseAtmosphereTemperatureK,
+                                         bool useAtmosphericModel,
+                                         RadiationModelType radiationModelType,
+                                         bool manualGreenhouseOnTopOfAtmosphere,
+                                         bool logDetails) {
     const double safeRadiusKm = qMax(0.1, planetRadiusKm);
     const double areaScale = std::pow(safeRadiusKm / kEarthRadiusKm, 2.0);
 
@@ -742,6 +742,44 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
                                  << "greenhouseOpacity=" << greenhouseOpacity;
     }
     return qBound(0.0, greenhouseOpacity, 0.999);
+}
+
+double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
+                                     const SurfaceMaterial &material,
+                                     double cloudAlbedo,
+                                     bool disableWaterAndClouds,
+                                     double presetSurfaceWaterGigatons,
+                                     bool hasSeaLevel,
+                                     double pressureAtm,
+                                     double planetRadiusKm,
+                                     double surfaceGravity,
+                                     double blendedInsolation,
+                                     double meanToaFlux,
+                                     double baseTemperatureKelvin,
+                                     double manualGreenhouseOpacity,
+                                     double minDenseAtmosphereTemperatureK,
+                                     bool useAtmosphericModel,
+                                     RadiationModelType radiationModelType,
+                                     bool manualGreenhouseOnTopOfAtmosphere,
+                                     bool logDetails) {
+    return computeSoftStartGreenhouseOpacity(atmosphere,
+                                             material,
+                                             cloudAlbedo,
+                                             disableWaterAndClouds,
+                                             presetSurfaceWaterGigatons,
+                                             hasSeaLevel,
+                                             pressureAtm,
+                                             planetRadiusKm,
+                                             surfaceGravity,
+                                             blendedInsolation,
+                                             meanToaFlux,
+                                             baseTemperatureKelvin,
+                                             manualGreenhouseOpacity,
+                                             minDenseAtmosphereTemperatureK,
+                                             useAtmosphericModel,
+                                             radiationModelType,
+                                             manualGreenhouseOnTopOfAtmosphere,
+                                             logDetails);
 }
 
 struct StellarCacheKey {
@@ -6215,25 +6253,27 @@ private:
         if (atmosphereEnabled && meanToaFlux > 0.0) {
             // Учитываем атмосферный парник уже в инициализации:
             // без этого плотные атмосферы могут «схлопнуться» в холодный режим на старте.
+            // Стартовая температура должна опираться на ту же формулу парника,
+            // иначе правки в computeLocalGreenhouseOpacity не попадут на первичную карту.
             stateDefaults->greenhouseOpacity =
-                computeLocalGreenhouseOpacity(atmosphere,
-                                              stateDefaults->material,
-                                              cloudAlbedo,
-                                              disableWaterAndClouds,
-                                              input.surfaceWaterGigatons,
-                                              input.hasSeaLevel,
-                                              qMax(0.0, atmospherePressureAtm),
-                                              radiusKm,
-                                              gravity,
-                                              meanToaFlux,
-                                              meanToaFlux,
-                                              effectiveTemperatureKelvin,
-                                              stateDefaults->manualGreenhouseOpacity,
-                                              minDenseAtmosphereTemperatureK,
-                                              useAtmosphericModel,
-                                              radiationModelType,
-                                              manualGreenhouseOnTop,
-                                              false);
+                computeSoftStartGreenhouseOpacity(atmosphere,
+                                                  stateDefaults->material,
+                                                  cloudAlbedo,
+                                                  disableWaterAndClouds,
+                                                  input.surfaceWaterGigatons,
+                                                  input.hasSeaLevel,
+                                                  qMax(0.0, atmospherePressureAtm),
+                                                  radiusKm,
+                                                  gravity,
+                                                  meanToaFlux,
+                                                  meanToaFlux,
+                                                  effectiveTemperatureKelvin,
+                                                  stateDefaults->manualGreenhouseOpacity,
+                                                  minDenseAtmosphereTemperatureK,
+                                                  useAtmosphericModel,
+                                                  radiationModelType,
+                                                  manualGreenhouseOnTop,
+                                                  false);
         } else {
             stateDefaults->greenhouseOpacity = stateDefaults->manualGreenhouseOpacity;
         }
