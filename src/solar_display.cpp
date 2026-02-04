@@ -25,6 +25,7 @@
 #include "atmosphere_step_solver.h"
 #include "wind_field_model.h"
 #include "rotation_period_utils.h"
+#include "surface/SnowModel.h"
 #include "planet_surface_grid.h"
 #include "subsurface_temperature_solver.h"
 #include "fluids/PhaseModel.h"
@@ -2200,6 +2201,7 @@ private:
     QElapsedTimer starSystemElapsedTimer_;
     QTimer *starSystemTimer_ = nullptr;
     PlanetSurfaceGrid surfaceGrid_;
+    SnowModel snowModel_;
     std::shared_ptr<std::atomic_bool> temperatureCancelFlag_;
     std::shared_ptr<std::atomic_bool> surfaceGridCancelFlag_;
     std::atomic_bool temperaturePauseFlag_{false};
@@ -6710,6 +6712,12 @@ private:
             stepInput.verticalWindMixingCoefficientKz = currentVerticalWindMixingCoefficientKz();
             stepInput.logPointIndex = selectedSurfacePointIndex_;
             stepSolver.runLayeredStep(stepInput);
+        }
+
+        // Поверхностный шаг: таяние/сток снега выполняем после атмосферного блока,
+        // чтобы учесть свежие осадки и обновлённую температуру воздуха/поверхности.
+        for (auto &point : surfaceGrid_.points()) {
+            snowModel_.updatePoint(point, timeStepSeconds);
         }
 
         double minTemperature = std::numeric_limits<double>::max();

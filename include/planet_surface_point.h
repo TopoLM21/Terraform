@@ -29,6 +29,8 @@ struct SurfacePoint {
     double subsurfaceFluxWPerM2 = 0.0;
     // Осадки и накопленная вода на поверхности, кг/м².
     double precipitationKgPerM2 = 0.0;
+    // Запас снега/льда на суше, кг/м² (водный эквивалент).
+    double snowKgPerM2 = 0.0;
     SurfaceMoisture surfaceMoisture;
     // Состояние хранится отдельно для каждой точки, чтобы учитывать локальную
     // тепловую инерцию и парниковую поправку без глобального пересчёта.
