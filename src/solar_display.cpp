@@ -667,10 +667,13 @@ double computeLocalGreenhouseOpacity(const AtmosphereComposition &atmosphere,
         qMax(1e-6, preRadiationModel->outgoingTransmission());
     const double tBasePre =
         tEffPre * std::pow(1.0 / baseLongwaveTransmission, 0.25);
+    // Ограничение только для стартовой оценки: не раздуваем waterTau,
+    // пока атмосферная динамика не стабилизирует профиль.
+    const double tBasePreClamped = qMin(tBasePre, 320.0);
 
     double evaporation = 0.0;
     if (!disableWaterAndClouds && potentialCoverage > 0.0 && tBasePre > 263.0) {
-        evaporation = potentialCoverage * std::exp((tBasePre - 280.0) / 15.0);
+        evaporation = potentialCoverage * std::exp((tBasePreClamped - 280.0) / 15.0);
     }
     const double waterTau = disableWaterAndClouds ? 0.0 : qMin(8.0, evaporation * 1.5);
     double extraTau = waterTau;
