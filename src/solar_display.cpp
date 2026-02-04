@@ -1168,6 +1168,23 @@ public:
         planetFormLayout->addLayout(planetActionsLayout);
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
         planetGroupBox->setLayout(planetFormLayout);
+        auto *planetPanelContainer = new QWidget(this);
+        auto *planetPanelLayout = new QVBoxLayout(planetPanelContainer);
+        planetPanelLayout->setContentsMargins(0, 0, 0, 0);
+        planetPanelLayout->addWidget(planetGroupBox);
+        planetPanelContainer->setVisible(false);
+        auto *planetPanelToggleButton = new QToolButton(this);
+        planetPanelToggleButton->setText(QStringLiteral("Настройки планеты"));
+        planetPanelToggleButton->setCheckable(true);
+        planetPanelToggleButton->setChecked(false);
+        planetPanelToggleButton->setArrowType(Qt::RightArrow);
+        planetPanelToggleButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        connect(planetPanelToggleButton, &QToolButton::toggled, this,
+                [planetPanelContainer, planetPanelToggleButton](bool checked) {
+                    planetPanelContainer->setVisible(checked);
+                    planetPanelToggleButton->setArrowType(checked ? Qt::DownArrow
+                                                                 : Qt::RightArrow);
+                });
 
         atmosphereWidget_ = new AtmosphereWidget(this, false);
         atmosphereWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -1451,7 +1468,8 @@ public:
         auto *leftLayout = new QVBoxLayout();
         leftLayout->addLayout(presetsLayout);
         leftLayout->addWidget(starsPanel);
-        leftLayout->addWidget(planetGroupBox);
+        leftLayout->addWidget(planetPanelToggleButton);
+        leftLayout->addWidget(planetPanelContainer);
         leftLayout->addWidget(calculateButton);
         leftLayout->addStretch();
 
