@@ -211,7 +211,19 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                 << "delta=" << massDelta;
         }
         point.precipitationKgPerM2 += precipitationKgPerM2;
-        point.surfaceMoisture.addPrecipitation(precipitationKgPerM2);
+        if (precipitationKgPerM2 > 0.0) {
+            const double phaseTemperatureK =
+                (point.temperatureK > 0.0) ? point.temperatureK : point.airTemperatureK;
+            // Упрощённый фазовый порог: ниже 273.15 K осадки считаем снегом.
+            const bool isSnow =
+                (phaseTemperatureK > 0.0 && phaseTemperatureK <= 273.15) &&
+                point.materialId != QLatin1String("ocean");
+            if (isSnow) {
+                point.snowKgPerM2 += precipitationKgPerM2;
+            } else {
+                point.surfaceMoisture.addPrecipitation(precipitationKgPerM2);
+            }
+        }
         const double condensationAlbedo =
             evaporationModel_.cloudAlbedoFromCondensation(column);
         // Используем индикатор конденсации как визуальную непрозрачность облаков.

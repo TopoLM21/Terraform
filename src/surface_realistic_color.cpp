@@ -56,6 +56,21 @@ QColor applyVegetationTint(const QColor &baseColor, double vegetationBlend) {
                             invMix * baseColor.blueF() + mixFactor * vegetationTint.blueF(),
                             baseColor.alphaF());
 }
+
+QColor applySnowTint(const QColor &baseColor, double snowKgPerM2) {
+    if (snowKgPerM2 <= 0.0) {
+        return baseColor;
+    }
+    const QColor snowTint(240, 245, 255);
+    // Приближение: 30 кг/м² (~3 см водного эквивалента) достаточно для сплошного покрова.
+    const double fullCoverKgPerM2 = 30.0;
+    const double mixFactor = qBound(0.0, snowKgPerM2 / fullCoverKgPerM2, 1.0);
+    const double invMix = 1.0 - mixFactor;
+    return QColor::fromRgbF(invMix * baseColor.redF() + mixFactor * snowTint.redF(),
+                            invMix * baseColor.greenF() + mixFactor * snowTint.greenF(),
+                            invMix * baseColor.blueF() + mixFactor * snowTint.blueF(),
+                            baseColor.alphaF());
+}
 } // namespace
 
 QColor realisticSurfaceColor(const SurfacePoint &point,
@@ -77,7 +92,8 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
         if (point.materialId != QLatin1String("ocean")) {
             const double vegetationBlend =
                 qBound(0.0, point.vegetationFraction * point.vegetationBlendMask, 1.0);
-            return applyVegetationTint(heightTinted, vegetationBlend);
+            const QColor vegetated = applyVegetationTint(heightTinted, vegetationBlend);
+            return applySnowTint(vegetated, point.snowKgPerM2);
         }
         return heightTinted;
     }
@@ -90,7 +106,8 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
     if (point.materialId != QLatin1String("ocean")) {
         const double vegetationBlend =
             qBound(0.0, point.vegetationFraction * point.vegetationBlendMask, 1.0);
-        return applyVegetationTint(heightTinted, vegetationBlend);
+        const QColor vegetated = applyVegetationTint(heightTinted, vegetationBlend);
+        return applySnowTint(vegetated, point.snowKgPerM2);
     }
     return heightTinted;
 }

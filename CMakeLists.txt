@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.210 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.211 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -141,6 +141,8 @@ add_executable(solar_constant
     src/surface_point_state.cpp
     src/surface/SurfaceMoisture.h
     src/surface/SurfaceMoisture.cpp
+    src/surface/SnowModel.h
+    src/surface/SnowModel.cpp
     src/surface/VegetationModel.h
     src/surface/VegetationModel.cpp
     src/surface_height_scale_widget.cpp
