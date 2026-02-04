@@ -135,6 +135,7 @@ SurfaceGlobeWidget::SurfaceGlobeWidget(QWidget *parent)
     QPalette palette = this->palette();
     palette.setColor(QPalette::Window, Qt::black);
     setPalette(palette);
+    updateStarBackgroundColors();
 }
 
 void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
@@ -246,14 +247,57 @@ void SurfaceGlobeWidget::setStarLightDirection(const QVector3D &direction) {
 
 void SurfaceGlobeWidget::setStarColor(const QColor &color) {
     starColor_ = color;
+    if (starBackgroundAutoColorsEnabled_) {
+        updateStarBackgroundColors();
+    }
     update();
 }
 
 void SurfaceGlobeWidget::setStarAngularDiameterDegrees(double angularDiameterDeg) {
-    if (qFuzzyCompare(starBackgroundRenderer_.angularDiameterDegrees(), angularDiameterDeg)) {
+    if (qFuzzyCompare(starBackgroundAngularDiameterDeg_, angularDiameterDeg)) {
         return;
     }
-    starBackgroundRenderer_.setAngularDiameterDegrees(angularDiameterDeg);
+    starBackgroundAngularDiameterDeg_ = qMax(0.0, angularDiameterDeg);
+    starBackgroundAutoDiameterEnabled_ = false;
+    starBackgroundRenderer_.setAngularDiameterDegrees(starBackgroundAngularDiameterDeg_);
+    update();
+}
+
+void SurfaceGlobeWidget::setStarBackgroundAutoDiameterEnabled(bool enabled) {
+    if (starBackgroundAutoDiameterEnabled_ == enabled) {
+        return;
+    }
+    starBackgroundAutoDiameterEnabled_ = enabled;
+    updateStarAngularDiameter();
+}
+
+void SurfaceGlobeWidget::setStarBackgroundAutoColorsEnabled(bool enabled) {
+    if (starBackgroundAutoColorsEnabled_ == enabled) {
+        return;
+    }
+    starBackgroundAutoColorsEnabled_ = enabled;
+    updateStarBackgroundColors();
+}
+
+void SurfaceGlobeWidget::setStarBackgroundGradientColors(const QColor &coreColor,
+                                                         const QColor &edgeColor) {
+    if (starBackgroundCoreColor_ == coreColor && starBackgroundEdgeColor_ == edgeColor &&
+        !starBackgroundAutoColorsEnabled_) {
+        return;
+    }
+    starBackgroundCoreColor_ = coreColor;
+    starBackgroundEdgeColor_ = edgeColor;
+    starBackgroundAutoColorsEnabled_ = false;
+    updateStarBackgroundColors();
+}
+
+void SurfaceGlobeWidget::setStarBackgroundIntensity(double intensity) {
+    const double clamped = qMax(0.0, intensity);
+    if (qFuzzyCompare(starBackgroundIntensity_ + 1.0, clamped + 1.0)) {
+        return;
+    }
+    starBackgroundIntensity_ = clamped;
+    starBackgroundRenderer_.setIntensity(starBackgroundIntensity_);
     update();
 }
 
@@ -267,6 +311,11 @@ void SurfaceGlobeWidget::setCloudOpacityBoost(double boost) {
 }
 
 void SurfaceGlobeWidget::updateStarAngularDiameter() {
+    if (!starBackgroundAutoDiameterEnabled_) {
+        starBackgroundRenderer_.setAngularDiameterDegrees(starBackgroundAngularDiameterDeg_);
+        update();
+        return;
+    }
     if (starRadiusSolar_ <= 0.0 || starDistanceAu_ <= 0.0) {
         starBackgroundRenderer_.setAngularDiameterDegrees(0.0);
         update();
@@ -278,6 +327,16 @@ void SurfaceGlobeWidget::updateStarAngularDiameter() {
     // Угловой диаметр: θ = 2 * atan(R / d).
     const double angularDiameterRad = 2.0 * std::atan(radiusMeters / distanceMeters);
     starBackgroundRenderer_.setAngularDiameterDegrees(qRadiansToDegrees(angularDiameterRad));
+    update();
+}
+
+void SurfaceGlobeWidget::updateStarBackgroundColors() {
+    if (starBackgroundAutoColorsEnabled_) {
+        starBackgroundCoreColor_ = starColor_;
+        starBackgroundEdgeColor_ = starColor_;
+    }
+    starBackgroundRenderer_.setGradientColors(starBackgroundCoreColor_, starBackgroundEdgeColor_);
+    starBackgroundRenderer_.setIntensity(starBackgroundIntensity_);
     update();
 }
 
@@ -306,7 +365,7 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
     const QVector3D lightDir = applyRotation(baseLightDir).normalized();
     const double ambientFactor = 0.18;
 
-    starBackgroundRenderer_.draw(painter, center, sphereRadius, yawDeg_, pitchDeg_, starColor_);
+    starBackgroundRenderer_.draw(painter, center, sphereRadius, yawDeg_, pitchDeg_);
 
     QVector<GlobePoint> visiblePoints;
     visiblePoints.reserve(grid_->pointCount());

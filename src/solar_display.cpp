@@ -58,6 +58,7 @@
 #include <QtGui/QDoubleValidator>
 #include <QtGui/QImage>
 #include <QtGui/QVector3D>
+#include <QtWidgets/QColorDialog>
 #include <QtConcurrent/QtConcurrent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
@@ -221,6 +222,12 @@ constexpr int kRoleMinTopPressureAtm = Qt::UserRole + 46;
 constexpr int kRoleDisableWaterAndClouds = Qt::UserRole + 47;
 constexpr int kRoleSurfaceWaterGigatons = Qt::UserRole + 48;
 constexpr int kRoleCloudOpacityBoost = Qt::UserRole + 49;
+constexpr int kRoleStarBackgroundAngularDiameter = Qt::UserRole + 50;
+constexpr int kRoleStarBackgroundIntensity = Qt::UserRole + 51;
+constexpr int kRoleStarBackgroundCoreColor = Qt::UserRole + 52;
+constexpr int kRoleStarBackgroundEdgeColor = Qt::UserRole + 53;
+constexpr int kRoleStarBackgroundAutoDiameter = Qt::UserRole + 54;
+constexpr int kRoleStarBackgroundAutoColors = Qt::UserRole + 55;
 constexpr double kKelvinOffset = 273.15;
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kEarthMassKg = 5.9722e24;
@@ -1001,6 +1008,35 @@ public:
         cloudOpacityBoostSpinBox_->setValue(1.0);
         cloudOpacityBoostSpinBox_->setToolTip(
             QStringLiteral("Усиление визуальной непрозрачности облаков (0..2)."));
+        starBackgroundAutoDiameterCheckBox_ =
+            new QCheckBox(QStringLiteral("Авторазмер (по R и расстоянию)"), this);
+        starBackgroundAutoDiameterCheckBox_->setChecked(true);
+        starBackgroundAutoDiameterCheckBox_->setToolTip(
+            QStringLiteral("Если включено, угловой диаметр фона рассчитывается по радиусу\n"
+                           "звезды и расстоянию до планеты."));
+        starBackgroundAngularDiameterSpinBox_ = new QDoubleSpinBox(this);
+        starBackgroundAngularDiameterSpinBox_->setRange(0.0, 10.0);
+        starBackgroundAngularDiameterSpinBox_->setDecimals(3);
+        starBackgroundAngularDiameterSpinBox_->setSingleStep(0.05);
+        starBackgroundAngularDiameterSpinBox_->setSuffix(QStringLiteral("°"));
+        starBackgroundAngularDiameterSpinBox_->setToolTip(
+            QStringLiteral("Ручной угловой диаметр фоновой звезды (в градусах)."));
+        starBackgroundAutoColorsCheckBox_ =
+            new QCheckBox(QStringLiteral("Цвет по температуре звезды"), this);
+        starBackgroundAutoColorsCheckBox_->setChecked(true);
+        starBackgroundAutoColorsCheckBox_->setToolTip(
+            QStringLiteral("Если включено, цвет фоновой звезды берётся из температуры."));
+        starBackgroundCoreColorButton_ =
+            new QPushButton(QStringLiteral("Основной цвет"), this);
+        starBackgroundEdgeColorButton_ =
+            new QPushButton(QStringLiteral("Цвет края"), this);
+        starBackgroundIntensitySpinBox_ = new QDoubleSpinBox(this);
+        starBackgroundIntensitySpinBox_->setRange(0.0, 2.0);
+        starBackgroundIntensitySpinBox_->setDecimals(2);
+        starBackgroundIntensitySpinBox_->setSingleStep(0.1);
+        starBackgroundIntensitySpinBox_->setValue(1.0);
+        starBackgroundIntensitySpinBox_->setToolTip(
+            QStringLiteral("Интенсивность диска фоновой звезды (0..2)."));
         diurnalCoolingBiasSpinBox_ = new QDoubleSpinBox(this);
         diurnalCoolingBiasSpinBox_->setRange(0.0, 200.0);
         diurnalCoolingBiasSpinBox_->setDecimals(1);
@@ -1097,6 +1133,23 @@ public:
         planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
         planetControlsLayout->addRow(QStringLiteral("Интенсивность облаков (0..2):"),
                                      cloudOpacityBoostSpinBox_);
+        auto *starBackgroundLayout = new QFormLayout();
+        starBackgroundLayout->addRow(starBackgroundAutoDiameterCheckBox_);
+        starBackgroundLayout->addRow(QStringLiteral("Угловой диаметр (°):"),
+                                     starBackgroundAngularDiameterSpinBox_);
+        starBackgroundLayout->addRow(starBackgroundAutoColorsCheckBox_);
+        auto *starBackgroundColorRow = new QWidget(this);
+        auto *starBackgroundColorLayout = new QHBoxLayout(starBackgroundColorRow);
+        starBackgroundColorLayout->setContentsMargins(0, 0, 0, 0);
+        starBackgroundColorLayout->addWidget(starBackgroundCoreColorButton_);
+        starBackgroundColorLayout->addWidget(starBackgroundEdgeColorButton_);
+        starBackgroundColorLayout->addStretch();
+        starBackgroundLayout->addRow(QStringLiteral("Градиент:"), starBackgroundColorRow);
+        starBackgroundLayout->addRow(QStringLiteral("Интенсивность (0..2):"),
+                                     starBackgroundIntensitySpinBox_);
+        auto *starBackgroundGroupBox = new QGroupBox(QStringLiteral("Фоновая звезда"), this);
+        starBackgroundGroupBox->setLayout(starBackgroundLayout);
+        planetControlsLayout->addRow(starBackgroundGroupBox);
         planetControlsLayout->addRow(QStringLiteral("Поправка суточного охлаждения (К):"),
                                      diurnalCoolingBiasSpinBox_);
         planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
@@ -1437,6 +1490,8 @@ public:
 
         setLayout(layout);
         resize(480, 360);
+        updateStarBackgroundColorButtons();
+        updateStarBackgroundControlsEnabled();
         // Оставляем один поток под UI, чтобы параллельные вычисления не блокировали интерфейс.
         QThreadPool::globalInstance()->setMaxThreadCount(
             qMax(1, QThread::idealThreadCount() - 1));
@@ -1473,6 +1528,7 @@ public:
             syncAtmosphereDisableWithPlanet();
             syncCloudAlbedoWithPlanet();
             syncCloudOpacityBoostWithPlanet();
+            syncStarBackgroundWithPlanet();
             syncDiurnalCoolingBiasWithPlanet();
             syncManualGreenhouseOnTopWithPlanet();
             syncAdvancedRadiationWithPlanet();
@@ -1609,6 +1665,75 @@ public:
                     syncPlanetCloudOpacityBoostWithSelection();
                     applySurfaceCloudOpacityBoost(
                         cloudOpacityBoostSpinBox_ ? cloudOpacityBoostSpinBox_->value() : 1.0);
+                });
+
+        connect(starBackgroundAutoDiameterCheckBox_, &QCheckBox::toggled, this,
+                [this](bool) {
+                    if (planetComboBox_->currentIndex() < 0) {
+                        return;
+                    }
+                    updateStarBackgroundControlsEnabled();
+                    syncPlanetStarBackgroundWithSelection();
+                    applyStarBackgroundSettings();
+                });
+
+        connect(starBackgroundAngularDiameterSpinBox_,
+                QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this,
+                [this](double) {
+                    if (planetComboBox_->currentIndex() < 0) {
+                        return;
+                    }
+                    syncPlanetStarBackgroundWithSelection();
+                    applyStarBackgroundSettings();
+                });
+
+        connect(starBackgroundAutoColorsCheckBox_, &QCheckBox::toggled, this, [this](bool) {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            updateStarBackgroundControlsEnabled();
+            syncPlanetStarBackgroundWithSelection();
+            applyStarBackgroundSettings();
+        });
+
+        connect(starBackgroundCoreColorButton_, &QPushButton::clicked, this, [this]() {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            const QColor selected = QColorDialog::getColor(starBackgroundCoreColor_, this);
+            if (!selected.isValid()) {
+                return;
+            }
+            starBackgroundCoreColor_ = selected;
+            updateStarBackgroundColorButtons();
+            syncPlanetStarBackgroundWithSelection();
+            applyStarBackgroundSettings();
+        });
+
+        connect(starBackgroundEdgeColorButton_, &QPushButton::clicked, this, [this]() {
+            if (planetComboBox_->currentIndex() < 0) {
+                return;
+            }
+            const QColor selected = QColorDialog::getColor(starBackgroundEdgeColor_, this);
+            if (!selected.isValid()) {
+                return;
+            }
+            starBackgroundEdgeColor_ = selected;
+            updateStarBackgroundColorButtons();
+            syncPlanetStarBackgroundWithSelection();
+            applyStarBackgroundSettings();
+        });
+
+        connect(starBackgroundIntensitySpinBox_,
+                QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this,
+                [this](double) {
+                    if (planetComboBox_->currentIndex() < 0) {
+                        return;
+                    }
+                    syncPlanetStarBackgroundWithSelection();
+                    applyStarBackgroundSettings();
                 });
 
         connect(diurnalCoolingBiasSpinBox_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -1915,6 +2040,12 @@ private:
     QPushButton *disableAtmosphereButton_ = nullptr;
     QDoubleSpinBox *cloudAlbedoSpinBox_ = nullptr;
     QDoubleSpinBox *cloudOpacityBoostSpinBox_ = nullptr;
+    QCheckBox *starBackgroundAutoDiameterCheckBox_ = nullptr;
+    QDoubleSpinBox *starBackgroundAngularDiameterSpinBox_ = nullptr;
+    QCheckBox *starBackgroundAutoColorsCheckBox_ = nullptr;
+    QPushButton *starBackgroundCoreColorButton_ = nullptr;
+    QPushButton *starBackgroundEdgeColorButton_ = nullptr;
+    QDoubleSpinBox *starBackgroundIntensitySpinBox_ = nullptr;
     QDoubleSpinBox *diurnalCoolingBiasSpinBox_ = nullptr;
     QCheckBox *manualGreenhouseOnTopCheckBox_ = nullptr;
     QCheckBox *advancedRadiationCheckBox_ = nullptr;
@@ -1946,6 +2077,8 @@ private:
     QCheckBox *surfaceMarkupCheckBox_ = nullptr;
     bool debugLogEnabled_ = false;
     QLabel *surfaceCalculationLabel_ = nullptr;
+    QColor starBackgroundCoreColor_ = QColor(255, 244, 234);
+    QColor starBackgroundEdgeColor_ = QColor(255, 244, 234);
     QProgressBar *surfaceCalculationProgress_ = nullptr;
     QSpinBox *subsurfaceLayersSpinBox_ = nullptr;
     QDoubleSpinBox *subsurfaceTopThicknessSpinBox_ = nullptr;
@@ -3300,6 +3433,24 @@ private:
         planetComboBox_->setItemData(index,
                                      planet.verticalWindMixingCoefficient,
                                      kRoleVerticalWindMixingCoefficient);
+        planetComboBox_->setItemData(index,
+                                     planet.starBackgroundAngularDiameterDeg,
+                                     kRoleStarBackgroundAngularDiameter);
+        planetComboBox_->setItemData(index,
+                                     planet.starBackgroundIntensity,
+                                     kRoleStarBackgroundIntensity);
+        planetComboBox_->setItemData(index,
+                                     planet.starBackgroundCoreColor,
+                                     kRoleStarBackgroundCoreColor);
+        planetComboBox_->setItemData(index,
+                                     planet.starBackgroundEdgeColor,
+                                     kRoleStarBackgroundEdgeColor);
+        planetComboBox_->setItemData(index,
+                                     planet.starBackgroundAutoDiameter,
+                                     kRoleStarBackgroundAutoDiameter);
+        planetComboBox_->setItemData(index,
+                                     planet.starBackgroundAutoColors,
+                                     kRoleStarBackgroundAutoColors);
     }
 
     bool isCustomPlanetIndex(int index) const {
@@ -3940,6 +4091,108 @@ private:
         applySurfaceCloudOpacityBoost(cloudOpacityBoostSpinBox_->value());
     }
 
+    void updateStarBackgroundColorButtons() {
+        if (starBackgroundCoreColorButton_) {
+            starBackgroundCoreColorButton_->setStyleSheet(
+                QStringLiteral("background-color: %1;").arg(
+                    starBackgroundCoreColor_.name(QColor::HexArgb)));
+        }
+        if (starBackgroundEdgeColorButton_) {
+            starBackgroundEdgeColorButton_->setStyleSheet(
+                QStringLiteral("background-color: %1;").arg(
+                    starBackgroundEdgeColor_.name(QColor::HexArgb)));
+        }
+    }
+
+    void updateStarBackgroundControlsEnabled() {
+        if (starBackgroundAngularDiameterSpinBox_ && starBackgroundAutoDiameterCheckBox_) {
+            starBackgroundAngularDiameterSpinBox_->setEnabled(
+                !starBackgroundAutoDiameterCheckBox_->isChecked());
+        }
+        const bool autoColors =
+            starBackgroundAutoColorsCheckBox_ && starBackgroundAutoColorsCheckBox_->isChecked();
+        if (starBackgroundCoreColorButton_) {
+            starBackgroundCoreColorButton_->setEnabled(!autoColors);
+        }
+        if (starBackgroundEdgeColorButton_) {
+            starBackgroundEdgeColorButton_->setEnabled(!autoColors);
+        }
+    }
+
+    void applyStarBackgroundSettings() {
+        if (!surfaceGlobeWidget_) {
+            return;
+        }
+        const bool autoDiameter =
+            starBackgroundAutoDiameterCheckBox_ && starBackgroundAutoDiameterCheckBox_->isChecked();
+        surfaceGlobeWidget_->setStarBackgroundAutoDiameterEnabled(autoDiameter);
+        if (!autoDiameter && starBackgroundAngularDiameterSpinBox_) {
+            surfaceGlobeWidget_->setStarAngularDiameterDegrees(
+                starBackgroundAngularDiameterSpinBox_->value());
+        }
+        const bool autoColors =
+            starBackgroundAutoColorsCheckBox_ && starBackgroundAutoColorsCheckBox_->isChecked();
+        surfaceGlobeWidget_->setStarBackgroundAutoColorsEnabled(autoColors);
+        if (!autoColors) {
+            surfaceGlobeWidget_->setStarBackgroundGradientColors(starBackgroundCoreColor_,
+                                                                starBackgroundEdgeColor_);
+        }
+        if (starBackgroundIntensitySpinBox_) {
+            surfaceGlobeWidget_->setStarBackgroundIntensity(
+                starBackgroundIntensitySpinBox_->value());
+        }
+    }
+
+    void syncStarBackgroundWithPlanet() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+        if (starBackgroundAngularDiameterSpinBox_) {
+            const QVariant diameterValue =
+                planetComboBox_->itemData(index, kRoleStarBackgroundAngularDiameter);
+            const double diameter = diameterValue.isValid() ? diameterValue.toDouble() : 0.5;
+            const QSignalBlocker blocker(starBackgroundAngularDiameterSpinBox_);
+            starBackgroundAngularDiameterSpinBox_->setValue(qMax(0.0, diameter));
+        }
+        if (starBackgroundIntensitySpinBox_) {
+            const QVariant intensityValue =
+                planetComboBox_->itemData(index, kRoleStarBackgroundIntensity);
+            const double intensity = intensityValue.isValid() ? intensityValue.toDouble() : 1.0;
+            const QSignalBlocker blocker(starBackgroundIntensitySpinBox_);
+            starBackgroundIntensitySpinBox_->setValue(qBound(0.0, intensity, 2.0));
+        }
+        const QVariant coreValue =
+            planetComboBox_->itemData(index, kRoleStarBackgroundCoreColor);
+        const QVariant edgeValue =
+            planetComboBox_->itemData(index, kRoleStarBackgroundEdgeColor);
+        starBackgroundCoreColor_ = coreValue.isValid()
+            ? coreValue.value<QColor>()
+            : QColor(255, 244, 234);
+        starBackgroundEdgeColor_ = edgeValue.isValid()
+            ? edgeValue.value<QColor>()
+            : QColor(255, 244, 234);
+        if (starBackgroundAutoDiameterCheckBox_) {
+            const QVariant autoDiameterValue =
+                planetComboBox_->itemData(index, kRoleStarBackgroundAutoDiameter);
+            const bool autoDiameter =
+                autoDiameterValue.isValid() ? autoDiameterValue.toBool() : true;
+            const QSignalBlocker blocker(starBackgroundAutoDiameterCheckBox_);
+            starBackgroundAutoDiameterCheckBox_->setChecked(autoDiameter);
+        }
+        if (starBackgroundAutoColorsCheckBox_) {
+            const QVariant autoColorsValue =
+                planetComboBox_->itemData(index, kRoleStarBackgroundAutoColors);
+            const bool autoColors =
+                autoColorsValue.isValid() ? autoColorsValue.toBool() : true;
+            const QSignalBlocker blocker(starBackgroundAutoColorsCheckBox_);
+            starBackgroundAutoColorsCheckBox_->setChecked(autoColors);
+        }
+        updateStarBackgroundColorButtons();
+        updateStarBackgroundControlsEnabled();
+        applyStarBackgroundSettings();
+    }
+
     void syncDiurnalCoolingBiasWithPlanet() {
         const int index = planetComboBox_->currentIndex();
         if (index < 0 || !diurnalCoolingBiasSpinBox_) {
@@ -4155,6 +4408,37 @@ private:
         planetComboBox_->setItemData(index,
                                      cloudOpacityBoostSpinBox_->value(),
                                      kRoleCloudOpacityBoost);
+    }
+
+    void syncPlanetStarBackgroundWithSelection() {
+        const int index = planetComboBox_->currentIndex();
+        if (index < 0) {
+            return;
+        }
+        if (starBackgroundAngularDiameterSpinBox_) {
+            planetComboBox_->setItemData(index,
+                                         starBackgroundAngularDiameterSpinBox_->value(),
+                                         kRoleStarBackgroundAngularDiameter);
+        }
+        if (starBackgroundIntensitySpinBox_) {
+            planetComboBox_->setItemData(index,
+                                         starBackgroundIntensitySpinBox_->value(),
+                                         kRoleStarBackgroundIntensity);
+        }
+        planetComboBox_->setItemData(index, starBackgroundCoreColor_,
+                                     kRoleStarBackgroundCoreColor);
+        planetComboBox_->setItemData(index, starBackgroundEdgeColor_,
+                                     kRoleStarBackgroundEdgeColor);
+        if (starBackgroundAutoDiameterCheckBox_) {
+            planetComboBox_->setItemData(index,
+                                         starBackgroundAutoDiameterCheckBox_->isChecked(),
+                                         kRoleStarBackgroundAutoDiameter);
+        }
+        if (starBackgroundAutoColorsCheckBox_) {
+            planetComboBox_->setItemData(index,
+                                         starBackgroundAutoColorsCheckBox_->isChecked(),
+                                         kRoleStarBackgroundAutoColors);
+        }
     }
 
     void syncPlanetDiurnalCoolingBiasWithSelection() {

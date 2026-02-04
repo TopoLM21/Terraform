@@ -30,6 +30,10 @@ public:
     void setStarLightDirection(const QVector3D &direction);
     void setStarColor(const QColor &color);
     void setStarAngularDiameterDegrees(double angularDiameterDeg);
+    void setStarBackgroundAutoDiameterEnabled(bool enabled);
+    void setStarBackgroundAutoColorsEnabled(bool enabled);
+    void setStarBackgroundGradientColors(const QColor &coreColor, const QColor &edgeColor);
+    void setStarBackgroundIntensity(double intensity);
     void setCloudOpacityBoost(double boost);
 
 signals:
@@ -54,6 +58,7 @@ private:
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
     QVector3D applyRotation(const QVector3D &v) const;
     void updateStarAngularDiameter();
+    void updateStarBackgroundColors();
 
     const PlanetSurfaceGrid *grid_ = nullptr;
     SurfaceMapMode mapMode_ = SurfaceMapMode::Temperature;
@@ -75,7 +80,13 @@ private:
     double axisTiltDegrees_ = 0.0;
     StarBackgroundRenderer starBackgroundRenderer_;
     QColor starColor_ = QColor(255, 244, 234);
+    QColor starBackgroundCoreColor_ = QColor(255, 244, 234);
+    QColor starBackgroundEdgeColor_ = QColor(255, 244, 234);
     double starRadiusSolar_ = 0.0;
     double starDistanceAu_ = 0.0;
+    double starBackgroundAngularDiameterDeg_ = 0.5;
+    double starBackgroundIntensity_ = 1.0;
+    bool starBackgroundAutoDiameterEnabled_ = true;
+    bool starBackgroundAutoColorsEnabled_ = true;
     double cloudOpacityBoost_ = 1.0;
 };

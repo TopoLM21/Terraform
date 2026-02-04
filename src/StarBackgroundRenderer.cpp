@@ -17,6 +17,15 @@ void StarBackgroundRenderer::setLightDirection(const QVector3D &direction) {
     }
 }
 
+void StarBackgroundRenderer::setGradientColors(const QColor &coreColor, const QColor &edgeColor) {
+    coreColor_ = coreColor;
+    edgeColor_ = edgeColor;
+}
+
+void StarBackgroundRenderer::setIntensity(double intensity) {
+    intensity_ = qMax(0.0, intensity);
+}
+
 double StarBackgroundRenderer::angularDiameterDegrees() const {
     return angularDiameterDeg_;
 }
@@ -25,12 +34,23 @@ const QVector3D &StarBackgroundRenderer::lightDirection() const {
     return lightDirection_;
 }
 
+QColor StarBackgroundRenderer::coreColor() const {
+    return coreColor_;
+}
+
+QColor StarBackgroundRenderer::edgeColor() const {
+    return edgeColor_;
+}
+
+double StarBackgroundRenderer::intensity() const {
+    return intensity_;
+}
+
 void StarBackgroundRenderer::draw(QPainter &painter,
                                   const QPointF &screenCenter,
                                   double sphereRadiusPx,
                                   float yawDeg,
-                                  float pitchDeg,
-                                  const QColor &starColor) const {
+                                  float pitchDeg) const {
     if (angularDiameterDeg_ <= 0.0 || sphereRadiusPx <= 0.0) {
         return;
     }
@@ -50,10 +70,20 @@ void StarBackgroundRenderer::draw(QPainter &painter,
         return;
     }
 
+    const double clampedIntensity = qBound(0.0, intensity_, 2.0);
+    // Интенсивность усиливает яркость RGB и альфу диска без изменения геометрии.
+    const double intensityFactor = qMax(0.0, clampedIntensity);
+
     QRadialGradient gradient(occlusion.starCenter, starRadius);
-    QColor coreColor = starColor;
-    coreColor.setAlpha(220);
-    QColor edgeColor = starColor;
+    QColor coreColor = coreColor_;
+    QColor edgeColor = edgeColor_;
+    coreColor.setRedF(qMin(1.0, coreColor.redF() * intensityFactor));
+    coreColor.setGreenF(qMin(1.0, coreColor.greenF() * intensityFactor));
+    coreColor.setBlueF(qMin(1.0, coreColor.blueF() * intensityFactor));
+    edgeColor.setRedF(qMin(1.0, edgeColor.redF() * intensityFactor));
+    edgeColor.setGreenF(qMin(1.0, edgeColor.greenF() * intensityFactor));
+    edgeColor.setBlueF(qMin(1.0, edgeColor.blueF() * intensityFactor));
+    coreColor.setAlpha(qBound(0, static_cast<int>(220.0 * intensityFactor), 255));
     edgeColor.setAlpha(0);
     gradient.setColorAt(0.0, coreColor);
     gradient.setColorAt(1.0, edgeColor);
