@@ -9,6 +9,9 @@ namespace {
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kMeanInsolationFactor = 0.25;
 constexpr double kTwoThirds = 2.0 / 3.0;
+constexpr double kOceanBottomDepthMeters = 60.0;
+constexpr int kOceanLayerCount = 64;
+constexpr double kOceanMinTopLayerThicknessMeters = 0.5;
 
 double estimateMeanEquilibriumTemperature(double solarConstant,
                                           double albedo,
@@ -26,6 +29,30 @@ double estimateMeanEquilibriumTemperature(double solarConstant,
     return qMax(minTemperatureKelvin,
                 std::pow(meanAbsorbedFlux / kStefanBoltzmannConstant, 0.25));
 }
+
+SubsurfaceModelSettings resolveSubsurfaceSettings(const SubsurfaceModelSettings &settings) {
+    SubsurfaceModelSettings resolved = settings;
+    const SubsurfaceGrid resolvedGrid(resolved.layerCount,
+                                      resolved.topLayerThicknessMeters,
+                                      resolved.bottomDepthMeters);
+    resolved.layerCount = resolvedGrid.layerCount();
+    resolved.bottomDepthMeters = resolvedGrid.bottomDepthMeters();
+    const auto &resolvedThicknesses = resolvedGrid.layerThicknessesMeters();
+    if (!resolvedThicknesses.isEmpty()) {
+        resolved.topLayerThicknessMeters = resolvedThicknesses.front();
+    }
+    return resolved;
+}
+
+SubsurfaceModelSettings oceanSubsurfaceSettings(const SubsurfaceModelSettings &settings) {
+    // Подбираем океаническую сетку по тем же константам, что и в SolarDisplay.
+    SubsurfaceModelSettings ocean = settings;
+    ocean.bottomDepthMeters = kOceanBottomDepthMeters;
+    ocean.layerCount = kOceanLayerCount;
+    ocean.topLayerThicknessMeters =
+        qMax(ocean.topLayerThicknessMeters, kOceanMinTopLayerThicknessMeters);
+    return ocean;
+}
 }
 
 SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface(
@@ -40,16 +67,8 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         return result;
     }
 
-    SubsurfaceModelSettings resolvedSubsurfaceSettings = defaults.subsurfaceSettings;
-    const SubsurfaceGrid resolvedGrid(resolvedSubsurfaceSettings.layerCount,
-                                      resolvedSubsurfaceSettings.topLayerThicknessMeters,
-                                      resolvedSubsurfaceSettings.bottomDepthMeters);
-    resolvedSubsurfaceSettings.layerCount = resolvedGrid.layerCount();
-    resolvedSubsurfaceSettings.bottomDepthMeters = resolvedGrid.bottomDepthMeters();
-    const auto &resolvedThicknesses = resolvedGrid.layerThicknessesMeters();
-    if (!resolvedThicknesses.isEmpty()) {
-        resolvedSubsurfaceSettings.topLayerThicknessMeters = resolvedThicknesses.front();
-    }
+    const SubsurfaceModelSettings resolvedSubsurfaceSettings =
+        resolveSubsurfaceSettings(defaults.subsurfaceSettings);
     result.resolvedSubsurfaceSettings = resolvedSubsurfaceSettings;
 
     result.blendedInsolations.reserve(pointCount);
@@ -115,13 +134,17 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
         const double materialAlbedo = qBound(0.0, material.albedo, 1.0);
         // Облака перекрывают поверхность, поэтому берём максимум отражения.
         const double albedo = qMax(materialAlbedo, clampedCloudAlbedo);
+        const SubsurfaceModelSettings pointSubsurfaceSettings =
+            (material.id == QStringLiteral("ocean"))
+                ? resolveSubsurfaceSettings(oceanSubsurfaceSettings(defaults.subsurfaceSettings))
+                : resolvedSubsurfaceSettings;
         SurfacePointState state(adjustedGlobalTemperature,
                                 albedo,
                                 defaults.greenhouseOpacity,
                                 defaults.radiationModelType,
                                 defaults.minTemperatureKelvin,
                                 material,
-                                defaults.subsurfaceSettings);
+                                pointSubsurfaceSettings);
         point.state = state;
         point.state.setProfileTemperatureKelvin(adjustedGlobalTemperature);
         point.temperatureK = adjustedGlobalTemperature;
