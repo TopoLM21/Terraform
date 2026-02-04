@@ -39,6 +39,9 @@ public:
     void setSettings(const Settings &settings);
     const Settings &settings() const;
 
+    // co2Share — доля CO₂ в атмосфере (по составу), используется вместе с
+    // point.pressureAtm для расчёта парциального давления.
+    // point.solarFluxWPerM2 задаёт освещённость для ограничения фотосинтеза.
     void update(QVector<SurfacePoint> &points,
                 double timeStepSeconds,
                 double co2Share) const;
