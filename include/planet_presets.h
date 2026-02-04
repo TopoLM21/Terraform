@@ -116,6 +116,8 @@ struct PlanetPreset {
     QColor starBackgroundEdgeColor = QColor(255, 244, 234);
     bool starBackgroundAutoDiameter = true;
     bool starBackgroundAutoColors = true;
+    // Флаг "обитаемости" для пресета (служебный маркер для интерфейса/логики).
+    bool isHabitable = false;
 };
 
 // Допуск 2% от орбитального периода: сглаживает округления и различия между

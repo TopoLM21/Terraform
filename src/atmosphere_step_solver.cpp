@@ -6,6 +6,7 @@
 #include "fluids/PhaseModel.h"
 
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QString>
 #include <QtCore/QtMath>
 
 #include <cmath>
@@ -65,6 +66,16 @@ double columnWaterMassKgPerM2(const AtmosphericColumn &column) {
     }
     return total;
 }
+
+double gasShareById(const AtmosphereComposition &composition, const QString &gasId) {
+    const auto fractions = composition.fractions();
+    for (const auto &fraction : fractions) {
+        if (fraction.id == gasId) {
+            return qMax(0.0, fraction.share);
+        }
+    }
+    return 0.0;
+}
 } // namespace
 
 AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composition,
@@ -79,7 +90,8 @@ AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composit
     , specificHeatCp_(AtmosphericThermodynamics::specificHeatCp(composition))
     , timeStepSeconds_(timeStepSeconds)
     , dayLengthSeconds_(dayLengthSeconds)
-    , isRetrograde_(isRetrograde) {}
+    , isRetrograde_(isRetrograde)
+    , co2Share_(gasShareById(composition, QStringLiteral("co2"))) {}
 
 const SurfaceMaterial &AtmosphereStepSolver::materialForPoint(
     const QHash<QString, SurfaceMaterial> &materialsById,
@@ -297,6 +309,10 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             }
         }
     }
+
+    // Растительность обновляем после теплового шага, чтобы использовать свежие
+    // температуру/влажность/осадки и стабильные соседние значения.
+    vegetationModel_.update(input.surfaceGrid.points(), timeStepSeconds_, co2Share_);
 
     dynamicsSolver_.updateLayerWinds(input.surfaceGrid,
                                     input.atmosphereGrid,
