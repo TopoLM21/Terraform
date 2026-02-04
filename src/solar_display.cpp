@@ -1595,6 +1595,7 @@ public:
         connect(planetComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [this](int) {
             cancelTemperatureCalculation();
+            resetSolarConstant();
             updatePlanetSemiMajorAxisLabel();
             updatePlanetDayLengthLabel();
             updatePlanetYearLengthLabel();
@@ -5101,6 +5102,59 @@ private:
         return true;
     }
 
+    std::optional<StellarCacheKey> currentStellarCacheKeyForSurface() const {
+        if (!planetComboBox_ || planetComboBox_->currentIndex() < 0) {
+            return std::nullopt;
+        }
+
+        StellarParameters primary{};
+        bool hasPrimary = readStellarParametersForRender(radiusInput_, temperatureInput_, primary);
+        if (!hasPrimary) {
+            bool radiusOk = false;
+            bool temperatureOk = false;
+            const double radius =
+                planetComboBox_->currentData(kRolePrimaryStarRadius).toDouble(&radiusOk);
+            const double temperature =
+                planetComboBox_->currentData(kRolePrimaryStarTemperature).toDouble(&temperatureOk);
+            if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                primary.radiusInSolarRadii = radius;
+                primary.temperatureKelvin = temperature;
+                hasPrimary = true;
+            }
+        }
+
+        if (!hasPrimary) {
+            return std::nullopt;
+        }
+
+        StellarParameters secondary{};
+        bool hasSecondary = false;
+        if (secondStarCheckBox_ && secondStarCheckBox_->isChecked()) {
+            hasSecondary = readStellarParametersForRender(secondaryRadiusInput_,
+                                                          secondaryTemperatureInput_,
+                                                          secondary);
+        }
+        if (!hasSecondary) {
+            bool radiusOk = false;
+            bool temperatureOk = false;
+            const double radius =
+                planetComboBox_->currentData(kRoleSecondaryStarRadius).toDouble(&radiusOk);
+            const double temperature =
+                planetComboBox_->currentData(kRoleSecondaryStarTemperature).toDouble(&temperatureOk);
+            if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
+                secondary.radiusInSolarRadii = radius;
+                secondary.temperatureKelvin = temperature;
+                hasSecondary = true;
+            }
+        }
+
+        return StellarCacheKey{primary.radiusInSolarRadii,
+                               primary.temperatureKelvin,
+                               hasSecondary,
+                               hasSecondary ? secondary.radiusInSolarRadii : 0.0,
+                               hasSecondary ? secondary.temperatureKelvin : 0.0};
+    }
+
     void updateSurfaceStarRendering(double declinationDegrees,
                                     double elapsedTimeDays,
                                     double rotationDayLengthDays,
@@ -6100,8 +6154,17 @@ private:
         ensureSurfaceOrbitAnimationReady();
         const double declinationDegrees = surfaceOrbitAnimation_.declinationDegrees();
         const double orbitalPhaseRadians = surfaceOrbitAnimation_.orbitalPhaseRadians();
-        double segmentSolarConstant = hasSolarConstant_ ? lastSolarConstant_ : 0.0;
-        if (hasSolarConstant_ && lastSolarConstantDistanceAU_ > 0.0) {
+        const double semiMajorAxisAu =
+            planetComboBox_->currentData(kRoleSemiMajorAxis).toDouble();
+        const auto currentStellarKey = currentStellarCacheKeyForSurface();
+        const bool hasMatchingSolarContext =
+            hasSolarConstant_ && lastStellarKey_ && currentStellarKey &&
+            qFuzzyCompare(1.0 + semiMajorAxisAu, 1.0 + lastSolarConstantDistanceAU_) &&
+            *lastStellarKey_ == *currentStellarKey;
+        // lastSolarConstant_ валиден только для текущей звезды/дистанции,
+        // иначе стартовая температура получается некорректной.
+        double segmentSolarConstant = hasMatchingSolarContext ? lastSolarConstant_ : 0.0;
+        if (hasMatchingSolarContext && lastSolarConstantDistanceAU_ > 0.0) {
             const double distanceAU = surfaceOrbitAnimation_.distanceAU();
             segmentSolarConstant =
                 lastSolarConstant_ *
@@ -6109,7 +6172,7 @@ private:
             updateSurfaceSolarConstantLabel(computeSurfaceFluxBreakdown());
         } else {
             const SurfaceFluxBreakdown breakdown = computeSurfaceFluxBreakdown();
-            if (!hasSolarConstant_ && breakdown.totalFluxWPerM2 > 0.0) {
+            if (breakdown.totalFluxWPerM2 > 0.0) {
                 // Допускаем оценку по пресету для первичной визуализации тайлов,
                 // чтобы не держать карту на фоне 3 K до ручного расчёта.
                 segmentSolarConstant = breakdown.totalFluxWPerM2;
