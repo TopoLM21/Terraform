@@ -109,6 +109,13 @@ struct PlanetPreset {
     double minDenseAtmosphereTemperatureK = 0.0;
     // Kz задаёт интенсивность вертикального турбулентного обмена (м²/с).
     double verticalWindMixingCoefficient = 1.0;
+    // Настройки фоновой звезды для визуализации.
+    double starBackgroundAngularDiameterDeg = 0.5;
+    double starBackgroundIntensity = 1.0;
+    QColor starBackgroundCoreColor = QColor(255, 244, 234);
+    QColor starBackgroundEdgeColor = QColor(255, 244, 234);
+    bool starBackgroundAutoDiameter = true;
+    bool starBackgroundAutoColors = true;
 };
 
 // Допуск 2% от орбитального периода: сглаживает округления и различия между
