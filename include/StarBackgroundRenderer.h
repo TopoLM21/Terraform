@@ -4,6 +4,8 @@
 #include <QPointF>
 #include <QVector3D>
 
+#include "StarOcclusionGeometry.h"
+
 class QPainter;
 
 class StarBackgroundRenderer {
@@ -26,4 +28,5 @@ private:
 
     double angularDiameterDeg_ = 0.5;
     QVector3D lightDirection_ = QVector3D(0.0f, 0.0f, 1.0f);
+    StarOcclusionGeometry occlusionGeometry_;
 };
