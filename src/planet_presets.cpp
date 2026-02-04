@@ -188,7 +188,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          QColor(255, 244, 234),
          true,
          true,
-         true},
+         false},
         {QStringLiteral("Венера"), 0.72, 116.75, 224.70, 0.0068, 177.36, 54.88, 0.815, 6051.8,
          QStringLiteral("desert"),
          atmosphereByPressureAtm(92.0, 0.815, 6051.8, {{QStringLiteral("co2"), 1.0}}),
@@ -230,7 +230,7 @@ QVector<PlanetPreset> solarSystemPresets() {
          QColor(255, 244, 234),
          true,
          true,
-         true},
+         false},
         {QStringLiteral("Земля"), 1.00, 1.0, 365.25, 0.0167, 23.44, 102.94, 1.0, 6371.0,
          QStringLiteral("rocky"),
          atmosphereByPressureAtm(
