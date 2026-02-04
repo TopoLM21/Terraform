@@ -6605,9 +6605,13 @@ private:
             // Высоту считаем относительно уровня моря (ниже моря может быть отрицательная).
             const double heightAboveSeaLevelMeters =
                 (point.heightKm - (input.hasSeaLevel ? input.seaLevelKm : 0.0)) * 1000.0;
+            // Барометрическая релаксация, как и первичная инициализация, должна считать
+            // давление для океанских ячеек от уровня моря, а не от глубины дна.
+            const double atmosphereHeightMeters =
+                input.hasSeaLevel ? qMax(0.0, heightAboveSeaLevelMeters) : heightAboveSeaLevelMeters;
             const double barometricAtm =
                 AtmosphericPressureModel::pressureAtHeightAtm(localSeaLevelPressureAtm,
-                                                              heightAboveSeaLevelMeters,
+                                                              atmosphereHeightMeters,
                                                               airColumnTemperatureK,
                                                               atmosphere,
                                                               gravity);
