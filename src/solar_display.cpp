@@ -1079,6 +1079,8 @@ public:
 
         auto *planetHeaderLayout = new QFormLayout();
         planetHeaderLayout->addRow(QStringLiteral("Планета:"), planetSelectorLayout);
+        auto *planetSelectorContainer = new QGroupBox(QStringLiteral("Выбор планеты"), this);
+        planetSelectorContainer->setLayout(planetHeaderLayout);
 
         auto *planetLeftFormLayout = new QFormLayout();
         planetLeftFormLayout->addRow(QStringLiteral("Большая полуось (а.е.):"), planetSemiMajorAxisLabel_);
@@ -1111,28 +1113,79 @@ public:
         planetColumnsLayout->addLayout(planetLeftFormLayout);
         planetColumnsLayout->addLayout(planetRightFormLayout);
 
-        auto *planetControlsLayout = new QFormLayout();
-        planetControlsLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
-        planetControlsLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
-        planetControlsLayout->addRow(QStringLiteral("Резонанс вращения p:q:"), spinOrbitWidget);
-        planetControlsLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
+        auto *orbitRotationLayout = new QFormLayout();
+        orbitRotationLayout->addRow(QStringLiteral("Режим вращения:"), rotationModeWidget);
+        orbitRotationLayout->addRow(QStringLiteral("Резонанс вращения p:q:"), spinOrbitWidget);
+        auto *orbitRotationGroupBox =
+            new QGroupBox(QStringLiteral("Орбита и вращение"), this);
+        orbitRotationGroupBox->setLayout(orbitRotationLayout);
+        orbitRotationGroupBox->setVisible(true);
+        auto *orbitRotationToggleButton = new QToolButton(this);
+        orbitRotationToggleButton->setText(QStringLiteral("Орбита и вращение"));
+        orbitRotationToggleButton->setCheckable(true);
+        orbitRotationToggleButton->setChecked(true);
+        orbitRotationToggleButton->setArrowType(Qt::DownArrow);
+        orbitRotationToggleButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        connect(orbitRotationToggleButton, &QToolButton::toggled, this,
+                [orbitRotationGroupBox, orbitRotationToggleButton](bool checked) {
+                    orbitRotationGroupBox->setVisible(checked);
+                    orbitRotationToggleButton->setArrowType(checked ? Qt::DownArrow
+                                                                    : Qt::RightArrow);
+                });
+
+        auto *surfaceLayout = new QFormLayout();
+        surfaceLayout->addRow(QStringLiteral("Материал поверхности:"), materialComboBox_);
+        surfaceLayout->addRow(QStringLiteral("Семя рельефа:"), heightSeedSpinBox_);
         auto *heightmapControls = new QWidget(this);
         auto *heightmapControlsLayout = new QHBoxLayout(heightmapControls);
         heightmapControlsLayout->setContentsMargins(0, 0, 0, 0);
         heightmapControlsLayout->addWidget(heightmapImportButton_);
         heightmapControlsLayout->addWidget(heightmapScaleSpinBox_);
         heightmapControlsLayout->addStretch();
-        planetControlsLayout->addRow(QStringLiteral("Heightmap:"), heightmapControls);
+        surfaceLayout->addRow(QStringLiteral("Heightmap:"), heightmapControls);
         auto *heightAtmosphereButtons = new QWidget(this);
         auto *heightAtmosphereLayout = new QHBoxLayout(heightAtmosphereButtons);
         heightAtmosphereLayout->setContentsMargins(0, 0, 0, 0);
         heightAtmosphereLayout->addWidget(flatHeightButton_);
         heightAtmosphereLayout->addWidget(disableAtmosphereButton_);
         heightAtmosphereLayout->addStretch();
-        planetControlsLayout->addRow(QStringLiteral("Высота поверхности:"), heightAtmosphereButtons);
-        planetControlsLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
-        planetControlsLayout->addRow(QStringLiteral("Интенсивность облаков (0..2):"),
-                                     cloudOpacityBoostSpinBox_);
+        surfaceLayout->addRow(QStringLiteral("Высота поверхности:"), heightAtmosphereButtons);
+        auto *surfaceGroupBox = new QGroupBox(QStringLiteral("Поверхность и рельеф"), this);
+        surfaceGroupBox->setLayout(surfaceLayout);
+        surfaceGroupBox->setVisible(true);
+        auto *surfaceToggleButton = new QToolButton(this);
+        surfaceToggleButton->setText(QStringLiteral("Поверхность и рельеф"));
+        surfaceToggleButton->setCheckable(true);
+        surfaceToggleButton->setChecked(true);
+        surfaceToggleButton->setArrowType(Qt::DownArrow);
+        surfaceToggleButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        connect(surfaceToggleButton, &QToolButton::toggled, this,
+                [surfaceGroupBox, surfaceToggleButton](bool checked) {
+                    surfaceGroupBox->setVisible(checked);
+                    surfaceToggleButton->setArrowType(checked ? Qt::DownArrow
+                                                             : Qt::RightArrow);
+                });
+
+        auto *atmosphereLayout = new QFormLayout();
+        atmosphereLayout->addRow(QStringLiteral("Альбедо облаков (0..1):"), cloudAlbedoSpinBox_);
+        atmosphereLayout->addRow(QStringLiteral("Интенсивность облаков (0..2):"),
+                                 cloudOpacityBoostSpinBox_);
+        auto *atmosphereGroupBox = new QGroupBox(QStringLiteral("Атмосфера и облака"), this);
+        atmosphereGroupBox->setLayout(atmosphereLayout);
+        atmosphereGroupBox->setVisible(true);
+        auto *atmosphereToggleButton = new QToolButton(this);
+        atmosphereToggleButton->setText(QStringLiteral("Атмосфера и облака"));
+        atmosphereToggleButton->setCheckable(true);
+        atmosphereToggleButton->setChecked(true);
+        atmosphereToggleButton->setArrowType(Qt::DownArrow);
+        atmosphereToggleButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        connect(atmosphereToggleButton, &QToolButton::toggled, this,
+                [atmosphereGroupBox, atmosphereToggleButton](bool checked) {
+                    atmosphereGroupBox->setVisible(checked);
+                    atmosphereToggleButton->setArrowType(checked ? Qt::DownArrow
+                                                                : Qt::RightArrow);
+                });
+
         auto *starBackgroundLayout = new QFormLayout();
         starBackgroundLayout->addRow(starBackgroundAutoDiameterCheckBox_);
         starBackgroundLayout->addRow(QStringLiteral("Угловой диаметр (°):"),
@@ -1149,22 +1202,45 @@ public:
                                      starBackgroundIntensitySpinBox_);
         auto *starBackgroundGroupBox = new QGroupBox(QStringLiteral("Фоновая звезда"), this);
         starBackgroundGroupBox->setLayout(starBackgroundLayout);
-        planetControlsLayout->addRow(starBackgroundGroupBox);
-        planetControlsLayout->addRow(QStringLiteral("Поправка суточного охлаждения (К):"),
-                                     diurnalCoolingBiasSpinBox_);
-        planetControlsLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
-        planetControlsLayout->addRow(QString(), advancedRadiationCheckBox_);
-        planetControlsLayout->addRow(QString(), debugLogCheckBox_);
-        planetControlsLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
+        auto *radiationLayout = new QFormLayout();
+        radiationLayout->addRow(starBackgroundGroupBox);
+        radiationLayout->addRow(QStringLiteral("Поправка суточного охлаждения (К):"),
+                                diurnalCoolingBiasSpinBox_);
+        radiationLayout->addRow(QString(), manualGreenhouseOnTopCheckBox_);
+        radiationLayout->addRow(QString(), advancedRadiationCheckBox_);
+        radiationLayout->addRow(QString(), debugLogCheckBox_);
+        radiationLayout->addRow(QStringLiteral("Солнечная постоянная (Вт/м²):"), resultLabel_);
+        auto *radiationGroupBox =
+            new QGroupBox(QStringLiteral("Фоновая звезда и радиация"), this);
+        radiationGroupBox->setLayout(radiationLayout);
+        radiationGroupBox->setVisible(true);
+        auto *radiationToggleButton = new QToolButton(this);
+        radiationToggleButton->setText(QStringLiteral("Фоновая звезда и радиация"));
+        radiationToggleButton->setCheckable(true);
+        radiationToggleButton->setChecked(true);
+        radiationToggleButton->setArrowType(Qt::DownArrow);
+        radiationToggleButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        connect(radiationToggleButton, &QToolButton::toggled, this,
+                [radiationGroupBox, radiationToggleButton](bool checked) {
+                    radiationGroupBox->setVisible(checked);
+                    radiationToggleButton->setArrowType(checked ? Qt::DownArrow
+                                                                : Qt::RightArrow);
+                });
 
         auto *planetActionsLayout = new QHBoxLayout();
         planetActionsLayout->addStretch();
         planetActionsLayout->addWidget(addPlanetButton_);
 
         auto *planetFormLayout = new QVBoxLayout();
-        planetFormLayout->addLayout(planetHeaderLayout);
         planetFormLayout->addLayout(planetColumnsLayout);
-        planetFormLayout->addLayout(planetControlsLayout);
+        planetFormLayout->addWidget(orbitRotationToggleButton);
+        planetFormLayout->addWidget(orbitRotationGroupBox);
+        planetFormLayout->addWidget(surfaceToggleButton);
+        planetFormLayout->addWidget(surfaceGroupBox);
+        planetFormLayout->addWidget(atmosphereToggleButton);
+        planetFormLayout->addWidget(atmosphereGroupBox);
+        planetFormLayout->addWidget(radiationToggleButton);
+        planetFormLayout->addWidget(radiationGroupBox);
         planetFormLayout->addLayout(planetActionsLayout);
         auto *planetGroupBox = new QGroupBox(QStringLiteral("Планеты"), this);
         planetGroupBox->setLayout(planetFormLayout);
@@ -1468,6 +1544,7 @@ public:
         auto *leftLayout = new QVBoxLayout();
         leftLayout->addLayout(presetsLayout);
         leftLayout->addWidget(starsPanel);
+        leftLayout->addWidget(planetSelectorContainer);
         leftLayout->addWidget(planetPanelToggleButton);
         leftLayout->addWidget(planetPanelContainer);
         leftLayout->addWidget(calculateButton);
