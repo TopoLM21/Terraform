@@ -726,9 +726,10 @@ double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere
     // Приводим пропускание к коэффициенту парникового эффекта для SurfacePointState.
     const double greenhouseOpacity = 1.0 - totalLongwaveTransmission;
     if (logDetails) {
-        qCInfo(solarRadiationLog) << "Local greenhouse opacity"
+        qCInfo(solarRadiationLog) << "Soft-start greenhouse opacity"
                                  << "pressureAtm=" << pressureAtm
                                  << "blendedInsolation=" << blendedInsolation
+                                 << "meanToaFlux=" << meanToaFlux
                                  << "surfAlbedoPre=" << surfAlbedoPre
                                  << "pressureClouds=" << pressureClouds
                                  << "tEffPre=" << tEffPre
