@@ -6204,6 +6204,15 @@ private:
         for (const auto &material : materials) {
             materialsById.insert(material.id, material);
         }
+        const auto materialForPoint = [&materialsById, &stateDefaults](const SurfacePoint &point) {
+            const QString effectiveMaterialId =
+                (point.materialId == QLatin1String("ocean") &&
+                 point.waterPhase == PhaseModel::Phase::Ice)
+                    ? QStringLiteral("ice")
+                    : point.materialId;
+            const auto it = materialsById.constFind(effectiveMaterialId);
+            return it != materialsById.cend() ? *it : stateDefaults->material;
+        };
 
         const double dayLengthDays = planetComboBox_->currentData(kRoleDayLength).toDouble();
         const double yearLengthDays =
