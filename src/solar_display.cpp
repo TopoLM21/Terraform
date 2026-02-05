@@ -6276,9 +6276,7 @@ private:
 
         double materialAlbedoSum = 0.0;
         for (const auto &point : surfaceGrid_.points()) {
-            const auto materialIt = materialsById.constFind(point.materialId);
-            const SurfaceMaterial material =
-                (materialIt != materialsById.cend()) ? *materialIt : stateDefaults->material;
+            const SurfaceMaterial material = materialForPoint(point);
             materialAlbedoSum += qBound(0.0, material.albedo, 1.0);
         }
         const double meanMaterialAlbedo = materialAlbedoSum /
@@ -6582,9 +6580,7 @@ private:
         // а локальная инсоляция влияет только на SW-поток у поверхности и в воздухе.
         double materialAlbedoSum = 0.0;
         for (const auto &point : surfaceGrid_.points()) {
-            const auto materialIt = materialsById.constFind(point.materialId);
-            const SurfaceMaterial material =
-                (materialIt != materialsById.cend()) ? *materialIt : stateDefaults->material;
+            const SurfaceMaterial material = materialForPoint(point);
             materialAlbedoSum += qBound(0.0, material.albedo, 1.0);
         }
         const double meanMaterialAlbedo = materialAlbedoSum /
