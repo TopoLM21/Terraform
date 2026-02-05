@@ -118,6 +118,8 @@ struct PlanetPreset {
     bool starBackgroundAutoColors = true;
     // Флаг "обитаемости" для пресета (служебный маркер для интерфейса/логики).
     bool isHabitable = false;
+    // Эвристический сдвиг для ночного охлаждения поверхности (K).
+    double diurnalCoolingBiasK = 0.0;
 };
 
 // Допуск 2% от орбитального периода: сглаживает округления и различия между
