@@ -673,7 +673,10 @@ double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere
 
     double evaporation = 0.0;
     if (!disableWaterAndClouds && potentialCoverage > 0.0 && tBasePre > 263.0) {
-        evaporation = potentialCoverage * std::exp((tBasePreClamped - 280.0) / 15.0);
+        // Сдвигаем порог и уменьшаем крутизну экспоненты: при 280–285 K на Земле
+        // испарение растёт умеренно, а не взрывным образом, поэтому используем
+        // более мягкую зависимость, соответствующую земным условиям.
+        evaporation = potentialCoverage * std::exp((tBasePreClamped - 290.0) / 30.0);
     }
     const double waterTau = disableWaterAndClouds ? 0.0 : qMin(8.0, evaporation * 1.5);
     double extraTau = waterTau;
