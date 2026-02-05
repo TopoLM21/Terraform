@@ -3514,7 +3514,7 @@ private:
         planetComboBox_->setItemData(index, planet.cloudOpacityBoost, kRoleCloudOpacityBoost);
         planetComboBox_->setItemData(index, planet.disableWaterAndClouds, kRoleDisableWaterAndClouds);
         planetComboBox_->setItemData(index, planet.surfaceWaterGigatons, kRoleSurfaceWaterGigatons);
-        planetComboBox_->setItemData(index, 0.0, kRoleDiurnalCoolingBiasK);
+        planetComboBox_->setItemData(index, planet.diurnalCoolingBiasK, kRoleDiurnalCoolingBiasK);
         planetComboBox_->setItemData(index, planet.geothermalFluxWPerM2, kRoleGeothermalFlux);
         planetComboBox_->setItemData(index, static_cast<int>(planet.heightSourceType),
                                      kRoleHeightSourceType);
