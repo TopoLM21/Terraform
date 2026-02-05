@@ -637,9 +637,7 @@ double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere
     const double tEffPre = std::pow(qMax(0.0, absorbedMeanFlux) / kStefanBoltzmannConstant, 0.25);
     const double atmosphereMassGt = atmosphere.totalMassGigatons();
     const double co2MassGt = atmosphere.massGigatons(QStringLiteral("co2"));
-    const double h2oMassGt = atmosphere.massGigatons(QStringLiteral("h2o"));
     const double co2Share = atmosphereMassGt > 0.0 ? co2MassGt / atmosphereMassGt : 0.0;
-    const double h2oShare = atmosphereMassGt > 0.0 ? h2oMassGt / atmosphereMassGt : 0.0;
     const double denseAtmosphereThresholdAtm = 0.1;
     double profileBaseTemperatureKelvin = baseTemperatureKelvin;
     if (pressureAtm >= denseAtmosphereThresholdAtm) {
@@ -678,17 +676,11 @@ double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere
         // более мягкую зависимость, соответствующую земным условиям.
         evaporation = potentialCoverage * std::exp((tBasePreClamped - 290.0) / 30.0);
     }
+    // Единая водяная эвристика: связываем испарение с ИК-непрозрачностью,
+    // трактуя waterTau как агрегированный вклад водяного пара + облачности.
+    // Так избегаем двойного учёта H₂O в τ (отдельная H₂O-модель отключена).
     const double waterTau = disableWaterAndClouds ? 0.0 : qMin(8.0, evaporation * 1.5);
     double extraTau = waterTau;
-    // Облака повышают альбедо, но также усиливают ИК-поглощение.
-    // Держим вклад умеренным и связываем его с облачным альбедо и давлением.
-    const double clampedCloudAlbedo = qBound(0.0, cloudAlbedo, 1.0);
-    const double cloudLongwaveFactor =
-        qBound(0.0, clampedCloudAlbedo + pressureClouds, 1.0);
-    constexpr double kCloudLongwaveTau = 0.3;
-    const double tauCloudLW =
-        disableWaterAndClouds ? 0.0 : kCloudLongwaveTau * cloudLongwaveFactor;
-    extraTau += tauCloudLW;
     const double co2PartialPressureAtm = pressureAtm * co2Share;
     if (co2PartialPressureAtm > 0.0) {
         // Серый парник от CO₂: растущее поглощение ограничиваем логарифмом,
@@ -699,19 +691,6 @@ double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere
         const double tauCo2 =
             kTauCo2 * std::log(1.0 + co2PartialPressureAtm / kReferencePressureAtm);
         extraTau += tauCo2;
-    }
-    if (useAtmosphericModel) {
-        const double h2oPartialPressureAtm = pressureAtm * h2oShare;
-        if (h2oPartialPressureAtm > 0.0) {
-            // H₂O добавляем только при активной атмосферной модели, чтобы не
-            // дублировать парниковый вклад с оценкой испарения/облачности выше.
-            // Формула — логарифмическое насыщение линий при росте парциального давления.
-            constexpr double kTauH2o = 0.5;
-            constexpr double kReferencePressureAtm = 0.05;
-            const double tauH2o =
-                kTauH2o * std::log(1.0 + h2oPartialPressureAtm / kReferencePressureAtm);
-            extraTau += tauH2o;
-        }
     }
     if (manualGreenhouseOpacity > 0.0 &&
         (!useAtmosphericModel || manualGreenhouseOnTopOfAtmosphere)) {
@@ -740,7 +719,6 @@ double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere
                                  << "tBasePre=" << tBasePre
                                  << "evaporation=" << evaporation
                                  << "waterTau=" << waterTau
-                                 << "tauCloudLW=" << tauCloudLW
                                  << "extraTau=" << extraTau
                                  << "totalLongwaveTransmission=" << totalLongwaveTransmission
                                  << "greenhouseOpacity=" << greenhouseOpacity;
