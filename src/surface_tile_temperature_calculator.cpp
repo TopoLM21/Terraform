@@ -10,7 +10,6 @@ namespace {
 Q_LOGGING_CATEGORY(solarRadiationLog, "solar.radiation")
 constexpr double kStefanBoltzmannConstant = 5.670374419e-8;
 constexpr double kMeanInsolationFactor = 0.25;
-constexpr double kTwoThirds = 2.0 / 3.0;
 constexpr double kOceanBottomDepthMeters = 60.0;
 constexpr int kOceanLayerCount = 64;
 constexpr double kOceanMinTopLayerThicknessMeters = 0.5;
@@ -101,27 +100,12 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
                                                  globalAlbedo,
                                                  defaults.minTemperatureKelvin)
             : defaults.minTemperatureKelvin;
-    const double tauSurface =
-        opticalDepthFromGreenhouseOpacity(defaults.greenhouseOpacity,
-                                          defaults.radiationModelType);
-    const double tauEmission = qMin(1.0, qMax(0.0, tauSurface));
-    const double greenhouseFactor = (tauEmission + kTwoThirds > 0.0)
-        // Инвертируем серую формулу эмиссионного слоя:
-        // T_em^4 = T_surface^4 * (τ_em + 2/3) / (τ_surface + 2/3),
-        // поэтому T_surface = T_eq * ((τ_surface + 2/3)/(τ_em + 2/3))^(1/4).
-        ? std::pow((tauSurface + kTwoThirds) / (tauEmission + kTwoThirds), 0.25)
-        : 1.0;
-    const double maxGreenhouseFactor = 2.5;
-    const double limitedGreenhouseFactor =
-        (greenhouseFactor <= 1.0)
-            ? greenhouseFactor
-            : 1.0 + (maxGreenhouseFactor - 1.0)
-                * std::tanh((greenhouseFactor - 1.0) / (maxGreenhouseFactor - 1.0));
-    // Ограничиваем начальный парниковый множитель мягкой компрессией:
-    // это лишь стартовая инициализация, реальные значения должна догнать динамика.
+    // Парниковый множитель применяется ровно один раз в радиационной модели,
+    // поэтому стартовую температуру берём по равновесию без повторного
+    // «серого» пересчёта (иначе получим двойной разогрев).
     const double globalTemperature =
         qMax(defaults.minTemperatureKelvin,
-             baseEquilibriumTemperature * limitedGreenhouseFactor);
+             baseEquilibriumTemperature);
     const double diurnalCoolingBiasK = qMax(0.0, defaults.diurnalCoolingBiasK);
     // Эти параметры (segmentSolarConstant, cloudAlbedo, greenhouseOpacity,
     // minTemperatureKelvin, diurnalCoolingBiasK) задают единый стартовый
