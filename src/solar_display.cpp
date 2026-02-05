@@ -5648,7 +5648,19 @@ private:
         // если стартовая температура не меняется, проверьте их значения до и после
         // initializeSurface(). Если segmentSolarConstant уже завышен, проверьте путь
         // вычисления computeSurfaceFluxBreakdown() и возможное устаревание lastSolarConstant_.
-        const double planetaryAlbedo = input.cloudAlbedo;
+        double materialAlbedoSum = 0.0;
+        for (const auto &point : result.grid.points()) {
+            const auto materialIt = input.materialsById.constFind(point.materialId);
+            const SurfaceMaterial material =
+                (materialIt != input.materialsById.cend())
+                    ? *materialIt
+                    : input.stateDefaults.material;
+            materialAlbedoSum += qBound(0.0, material.albedo, 1.0);
+        }
+        const double meanMaterialAlbedo = materialAlbedoSum /
+            qMax(1, result.grid.points().size());
+        // Используем планетарное альбедо, чтобы стартовая t_eff не была завышена.
+        const double planetaryAlbedo = qMax(meanMaterialAlbedo, input.cloudAlbedo);
         const double meanToaFlux =
             input.segmentSolarConstant * qMax(0.0, 1.0 - planetaryAlbedo) / 4.0;
         const double effectiveTemperatureKelvin =
@@ -6262,8 +6274,19 @@ private:
         }
         const double gravity = (surfaceGravity > 0.0) ? surfaceGravity : 9.80665;
 
+        double materialAlbedoSum = 0.0;
+        for (const auto &point : surfaceGrid_.points()) {
+            const auto materialIt = materialsById.constFind(point.materialId);
+            const SurfaceMaterial material =
+                (materialIt != materialsById.cend()) ? *materialIt : stateDefaults->material;
+            materialAlbedoSum += qBound(0.0, material.albedo, 1.0);
+        }
+        const double meanMaterialAlbedo = materialAlbedoSum /
+            qMax(1, surfaceGrid_.points().size());
+        // Используем планетарное альбедо, чтобы стартовая t_eff не была завышена.
+        const double planetaryAlbedo = qMax(meanMaterialAlbedo, cloudAlbedo);
         const double meanToaFlux =
-            segmentSolarConstant * qMax(0.0, 1.0 - cloudAlbedo) / 4.0;
+            segmentSolarConstant * qMax(0.0, 1.0 - planetaryAlbedo) / 4.0;
         const double effectiveTemperatureKelvin =
             std::pow(qMax(0.0, meanToaFlux) / kStefanBoltzmannConstant, 0.25);
         const double minDenseAtmosphereTemperatureK =
@@ -6557,8 +6580,19 @@ private:
         // Радиационный профиль должен опираться на средний ТОА-поток, а не на локальную
         // инсоляцию: вертикальная структура атмосферы задаётся глобальным балансом энергии,
         // а локальная инсоляция влияет только на SW-поток у поверхности и в воздухе.
+        double materialAlbedoSum = 0.0;
+        for (const auto &point : surfaceGrid_.points()) {
+            const auto materialIt = materialsById.constFind(point.materialId);
+            const SurfaceMaterial material =
+                (materialIt != materialsById.cend()) ? *materialIt : stateDefaults->material;
+            materialAlbedoSum += qBound(0.0, material.albedo, 1.0);
+        }
+        const double meanMaterialAlbedo = materialAlbedoSum /
+            qMax(1, surfaceGrid_.points().size());
+        // Используем планетарное альбедо, чтобы стартовая t_eff не была завышена.
+        const double planetaryAlbedo = qMax(meanMaterialAlbedo, cloudAlbedo);
         const double meanToaFlux =
-            segmentSolarConstant * qMax(0.0, 1.0 - cloudAlbedo) / 4.0;
+            segmentSolarConstant * qMax(0.0, 1.0 - planetaryAlbedo) / 4.0;
         const double effectiveTemperatureKelvin =
             std::pow(qMax(0.0, meanToaFlux) / kStefanBoltzmannConstant, 0.25);
         // Фиксируем меридиан для агрегации: либо пользовательскую точку,
