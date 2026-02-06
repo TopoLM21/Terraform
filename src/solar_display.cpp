@@ -676,9 +676,8 @@ double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere
         // более мягкую зависимость, соответствующую земным условиям.
         evaporation = potentialCoverage * std::exp((tBasePreClamped - 290.0) / 30.0);
     }
-    // Единая водяная эвристика: связываем испарение с ИК-непрозрачностью,
-    // трактуя waterTau как агрегированный вклад водяного пара + облачности.
-    // Так избегаем двойного учёта H₂O в τ (отдельная H₂O-модель отключена).
+    // Единая водяная эвристика: связываем испарение с ИК-непрозрачностью.
+    // Вода учтена агрегировано через waterTau, без отдельного τ для H₂O/облаков.
     const double waterTau = disableWaterAndClouds ? 0.0 : qMin(8.0, evaporation * 1.5);
     double extraTau = waterTau;
     const double co2PartialPressureAtm = pressureAtm * co2Share;
@@ -705,7 +704,8 @@ double computeSoftStartGreenhouseOpacity(const AtmosphereComposition &atmosphere
     const double totalLongwaveTransmission =
         qMax(1e-6, baseLongwaveTransmission * extraLongwaveTransmission);
 
-    // Приводим пропускание к коэффициенту парникового эффекта для SurfacePointState.
+    // Приводим пропускание к коэффициенту парникового эффекта для SurfacePointState:
+    // парниковый эффект применяется один раз.
     const double greenhouseOpacity = 1.0 - totalLongwaveTransmission;
     if (logDetails) {
         qCInfo(solarRadiationLog) << "Soft-start greenhouse opacity"

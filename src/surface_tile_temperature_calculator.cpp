@@ -100,7 +100,7 @@ SurfaceTileTemperatureResult SurfaceTileTemperatureCalculator::initializeSurface
                                                  globalAlbedo,
                                                  defaults.minTemperatureKelvin)
             : defaults.minTemperatureKelvin;
-    // Парниковый множитель применяется ровно один раз в радиационной модели,
+    // Парниковый эффект применяется один раз в радиационной модели,
     // поэтому стартовую температуру берём по равновесию без повторного
     // «серого» пересчёта (иначе получим двойной разогрев).
     const double globalTemperature =
