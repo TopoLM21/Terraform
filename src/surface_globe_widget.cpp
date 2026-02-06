@@ -150,6 +150,7 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
         double maxWind = minWind;
         double minPressure = grid_->points().first().pressureAtm;
         double maxPressure = minPressure;
+        // Используем сглаженную интенсивность осадков (EMA), кг/м² за интервал.
         double minPrecipitation = grid_->points().first().precipitationKgPerM2;
         double maxPrecipitation = minPrecipitation;
         for (const auto &point : grid_->points()) {
@@ -161,8 +162,9 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
             maxWind = qMax(maxWind, point.windSpeedMps);
             minPressure = qMin(minPressure, point.pressureAtm);
             maxPressure = qMax(maxPressure, point.pressureAtm);
-            minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
-            maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
+            const double precipitationIntensity = point.precipitationKgPerM2;
+            minPrecipitation = qMin(minPrecipitation, precipitationIntensity);
+            maxPrecipitation = qMax(maxPrecipitation, precipitationIntensity);
         }
         minTemperatureK_ = minTemp;
         maxTemperatureK_ = maxTemp;

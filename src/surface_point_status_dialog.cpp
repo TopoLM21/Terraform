@@ -110,7 +110,8 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Доля влаги поверхности (0..1):"),
                    surfaceMoistureFractionValueLabel_);
     layout->addRow(QStringLiteral("Вода на поверхности (кг/м²):"), surfaceMoistureWaterValueLabel_);
-    layout->addRow(QStringLiteral("Осадки (кг/м²):"), surfacePrecipitationValueLabel_);
+    layout->addRow(QStringLiteral("Осадки (среднее за интервал, кг/м²):"),
+                   surfacePrecipitationValueLabel_);
     const QString bottomBoundaryTooltip = QStringLiteral(
         "Фиксированная температура задаёт «глубинный резервуар», который может "
         "подогревать профиль.");

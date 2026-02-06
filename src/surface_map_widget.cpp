@@ -319,6 +319,7 @@ void SurfaceMapWidget::rebuildImages() {
         double maxWind = minWind;
         double minPressure = grid_->points().first().pressureAtm;
         double maxPressure = minPressure;
+        // Используем сглаженную интенсивность осадков (EMA), кг/м² за интервал.
         double minPrecipitation = grid_->points().first().precipitationKgPerM2;
         double maxPrecipitation = minPrecipitation;
         for (const auto &point : grid_->points()) {
@@ -330,8 +331,9 @@ void SurfaceMapWidget::rebuildImages() {
             maxWind = qMax(maxWind, point.windSpeedMps);
             minPressure = qMin(minPressure, point.pressureAtm);
             maxPressure = qMax(maxPressure, point.pressureAtm);
-            minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
-            maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
+            const double precipitationIntensity = point.precipitationKgPerM2;
+            minPrecipitation = qMin(minPrecipitation, precipitationIntensity);
+            maxPrecipitation = qMax(maxPrecipitation, precipitationIntensity);
         }
         if (minTemp != maxTemp) {
             minTemperatureK_ = minTemp;
@@ -641,7 +643,8 @@ QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point, int poin
     const double heightAboveSeaLevelKm = point.heightKm - (grid_ ? grid_->seaLevelKm() : 0.0);
     return QStringLiteral("Широта: %1°\nДолгота: %2°\nТемпература поверхности: %3 K\n"
                           "Температура воздуха: %4 K\nВысота над ур. моря: %5 км\nДавление: %6 атм\n"
-                          "Солнечный поток: %7 Вт/м²\nВетер: %8 м/с\nОсадки: %9 кг/м²\n"
+                          "Солнечный поток: %7 Вт/м²\nВетер: %8 м/с\n"
+                          "Осадки (среднее за интервал): %9 кг/м²\n"
                           "Площадь тайла: %10 км²\nСредняя длина ребра: %11 км")
         .arg(point.latitudeDeg, 0, 'f', 2)
         .arg(point.longitudeDeg, 0, 'f', 2)
