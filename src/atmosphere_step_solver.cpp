@@ -1,4 +1,5 @@
 #include "atmosphere_step_solver.h"
+#include "fluids/OceanAlbedoModel.h"
 
 #include "atmospheric_thermodynamics.h"
 #include "surface_atmosphere_coupler.h"
@@ -175,9 +176,9 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             materialForPoint(input.materialsById, input.defaultMaterial, point.materialId);
         double surfaceAlbedo = qBound(0.0, material.albedo, 1.0);
         if (point.materialId == QStringLiteral("ocean")) {
-            const auto &albedoTable = PhaseModel::albedoTable();
-            surfaceAlbedo =
-                (point.waterPhase == PhaseModel::Phase::Ice) ? albedoTable.ice : albedoTable.liquid;
+            const double cosZenith =
+                (i < input.localCosZeniths.size()) ? input.localCosZeniths.at(i) : 0.0;
+            surfaceAlbedo = OceanAlbedoModel::albedoForPhase(point.waterPhase, cosZenith);
         }
 
         auto &layers = column.layers();
