@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.228 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.229 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -84,6 +84,8 @@ add_executable(solar_constant
     src/fluids/FluidLayer.cpp
     src/fluids/MixingModel.h
     src/fluids/MixingModel.cpp
+    src/fluids/OceanAlbedoModel.h
+    src/fluids/OceanAlbedoModel.cpp
     src/fluids/PhaseModel.h
     src/fluids/PhaseModel.cpp
     src/atmospheric_cell_state.cpp

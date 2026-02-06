@@ -20,6 +20,7 @@ public:
         PlanetSurfaceGrid &surfaceGrid;
         AtmosphericGrid3D &atmosphereGrid;
         const QVector<double> &localInsolations;
+        const QVector<double> &localCosZeniths;
         const QHash<QString, SurfaceMaterial> &materialsById;
         const SurfaceMaterial &defaultMaterial;
         double cloudShortwaveTransmission = 1.0;

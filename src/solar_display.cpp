@@ -38,6 +38,7 @@
 #include "atmospheric_profile_initializer.h"
 #include "atmospheric_cell_state.h"
 #include "atmosphere_model.h"
+#include "fluids/OceanAlbedoModel.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -6636,9 +6637,12 @@ private:
         ensureSurfaceTemperatureAggregationTargets(targetLongitudeRadians);
 
         QVector<double> localInsolations;
+        QVector<double> localCosZeniths;
         localInsolations.reserve(surfaceGrid_.points().size());
+        localCosZeniths.reserve(surfaceGrid_.points().size());
         const PhaseModel phaseModel;
-        const auto updateOceanPhaseAndAlbedo = [&phaseModel](SurfacePoint &point) {
+        const auto updateOceanPhaseAndAlbedo = [&phaseModel](SurfacePoint &point,
+                                                             double cosZenith) {
             if (point.materialId != QLatin1String("ocean")) {
                 point.waterPhase = PhaseModel::Phase::Liquid;
                 return;
@@ -6652,10 +6656,8 @@ private:
             } else {
                 point.waterPhase = PhaseModel::Phase::Liquid;
             }
-            // Альбедо льда/воды берём из таблицы PhaseModel, чтобы совпадать с фазовой моделью.
-            const auto &albedoTable = PhaseModel::albedoTable();
             const double oceanAlbedo =
-                (point.waterPhase == PhaseModel::Phase::Ice) ? albedoTable.ice : albedoTable.liquid;
+                OceanAlbedoModel::albedoForPhase(point.waterPhase, cosZenith);
             point.state.setAlbedo(oceanAlbedo);
         };
         for (auto &point : surfaceGrid_.points()) {
@@ -6664,9 +6666,11 @@ private:
                 point.sinLatitude * sinDeclination +
                 point.cosLatitude * cosDeclination * std::cos(localHourAngle);
             // S_inst = S0 * cos(zenith) при освещении, иначе 0.
+            const double clampedCosZenith = qBound(0.0, cosZenith, 1.0);
             const double localInsolation =
-                segmentSolarConstant * qMax(0.0, cosZenith);
+                segmentSolarConstant * clampedCosZenith;
             localInsolations.push_back(localInsolation);
+            localCosZeniths.push_back(clampedCosZenith);
             // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
             // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
             // поэтому минимальная база зависит от давления и состава.
@@ -6721,7 +6725,7 @@ private:
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             // Обновляем поверхностную температуру до переноса в соседние точки.
             point.temperatureK = point.state.temperatureKelvin();
-            updateOceanPhaseAndAlbedo(point);
+            updateOceanPhaseAndAlbedo(point, clampedCosZenith);
         }
 
         updateSurfaceWindField(atmosphere, atmospherePressureAtm, dayLengthDays, surfaceGravity);
@@ -6886,7 +6890,9 @@ private:
             point.state.setSurfaceLayerTemperatureKelvin(advectedTemperatures.at(i));
             // Температура после переноса хранится как поверхностная величина.
             point.temperatureK = point.state.temperatureKelvin();
-            updateOceanPhaseAndAlbedo(point);
+            const double cosZenith =
+                (i < localCosZeniths.size()) ? localCosZeniths.at(i) : 0.0;
+            updateOceanPhaseAndAlbedo(point, cosZenith);
         }
 
         if (useLayeredAtmosphere) {
@@ -6899,6 +6905,7 @@ private:
             AtmosphereStepSolver::LayeredStepInput stepInput{surfaceGrid_,
                                                             atmosphereGrid,
                                                             localInsolations,
+                                                            localCosZeniths,
                                                             materialsById,
                                                             *defaultMaterial,
                                                             cloudShortwaveTransmission,
