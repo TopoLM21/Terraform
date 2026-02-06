@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SolarConstantCalculator VERSION 0.1.227 LANGUAGES CXX)
+project(SolarConstantCalculator VERSION 0.1.228 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,6 +39,7 @@ add_executable(solar_constant
     include/planet_surface_point.h
     include/segment_selector_widget.h
     include/height_color_scale.h
+    include/precipitation_color_scale.h
     include/heightmap_storage.h
     include/surface_point_state.h
     include/surface_temperature_state.h
@@ -50,6 +51,7 @@ add_executable(solar_constant
     include/surface_height_scale_widget.h
     include/surface_wind_scale_widget.h
     include/surface_pressure_scale_widget.h
+    include/surface_precipitation_scale_widget.h
     include/surface_realistic_color.h
     include/surface_realistic_scale_widget.h
     include/surface_tile_temperature_calculator.h
@@ -125,6 +127,7 @@ add_executable(solar_constant
     src/solar_calculator.cpp
     src/solar_display.cpp
     src/height_color_scale.cpp
+    src/precipitation_color_scale.cpp
     src/heightmap_storage.cpp
     src/surface_map_widget.cpp
     src/surface_map_interpolator.cpp
@@ -148,6 +151,7 @@ add_executable(solar_constant
     src/surface_height_scale_widget.cpp
     src/surface_wind_scale_widget.cpp
     src/surface_pressure_scale_widget.cpp
+    src/surface_precipitation_scale_widget.cpp
     src/surface_atmosphere_coupler.cpp
     src/surface_realistic_color.cpp
     src/surface_realistic_scale_widget.cpp

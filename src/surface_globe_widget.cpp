@@ -12,6 +12,7 @@
 #include <QtMath>
 
 #include "height_color_scale.h"
+#include "precipitation_color_scale.h"
 #include "star_color.h"
 #include "surface_realistic_color.h"
 #include "temperature_color_scale.h"
@@ -149,6 +150,8 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
         double maxWind = minWind;
         double minPressure = grid_->points().first().pressureAtm;
         double maxPressure = minPressure;
+        double minPrecipitation = grid_->points().first().precipitationKgPerM2;
+        double maxPrecipitation = minPrecipitation;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
@@ -158,6 +161,8 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
             maxWind = qMax(maxWind, point.windSpeedMps);
             minPressure = qMin(minPressure, point.pressureAtm);
             maxPressure = qMax(maxPressure, point.pressureAtm);
+            minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
+            maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
         }
         minTemperatureK_ = minTemp;
         maxTemperatureK_ = maxTemp;
@@ -167,6 +172,8 @@ void SurfaceGlobeWidget::setGrid(const PlanetSurfaceGrid *grid) {
         maxWindSpeedMps_ = maxWind;
         minPressureAtm_ = minPressure;
         maxPressureAtm_ = maxPressure;
+        minPrecipitationKgPerM2_ = minPrecipitation;
+        maxPrecipitationKgPerM2_ = maxPrecipitation;
     }
     update();
 }
@@ -194,6 +201,12 @@ void SurfaceGlobeWidget::setWindRange(double minMps, double maxMps) {
 void SurfaceGlobeWidget::setPressureRange(double minAtm, double maxAtm) {
     minPressureAtm_ = minAtm;
     maxPressureAtm_ = maxAtm;
+    update();
+}
+
+void SurfaceGlobeWidget::setPrecipitationRange(double minKgPerM2, double maxKgPerM2) {
+    minPrecipitationKgPerM2_ = minKgPerM2;
+    maxPrecipitationKgPerM2_ = maxKgPerM2;
     update();
 }
 
@@ -397,6 +410,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             globePoint.color = heightToColor(point.heightKm);
         } else if (mapMode_ == SurfaceMapMode::Pressure) {
             globePoint.color = pressureToColor(point.pressureAtm);
+        } else if (mapMode_ == SurfaceMapMode::Precipitation) {
+            globePoint.color = precipitationToColor(point.precipitationKgPerM2);
         } else if (mapMode_ == SurfaceMapMode::Realistic) {
             const QColor baseColor =
                 realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -467,6 +482,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
                 cellDraw.color = heightToColor(cellPoint.heightKm);
             } else if (mapMode_ == SurfaceMapMode::Pressure) {
                 cellDraw.color = pressureToColor(cellPoint.pressureAtm);
+            } else if (mapMode_ == SurfaceMapMode::Precipitation) {
+                cellDraw.color = precipitationToColor(cellPoint.precipitationKgPerM2);
             } else if (mapMode_ == SurfaceMapMode::Realistic) {
                 const QColor baseColor =
                     realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_);
@@ -602,6 +619,17 @@ QColor SurfaceGlobeWidget::pressureToColor(double pressureAtm) const {
                                 (maxPressureAtm_ - minPressureAtm_),
                             1.0);
     return temperatureColorForRatio(t);
+}
+
+QColor SurfaceGlobeWidget::precipitationToColor(double precipitationKgPerM2) const {
+    if (qFuzzyCompare(minPrecipitationKgPerM2_, maxPrecipitationKgPerM2_)) {
+        return precipitationColorForRatio(0.5);
+    }
+    const double t = qBound(0.0,
+                            (precipitationKgPerM2 - minPrecipitationKgPerM2_) /
+                                (maxPrecipitationKgPerM2_ - minPrecipitationKgPerM2_),
+                            1.0);
+    return precipitationColorForRatio(t);
 }
 
 QColor SurfaceGlobeWidget::applyLighting(const QColor &baseColor, double lightFactor) const {
