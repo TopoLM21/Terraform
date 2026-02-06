@@ -228,7 +228,7 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         }
         // Вертикальное перемешивание влаги выполняем сразу после фазового баланса,
         // чтобы распределить пар/капли/лёд по слоям до радиации и следующего переноса.
-        verticalMoistureMixingSolver_.mix(column, timeStepSeconds_);
+        verticalMoistureMixingSolver_.mix(column, timeStepSeconds_, minTopPressureAtm);
 
         const double condensationAlbedo =
             evaporationModel_.cloudAlbedoFromCondensation(column);

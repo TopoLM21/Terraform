@@ -25,7 +25,9 @@ double VerticalMoistureMixingSolver::mixingCoefficient() const {
     return mixingCoefficientKz_;
 }
 
-void VerticalMoistureMixingSolver::mix(AtmosphericColumn &column, double dtSeconds) const {
+void VerticalMoistureMixingSolver::mix(AtmosphericColumn &column,
+                                       double dtSeconds,
+                                       double minTopPressureAtm) const {
     if (dtSeconds <= 0.0 || mixingCoefficientKz_ <= 0.0) {
         return;
     }
@@ -95,6 +97,21 @@ void VerticalMoistureMixingSolver::mix(AtmosphericColumn &column, double dtSecon
             fluxVapor[i] = -mixingCoefficientKz_ * (vapor.at(i + 1) - vapor.at(i)) / dz;
             fluxLiquid[i] = -mixingCoefficientKz_ * (liquid.at(i + 1) - liquid.at(i)) / dz;
             fluxIce[i] = -mixingCoefficientKz_ * (ice.at(i + 1) - ice.at(i)) / dz;
+        }
+
+        if (minTopPressureAtm > 0.0 && interfaceCount > 0) {
+            const double topPressureAtm = layers.last().pressureAtm();
+            // Верхняя граница: не даём влаге уходить в разрежённые слои,
+            // чтобы предотвратить неограниченный вынос влаги из модели.
+            if (topPressureAtm > 0.0) {
+                const double transitionScale = qMax(minTopPressureAtm, 1.0e-6);
+                const double filter =
+                    qBound(0.0, (topPressureAtm - minTopPressureAtm) / transitionScale, 1.0);
+                const int topInterface = interfaceCount - 1;
+                fluxVapor[topInterface] *= filter;
+                fluxLiquid[topInterface] *= filter;
+                fluxIce[topInterface] *= filter;
+            }
         }
 
         for (int k = 0; k < layerCount; ++k) {
