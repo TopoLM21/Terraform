@@ -14,6 +14,7 @@
 #include "surface_atmosphere_coupler.h"
 #include "surface_temperature_scale_widget.h"
 #include "surface_height_scale_widget.h"
+#include "surface_precipitation_scale_widget.h"
 #include "surface_heightmap.h"
 #include "surface_wind_scale_widget.h"
 #include "surface_pressure_scale_widget.h"
@@ -849,6 +850,9 @@ struct SurfaceGridComputationResult {
     bool hasPressureRange = false;
     double minPressureAtm = 0.0;
     double maxPressureAtm = 0.0;
+    bool hasPrecipitationRange = false;
+    double minPrecipitationKgPerM2 = 0.0;
+    double maxPrecipitationKgPerM2 = 0.0;
     bool hasWindRange = false;
     double minWindSpeedMps = 0.0;
     double maxWindSpeedMps = 0.0;
@@ -1415,6 +1419,8 @@ public:
                                          static_cast<int>(SurfaceMapMode::Wind));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Давление"),
                                          static_cast<int>(SurfaceMapMode::Pressure));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Осадки"),
+                                         static_cast<int>(SurfaceMapMode::Precipitation));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Реалистичный"),
                                          static_cast<int>(SurfaceMapMode::Realistic));
         subsurfaceLayersSpinBox_ = new QSpinBox(this);
@@ -1468,6 +1474,9 @@ public:
         pressureScaleWidget_ = new SurfacePressureScaleWidget(this);
         pressureScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         pressureScaleWidget_->setMinimumHeight(18);
+        precipitationScaleWidget_ = new SurfacePrecipitationScaleWidget(this);
+        precipitationScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        precipitationScaleWidget_->setMinimumHeight(18);
         realisticScaleWidget_ = new SurfaceRealisticScaleWidget(this);
         realisticScaleWidget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         realisticScaleWidget_->setMinimumHeight(18);
@@ -1476,6 +1485,7 @@ public:
         surfaceLegendScaleStack_->addWidget(heightScaleWidget_);
         surfaceLegendScaleStack_->addWidget(windScaleWidget_);
         surfaceLegendScaleStack_->addWidget(pressureScaleWidget_);
+        surfaceLegendScaleStack_->addWidget(precipitationScaleWidget_);
         surfaceLegendScaleStack_->addWidget(realisticScaleWidget_);
         surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
         auto *surfaceLegendTopLayout = new QHBoxLayout();
@@ -2212,6 +2222,7 @@ private:
     SurfaceHeightScaleWidget *heightScaleWidget_ = nullptr;
     SurfaceWindScaleWidget *windScaleWidget_ = nullptr;
     SurfacePressureScaleWidget *pressureScaleWidget_ = nullptr;
+    SurfacePrecipitationScaleWidget *precipitationScaleWidget_ = nullptr;
     SurfaceRealisticScaleWidget *realisticScaleWidget_ = nullptr;
     QStackedWidget *surfaceLegendScaleStack_ = nullptr;
     SegmentSelectorWidget *segmentSelectorWidget_ = nullptr;
@@ -2253,6 +2264,9 @@ private:
     double surfaceMinPressureAtm_ = 0.0;
     double surfaceMaxPressureAtm_ = 0.0;
     bool hasSurfacePressureRange_ = false;
+    double surfaceMinPrecipitationKgPerM2_ = 0.0;
+    double surfaceMaxPrecipitationKgPerM2_ = 0.0;
+    bool hasSurfacePrecipitationRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
@@ -5079,6 +5093,15 @@ private:
         }
     }
 
+    void applySurfacePrecipitationRangeToViews(double minKgPerM2, double maxKgPerM2) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setPrecipitationRange(minKgPerM2, maxKgPerM2);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setPrecipitationRange(minKgPerM2, maxKgPerM2);
+        }
+    }
+
     void applySurfaceCloudOpacityBoost(double boost) {
         if (surfaceMapWidget_) {
             surfaceMapWidget_->setCloudOpacityBoost(boost);
@@ -5101,6 +5124,9 @@ private:
         } else if (mode == SurfaceMapMode::AirTemperature && hasSurfaceAirTemperatureRange_) {
             applySurfaceTemperatureRangeToViews(surfaceMinAirTemperatureK_,
                                                 surfaceMaxAirTemperatureK_);
+        } else if (mode == SurfaceMapMode::Precipitation && hasSurfacePrecipitationRange_) {
+            applySurfacePrecipitationRangeToViews(surfaceMinPrecipitationKgPerM2_,
+                                                  surfaceMaxPrecipitationKgPerM2_);
         }
         refreshSurfaceLegend();
     }
@@ -5740,6 +5766,8 @@ private:
         // (суточно-усреднённый приток), а локальная инсоляция влияет только на SW-поток внизу.
         double minPressureAtm = std::numeric_limits<double>::max();
         double maxPressureAtm = std::numeric_limits<double>::lowest();
+        double minPrecipitation = std::numeric_limits<double>::max();
+        double maxPrecipitation = std::numeric_limits<double>::lowest();
         const int logPointIndex = qBound(0, input.logPointIndex, result.grid.points().size() - 1);
         for (int i = 0; i < result.grid.points().size(); ++i) {
             if ((i % 64) == 0 && shouldCancel()) {
@@ -5810,6 +5838,8 @@ private:
             point.pressureAtm = qMax(0.0, pressureAtm);
             minPressureAtm = qMin(minPressureAtm, point.pressureAtm);
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
+            minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
+            maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const auto materialIt = input.materialsById.constFind(point.materialId);
@@ -5947,6 +5977,9 @@ private:
         result.hasPressureRange = minPressureAtm <= maxPressureAtm;
         result.minPressureAtm = minPressureAtm;
         result.maxPressureAtm = maxPressureAtm;
+        result.hasPrecipitationRange = minPrecipitation <= maxPrecipitation;
+        result.minPrecipitationKgPerM2 = minPrecipitation;
+        result.maxPrecipitationKgPerM2 = maxPrecipitation;
 
         double meanSurfaceTemperatureKelvin = 0.0;
         int meanSurfaceSamples = 0;
@@ -6119,6 +6152,16 @@ private:
         } else {
             updateSurfacePressureLegend(false, 0.0, 0.0);
         }
+        if (result.hasPrecipitationRange &&
+            result.minPrecipitationKgPerM2 <= result.maxPrecipitationKgPerM2) {
+            applySurfacePrecipitationRangeToViews(result.minPrecipitationKgPerM2,
+                                                  result.maxPrecipitationKgPerM2);
+            updateSurfacePrecipitationLegend(true,
+                                             result.minPrecipitationKgPerM2,
+                                             result.maxPrecipitationKgPerM2);
+        } else {
+            updateSurfacePrecipitationLegend(false, 0.0, 0.0);
+        }
         if (result.hasWindRange && result.minWindSpeedMps <= result.maxWindSpeedMps) {
             applySurfaceWindRangeToViews(result.minWindSpeedMps, result.maxWindSpeedMps);
             updateSurfaceWindLegend(true, result.minWindSpeedMps, result.maxWindSpeedMps);
@@ -6145,6 +6188,7 @@ private:
             updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
+            updateSurfacePrecipitationLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
             resumeSurfaceSimulationAfterGridUpdate();
             return;
@@ -6157,6 +6201,7 @@ private:
             updateSurfaceAirTemperatureLegend(false, 0.0, 0.0);
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
+            updateSurfacePrecipitationLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
             resumeSurfaceSimulationAfterGridUpdate();
             return;
@@ -6713,6 +6758,8 @@ private:
         constexpr double kPressureRelaxFactor = 0.1;
         double minPressureAtm = std::numeric_limits<double>::max();
         double maxPressureAtm = std::numeric_limits<double>::lowest();
+        double minPrecipitation = std::numeric_limits<double>::max();
+        double maxPrecipitation = std::numeric_limits<double>::lowest();
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             const double advectedAtm = advectedPressures.at(i);
@@ -6768,6 +6815,8 @@ private:
             point.pressureAtm = qMax(0.0, relaxedAtm);
             minPressureAtm = qMin(minPressureAtm, point.pressureAtm);
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
+            minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
+            maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point);
@@ -6996,6 +7045,12 @@ private:
         } else {
             updateSurfacePressureLegend(false, 0.0, 0.0);
         }
+        if (minPrecipitation <= maxPrecipitation) {
+            applySurfacePrecipitationRangeToViews(minPrecipitation, maxPrecipitation);
+            updateSurfacePrecipitationLegend(true, minPrecipitation, maxPrecipitation);
+        } else {
+            updateSurfacePrecipitationLegend(false, 0.0, 0.0);
+        }
 
         const bool publishDaily = surfaceTime_.hourIndex + 1 >= solarStepsPerDay;
         updateSurfaceTemperatureAggregation(publishDaily, rotationMode, useAtmosphericModel);
@@ -7045,6 +7100,19 @@ private:
             surfaceMaxPressureAtm_ = maxPressureAtm;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Pressure) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfacePrecipitationLegend(bool hasRange,
+                                          double minPrecipitationKgPerM2,
+                                          double maxPrecipitationKgPerM2) {
+        hasSurfacePrecipitationRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinPrecipitationKgPerM2_ = minPrecipitationKgPerM2;
+            surfaceMaxPrecipitationKgPerM2_ = maxPrecipitationKgPerM2;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::Precipitation) {
             refreshSurfaceLegend();
         }
     }
@@ -7175,33 +7243,63 @@ private:
             return;
         }
 
+        if (surfaceMapMode_ == SurfaceMapMode::Pressure) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(pressureScaleWidget_);
+            }
+            if (!hasSurfacePressureRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (pressureScaleWidget_) {
+                    pressureScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 атм").arg(locale.toString(surfaceMinPressureAtm_, 'f', 3)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 атм").arg(locale.toString(surfaceMaxPressureAtm_, 'f', 3)));
+            if (pressureScaleWidget_) {
+                pressureScaleWidget_->setPressureRange(surfaceMinPressureAtm_,
+                                                       surfaceMaxPressureAtm_);
+            }
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::Precipitation) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(precipitationScaleWidget_);
+            }
+            if (!hasSurfacePrecipitationRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                if (precipitationScaleWidget_) {
+                    precipitationScaleWidget_->clearRange();
+                }
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 кг/м²")
+                    .arg(locale.toString(surfaceMinPrecipitationKgPerM2_, 'f', 3)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 кг/м²")
+                    .arg(locale.toString(surfaceMaxPrecipitationKgPerM2_, 'f', 3)));
+            if (precipitationScaleWidget_) {
+                precipitationScaleWidget_->setPrecipitationRange(
+                    surfaceMinPrecipitationKgPerM2_,
+                    surfaceMaxPrecipitationKgPerM2_);
+            }
+            return;
+        }
+
         if (surfaceMapMode_ == SurfaceMapMode::Realistic) {
             if (surfaceLegendScaleStack_) {
                 surfaceLegendScaleStack_->setCurrentWidget(realisticScaleWidget_);
             }
             surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
             surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
-            return;
-        }
-
-        if (surfaceLegendScaleStack_) {
-            surfaceLegendScaleStack_->setCurrentWidget(pressureScaleWidget_);
-        }
-        if (!hasSurfacePressureRange_) {
-            surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
-            surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
-            if (pressureScaleWidget_) {
-                pressureScaleWidget_->clearRange();
-            }
-            return;
-        }
-
-        surfaceMinTemperatureLabel_->setText(
-            QStringLiteral("Мин: %1 атм").arg(locale.toString(surfaceMinPressureAtm_, 'f', 3)));
-        surfaceMaxTemperatureLabel_->setText(
-            QStringLiteral("Макс: %1 атм").arg(locale.toString(surfaceMaxPressureAtm_, 'f', 3)));
-        if (pressureScaleWidget_) {
-            pressureScaleWidget_->setPressureRange(surfaceMinPressureAtm_, surfaceMaxPressureAtm_);
         }
     }
 

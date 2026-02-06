@@ -10,6 +10,7 @@
 #include <QtMath>
 
 #include "height_color_scale.h"
+#include "precipitation_color_scale.h"
 #include "surface_realistic_color.h"
 #include "temperature_color_scale.h"
 
@@ -209,6 +210,12 @@ void SurfaceMapWidget::setPressureRange(double minAtm, double maxAtm) {
     rebuildImages();
 }
 
+void SurfaceMapWidget::setPrecipitationRange(double minKgPerM2, double maxKgPerM2) {
+    minPrecipitationKgPerM2_ = minKgPerM2;
+    maxPrecipitationKgPerM2_ = maxKgPerM2;
+    rebuildImages();
+}
+
 void SurfaceMapWidget::setInterpolationEnabled(bool enabled) {
     if (interpolationEnabled_ == enabled) {
         return;
@@ -312,6 +319,8 @@ void SurfaceMapWidget::rebuildImages() {
         double maxWind = minWind;
         double minPressure = grid_->points().first().pressureAtm;
         double maxPressure = minPressure;
+        double minPrecipitation = grid_->points().first().precipitationKgPerM2;
+        double maxPrecipitation = minPrecipitation;
         for (const auto &point : grid_->points()) {
             minTemp = qMin(minTemp, point.temperatureK);
             maxTemp = qMax(maxTemp, point.temperatureK);
@@ -321,6 +330,8 @@ void SurfaceMapWidget::rebuildImages() {
             maxWind = qMax(maxWind, point.windSpeedMps);
             minPressure = qMin(minPressure, point.pressureAtm);
             maxPressure = qMax(maxPressure, point.pressureAtm);
+            minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
+            maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
         }
         if (minTemp != maxTemp) {
             minTemperatureK_ = minTemp;
@@ -332,6 +343,8 @@ void SurfaceMapWidget::rebuildImages() {
         maxWindSpeedMps_ = maxWind;
         minPressureAtm_ = minPressure;
         maxPressureAtm_ = maxPressure;
+        minPrecipitationKgPerM2_ = minPrecipitation;
+        maxPrecipitationKgPerM2_ = maxPrecipitation;
     }
 
     const double baseRadius = pointRadiusPx(grid_->pointCount(), size());
@@ -411,6 +424,8 @@ void SurfaceMapWidget::rebuildImages() {
                             sample = points[pointIndex].heightKm;
                         } else if (mapMode_ == SurfaceMapMode::Pressure) {
                             sample = points[pointIndex].pressureAtm;
+                        } else if (mapMode_ == SurfaceMapMode::Precipitation) {
+                            sample = points[pointIndex].precipitationKgPerM2;
                         } else {
                             sample = points[pointIndex].windSpeedMps;
                         }
@@ -424,6 +439,8 @@ void SurfaceMapWidget::rebuildImages() {
                         scanLine[x] = heightToColor(value);
                     } else if (mapMode_ == SurfaceMapMode::Pressure) {
                         scanLine[x] = pressureToColor(value);
+                    } else if (mapMode_ == SurfaceMapMode::Precipitation) {
+                        scanLine[x] = precipitationToColor(value);
                     } else {
                         scanLine[x] = windToColor(value);
                     }
@@ -458,6 +475,8 @@ void SurfaceMapWidget::rebuildImages() {
                     color = heightToColor(point.heightKm);
                 } else if (mapMode_ == SurfaceMapMode::Pressure) {
                     color = pressureToColor(point.pressureAtm);
+                } else if (mapMode_ == SurfaceMapMode::Precipitation) {
+                    color = precipitationToColor(point.precipitationKgPerM2);
                 } else if (mapMode_ == SurfaceMapMode::Realistic) {
                     const QColor baseColor =
                         realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -503,6 +522,8 @@ void SurfaceMapWidget::rebuildImages() {
                         color = heightToColor(point.heightKm);
                     } else if (mapMode_ == SurfaceMapMode::Pressure) {
                         color = pressureToColor(point.pressureAtm);
+                    } else if (mapMode_ == SurfaceMapMode::Precipitation) {
+                        color = precipitationToColor(point.precipitationKgPerM2);
                     } else if (mapMode_ == SurfaceMapMode::Realistic) {
                         const QColor baseColor =
                             realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -596,6 +617,17 @@ QRgb SurfaceMapWidget::pressureToColor(double pressureAtm) const {
     return temperatureColorForRatio(t).rgb();
 }
 
+QRgb SurfaceMapWidget::precipitationToColor(double precipitationKgPerM2) const {
+    if (qFuzzyCompare(minPrecipitationKgPerM2_, maxPrecipitationKgPerM2_)) {
+        return precipitationColorForRatio(0.5).rgb();
+    }
+    const double t = qBound(0.0,
+                            (precipitationKgPerM2 - minPrecipitationKgPerM2_) /
+                                (maxPrecipitationKgPerM2_ - minPrecipitationKgPerM2_),
+                            1.0);
+    return precipitationColorForRatio(t).rgb();
+}
+
 int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
     if (!idImage_.rect().contains(pixel)) {
         return -1;
@@ -609,8 +641,8 @@ QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point, int poin
     const double heightAboveSeaLevelKm = point.heightKm - (grid_ ? grid_->seaLevelKm() : 0.0);
     return QStringLiteral("Широта: %1°\nДолгота: %2°\nТемпература поверхности: %3 K\n"
                           "Температура воздуха: %4 K\nВысота над ур. моря: %5 км\nДавление: %6 атм\n"
-                          "Солнечный поток: %7 Вт/м²\nВетер: %8 м/с\n"
-                          "Площадь тайла: %9 км²\nСредняя длина ребра: %10 км")
+                          "Солнечный поток: %7 Вт/м²\nВетер: %8 м/с\nОсадки: %9 кг/м²\n"
+                          "Площадь тайла: %10 км²\nСредняя длина ребра: %11 км")
         .arg(point.latitudeDeg, 0, 'f', 2)
         .arg(point.longitudeDeg, 0, 'f', 2)
         .arg(point.temperatureK, 0, 'f', 2)
@@ -619,6 +651,7 @@ QString SurfaceMapWidget::formatPointTooltip(const SurfacePoint &point, int poin
         .arg(point.pressureAtm, 0, 'f', 3)
         .arg(point.solarFluxWPerM2, 0, 'f', 2)
         .arg(point.windSpeedMps, 0, 'f', 2)
+        .arg(point.precipitationKgPerM2, 0, 'f', 3)
         .arg(areaKm2, 0, 'f', 2)
         .arg(edgeLengthKm, 0, 'f', 2);
 }
