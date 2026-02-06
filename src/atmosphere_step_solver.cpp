@@ -197,6 +197,10 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         // Фазовый баланс влаги обновляем до радиации, чтобы конденсация влияла
         // на альбедо облаков уже в текущем шаге.
+        // Вертикальное перемешивание влаги выполняем перед фазовым балансом,
+        // чтобы конденсация пересчитывалась уже после переноса влаги вверх/вниз.
+        verticalMoistureMixingSolver_.mix(column, timeStepSeconds_, minTopPressureAtm);
+
         const double columnWaterBefore = columnWaterMassKgPerM2(column);
         const double precipitationKgPerM2 =
             evaporationModel_.updateColumnWithPrecipitation(column, timeStepSeconds_);
@@ -226,9 +230,6 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                 point.surfaceMoisture.addPrecipitation(precipitationKgPerM2);
             }
         }
-        // Вертикальное перемешивание влаги выполняем сразу после фазового баланса,
-        // чтобы распределить пар/капли/лёд по слоям до радиации и следующего переноса.
-        verticalMoistureMixingSolver_.mix(column, timeStepSeconds_, minTopPressureAtm);
 
         const double condensationAlbedo =
             evaporationModel_.cloudAlbedoFromCondensation(column);

@@ -72,8 +72,16 @@ double EvaporationModel::updateColumnWithPrecipitation(AtmosphericColumn &column
     double precipitationKgPerM2 = 0.0;
 
     for (auto &layer : layers) {
+        // Упрощение: при необходимости моделируем "подъём" как дополнительное
+        // охлаждение перед фазовым балансом. Это не сохраняет энергию и используется
+        // только для расчёта насыщения/конденсации после вертикального переноса.
+        const double effectiveTemperatureKelvin = qMax(
+            0.0,
+            layer.temperatureKelvin() -
+                qMax(0.0, settings_.adiabaticCoolingDeltaKelvin));
         const double maxVaporKgPerM2 =
-            saturationWaterVaporKgPerM2(layer.temperatureKelvin(), layer.thicknessMeters());
+            saturationWaterVaporKgPerM2(effectiveTemperatureKelvin,
+                                        layer.thicknessMeters());
         const double vaporKgPerM2 = qMax(0.0, layer.waterVaporKgPerM2());
         const double liquidKgPerM2 = qMax(0.0, layer.liquidWaterKgPerM2());
         const double iceKgPerM2 = qMax(0.0, layer.iceWaterKgPerM2());
@@ -95,7 +103,7 @@ double EvaporationModel::updateColumnWithPrecipitation(AtmosphericColumn &column
         const double updatedCondensateKgPerM2 =
             qMax(0.0, totalWaterKgPerM2 - updatedVaporKgPerM2);
         const double iceFraction =
-            iceFractionFromTemperature(layer.temperatureKelvin(),
+            iceFractionFromTemperature(effectiveTemperatureKelvin,
                                        settings_.freezingTemperatureKelvin,
                                        settings_.freezingRangeKelvin);
         double updatedIceKgPerM2 = updatedCondensateKgPerM2 * iceFraction;
