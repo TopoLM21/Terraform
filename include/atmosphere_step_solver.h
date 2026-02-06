@@ -10,6 +10,7 @@
 #include "planet_surface_grid.h"
 #include "surface/VegetationModel.h"
 #include "vertical_wind_mixing_solver.h"
+#include "vertical_moisture_mixing_solver.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QVector>
@@ -26,6 +27,7 @@ public:
         double cloudShortwaveTransmission = 1.0;
         double heatTransferCoefficientWPerM2K = 0.0;
         double verticalWindMixingCoefficientKz = 1.0;
+        double verticalMoistureMixingCoefficientKz = 1.0;
         int logPointIndex = 0;
     };
 
@@ -49,6 +51,7 @@ private:
     AtmosphericDynamicsSolver dynamicsSolver_;
     AtmosphericAdvectionSolver advectionSolver_;
     VerticalWindMixingSolver verticalWindMixingSolver_;
+    VerticalMoistureMixingSolver verticalMoistureMixingSolver_;
     EvaporationModel evaporationModel_;
     VegetationModel vegetationModel_;
     double co2Share_ = 0.0;
