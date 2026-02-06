@@ -9,7 +9,7 @@ public:
     void setMixingCoefficient(double mixingCoefficientKz);
     double mixingCoefficient() const;
 
-    void mix(AtmosphericColumn &column, double dtSeconds) const;
+    void mix(AtmosphericColumn &column, double dtSeconds, double minTopPressureAtm) const;
 
 private:
     double mixingCoefficientKz_ = 1.0;
