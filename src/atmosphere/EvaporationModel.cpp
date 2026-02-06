@@ -146,21 +146,38 @@ double EvaporationModel::cloudAlbedoFromCondensation(const AtmosphericColumn &co
         return 0.0;
     }
 
-    double totalCondensedWaterPath = 0.0;
+    double weightedLiquidWaterPath = 0.0;
+    double weightedIceWaterPath = 0.0;
     const auto &layers = column.layers();
     for (const auto &layer : layers) {
-        totalCondensedWaterPath +=
-            qMax(0.0, layer.liquidWaterKgPerM2()) + qMax(0.0, layer.iceWaterKgPerM2());
+        const double liquidKgPerM2 = qMax(0.0, layer.liquidWaterKgPerM2());
+        const double iceKgPerM2 = qMax(0.0, layer.iceWaterKgPerM2());
+        // Упрощение: нижние слои более заметны в отражении из-за пути луча и
+        // перекрытия, поэтому даём им больший вес по высоте.
+        const double heightMeters = qMax(0.0, layer.heightMeters());
+        const double heightWeight = 1.0 / (1.0 + heightMeters / 2000.0);
+        weightedLiquidWaterPath += liquidKgPerM2 * heightWeight;
+        weightedIceWaterPath += iceKgPerM2 * heightWeight;
     }
 
-    if (totalCondensedWaterPath <= 0.0) {
+    if (weightedLiquidWaterPath + weightedIceWaterPath <= 0.0) {
         return 0.0;
     }
 
-    // Альбедо облаков растёт по экспоненте от массы конденсата (LWP+IWP),
-    // игнорируя различия в микрофизике — это упрощение для визуализации.
-    const double albedo = settings_.maxCloudAlbedo *
-        (1.0 - std::exp(-totalCondensedWaterPath / settings_.cloudAlbedoScaleKgPerM2));
+    // Физические допущения:
+    // 1) Жидкая вода эффективнее рассеивает коротковолновое излучение, чем лёд,
+    //    поэтому разделяем LWP/IWP с разными весами.
+    // 2) Видимая "оптическая толщина" уменьшается с высотой, т.к. нижние слои
+    //    чаще перекрывают верхние и дают больший вклад в отражение.
+    // Параметризация: albedo = Amax * (1 - exp(-tau_eff)),
+    // где tau_eff — безразмерная эффективная оптическая толщина.
+    const double liquidWeight = 1.0;
+    const double iceWeight = 0.6;
+    const double tauEff = (liquidWeight * weightedLiquidWaterPath +
+                           iceWeight * weightedIceWaterPath) /
+        settings_.cloudAlbedoScaleKgPerM2;
+    const double albedo =
+        settings_.maxCloudAlbedo * (1.0 - std::exp(-qMax(0.0, tauEff)));
     return qBound(0.0, albedo, settings_.maxCloudAlbedo);
 }
 
