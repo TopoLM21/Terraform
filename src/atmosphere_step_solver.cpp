@@ -156,6 +156,7 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         return;
     }
     verticalWindMixingSolver_.setMixingCoefficient(input.verticalWindMixingCoefficientKz);
+    verticalMoistureMixingSolver_.setMixingCoefficient(input.verticalMoistureMixingCoefficientKz);
     int logPointIndex = input.logPointIndex;
     if (logPointIndex < 0 || logPointIndex >= processedCount) {
         // Если индекс не задан, пишем лог для первой ячейки: так проще сравнивать шаги.
@@ -225,6 +226,10 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                 point.surfaceMoisture.addPrecipitation(precipitationKgPerM2);
             }
         }
+        // Вертикальное перемешивание влаги выполняем сразу после фазового баланса,
+        // чтобы распределить пар/капли/лёд по слоям до радиации и следующего переноса.
+        verticalMoistureMixingSolver_.mix(column, timeStepSeconds_);
+
         const double condensationAlbedo =
             evaporationModel_.cloudAlbedoFromCondensation(column);
         // Используем индикатор конденсации как визуальную непрозрачность облаков.
