@@ -20,6 +20,8 @@ constexpr double kEvaporationTransferVelocityMps = 1.0e-4;
 constexpr double kEvaporationTempMinK = 260.0;
 constexpr double kEvaporationTempRangeK = 20.0;
 constexpr double kWaterMassTolerance = 1.0e-6;
+// Время сглаживания для интенсивности осадков (EMA) в секундах.
+constexpr double kPrecipitationEmaTimeSeconds = 3600.0;
 
 double potentialEvaporationKgPerM2(const SurfacePointState &surface,
                                    const AtmosphericLayerState &layer,
@@ -216,7 +218,15 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                 << "after=" << columnWaterAfter
                 << "delta=" << massDelta;
         }
-        point.precipitationKgPerM2 += precipitationKgPerM2;
+        point.precipitationRateKgPerM2 = precipitationKgPerM2;
+        const double precipitationAlpha =
+            (timeStepSeconds_ > 0.0 && kPrecipitationEmaTimeSeconds > 0.0)
+                ? (1.0 - std::exp(-timeStepSeconds_ / kPrecipitationEmaTimeSeconds))
+                : 1.0;
+        // Храним EMA интенсивности осадков (кг/м² за интервал), а не интеграл по времени.
+        point.precipitationKgPerM2 =
+            (1.0 - precipitationAlpha) * point.precipitationKgPerM2 +
+            precipitationAlpha * precipitationKgPerM2;
         if (precipitationKgPerM2 > 0.0) {
             const double phaseTemperatureK =
                 (point.temperatureK > 0.0) ? point.temperatureK : point.airTemperatureK;

@@ -27,7 +27,9 @@ struct SurfacePoint {
     double longwaveDownWPerM2 = 0.0;
     double surfaceAirFluxWPerM2 = 0.0;
     double subsurfaceFluxWPerM2 = 0.0;
-    // Осадки и накопленная вода на поверхности, кг/м².
+    // Осадки за шаг моделирования, кг/м² за текущий интервал времени.
+    double precipitationRateKgPerM2 = 0.0;
+    // Сглаженная (EMA) интенсивность осадков, кг/м² за интервал; это не интеграл за всё время.
     double precipitationKgPerM2 = 0.0;
     // Запас снега/льда на суше, кг/м² (водный эквивалент).
     double snowKgPerM2 = 0.0;
