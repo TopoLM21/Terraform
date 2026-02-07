@@ -24,6 +24,7 @@
 #include "surface_advection_model.h"
 #include "surface_pressure_transport_model.h"
 #include "atmosphere_step_solver.h"
+#include "surface/VegetationModel.h"
 #include "wind_field_model.h"
 #include "rotation_period_utils.h"
 #include "surface/SnowModel.h"
@@ -1383,10 +1384,13 @@ public:
                     selectedSurfacePointIndex_ = pointIndex;
                     const double tileAreaKm2 = surfaceGrid_.tileAreaKm2(pointIndex);
                     const double tileEdgeLengthKm = surfaceGrid_.tileEdgeLengthKm(pointIndex);
+                    const double maxBiomassKgPerM2 =
+                        VegetationModel::Settings().maxBiomassKgPerM2;
                     surfacePointStatusDialog_->setPoint(*point,
                                                         surfaceGrid_.seaLevelKm(),
                                                         tileAreaKm2,
-                                                        tileEdgeLengthKm);
+                                                        tileEdgeLengthKm,
+                                                        maxBiomassKgPerM2);
                     surfacePointStatusDialog_->show();
                     surfacePointStatusDialog_->raise();
                     surfacePointStatusDialog_->activateWindow();
@@ -2886,10 +2890,12 @@ private:
         }
         const double tileAreaKm2 = surfaceGrid_.tileAreaKm2(selectedSurfacePointIndex_);
         const double tileEdgeLengthKm = surfaceGrid_.tileEdgeLengthKm(selectedSurfacePointIndex_);
+        const double maxBiomassKgPerM2 = VegetationModel::Settings().maxBiomassKgPerM2;
         surfacePointStatusDialog_->setPoint(*point,
                                             surfaceGrid_.seaLevelKm(),
                                             tileAreaKm2,
-                                            tileEdgeLengthKm);
+                                            tileEdgeLengthKm,
+                                            maxBiomassKgPerM2);
         const auto &atmosphereGrid = surfaceGrid_.atmosphericGrid();
         const AtmosphericColumn *column = nullptr;
         if (selectedSurfacePointIndex_ >= 0 &&

@@ -17,7 +17,8 @@ public:
     void setPoint(const SurfacePoint &point,
                   double seaLevelKm,
                   double tileAreaKm2,
-                  double tileEdgeLengthKm);
+                  double tileEdgeLengthKm,
+                  double maxBiomassKgPerM2);
     void setAtmosphereProfile(const AtmosphericColumn *column);
     void clearPoint();
     void clearAtmosphereProfile();
@@ -41,6 +42,8 @@ private:
     QLabel *surfaceMoistureFractionValueLabel_ = nullptr;
     QLabel *surfaceMoistureWaterValueLabel_ = nullptr;
     QLabel *surfacePrecipitationValueLabel_ = nullptr;
+    QLabel *vegetationBiomassValueLabel_ = nullptr;
+    QLabel *maxVegetationBiomassValueLabel_ = nullptr;
     QLabel *bottomBoundaryValueLabel_ = nullptr;
     QLabel *bottomTemperatureValueLabel_ = nullptr;
     QLabel *materialValueLabel_ = nullptr;
