@@ -41,6 +41,8 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     surfaceMoistureFractionValueLabel_ = new QLabel(QStringLiteral("—"), this);
     surfaceMoistureWaterValueLabel_ = new QLabel(QStringLiteral("—"), this);
     surfacePrecipitationValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    vegetationBiomassValueLabel_ = new QLabel(QStringLiteral("—"), this);
+    maxVegetationBiomassValueLabel_ = new QLabel(QStringLiteral("—"), this);
     bottomBoundaryValueLabel_ = new QLabel(QStringLiteral("—"), this);
     bottomTemperatureValueLabel_ = new QLabel(QStringLiteral("—"), this);
     materialValueLabel_ = new QLabel(QStringLiteral("—"), this);
@@ -112,6 +114,8 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
     layout->addRow(QStringLiteral("Вода на поверхности (кг/м²):"), surfaceMoistureWaterValueLabel_);
     layout->addRow(QStringLiteral("Осадки (среднее за интервал, кг/м²):"),
                    surfacePrecipitationValueLabel_);
+    layout->addRow(QStringLiteral("Биомасса (кг/м²):"), vegetationBiomassValueLabel_);
+    layout->addRow(QStringLiteral("Макс. биомасса (кг/м²):"), maxVegetationBiomassValueLabel_);
     const QString bottomBoundaryTooltip = QStringLiteral(
         "Фиксированная температура задаёт «глубинный резервуар», который может "
         "подогревать профиль.");
@@ -132,7 +136,8 @@ SurfacePointStatusDialog::SurfacePointStatusDialog(QWidget *parent)
 void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
                                         double seaLevelKm,
                                         double tileAreaKm2,
-                                        double tileEdgeLengthKm) {
+                                        double tileEdgeLengthKm,
+                                        double maxBiomassKgPerM2) {
     latitudeValueLabel_->setText(formatNumber(point.latitudeDeg));
     longitudeValueLabel_->setText(formatNumber(point.longitudeDeg));
     temperatureValueLabel_->setText(formatNumber(point.temperatureK));
@@ -156,6 +161,8 @@ void SurfacePointStatusDialog::setPoint(const SurfacePoint &point,
     surfaceMoistureWaterValueLabel_->setText(
         formatNumber(point.surfaceMoisture.waterKgPerM2(), 3));
     surfacePrecipitationValueLabel_->setText(formatNumber(point.precipitationKgPerM2, 3));
+    vegetationBiomassValueLabel_->setText(formatNumber(point.vegetationBiomass, 3));
+    maxVegetationBiomassValueLabel_->setText(formatNumber(maxBiomassKgPerM2, 3));
     materialValueLabel_->setText(point.materialId.isEmpty() ? QStringLiteral("—") : point.materialId);
     tileAreaValueLabel_->setText(formatNumber(tileAreaKm2));
     tileEdgeLengthValueLabel_->setText(formatNumber(tileEdgeLengthKm));
@@ -290,6 +297,8 @@ void SurfacePointStatusDialog::clearPoint() {
     surfaceMoistureFractionValueLabel_->setText(QStringLiteral("—"));
     surfaceMoistureWaterValueLabel_->setText(QStringLiteral("—"));
     surfacePrecipitationValueLabel_->setText(QStringLiteral("—"));
+    vegetationBiomassValueLabel_->setText(QStringLiteral("—"));
+    maxVegetationBiomassValueLabel_->setText(QStringLiteral("—"));
     bottomBoundaryValueLabel_->setText(QStringLiteral("—"));
     bottomTemperatureValueLabel_->setText(QStringLiteral("—"));
     materialValueLabel_->setText(QStringLiteral("—"));
