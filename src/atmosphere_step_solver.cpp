@@ -16,15 +16,23 @@ Q_LOGGING_CATEGORY(atmosphereProfileLog, "solar.atmosphere.profile")
 Q_LOGGING_CATEGORY(atmosphereMassLog, "solar.atmosphere.mass")
 
 namespace {
-constexpr double kEvaporationTransferVelocityMps = 1.0e-4;
+// Базовая скорость массообмена для испарения (м/с).
+// Bulk transfer: C_E ≈ 1.5e-3, типичный ветер ~5 м/с → C_E * U ≈ 7.5e-3.
+// Минимальное значение при штиле (~0.5 м/с ветра).
+constexpr double kEvaporationBaseTransferVelocityMps = 7.5e-4;
+// Коэффициент Дальтона (безразмерный): типичный C_E ~ 1.2e-3 для океана.
+constexpr double kDaltonCoefficient = 1.2e-3;
 constexpr double kEvaporationTempMinK = 260.0;
 constexpr double kEvaporationTempRangeK = 20.0;
 constexpr double kWaterMassTolerance = 1.0e-6;
+// Удельная теплота парообразования воды, Дж/кг.
+constexpr double kLatentHeatVaporization = 2.501e6;
 // Время сглаживания для интенсивности осадков (EMA) в секундах.
 constexpr double kPrecipitationEmaTimeSeconds = 3600.0;
 
 double potentialEvaporationKgPerM2(const SurfacePointState &surface,
                                    const AtmosphericLayerState &layer,
+                                   double windSpeedMps,
                                    double dtSeconds) {
     if (dtSeconds <= 0.0) {
         return 0.0;
@@ -51,11 +59,13 @@ double potentialEvaporationKgPerM2(const SurfacePointState &surface,
         ? qMax(0.0, layer.waterVaporKgPerM2()) / layerThickness
         : 0.0;
     const double deficit = qMax(0.0, saturationDensity - vaporDensity);
-    // Упрощённый массообмен: E = C * (rho_sat - rho),
-    // где C — эффективная скорость переноса (м/с),
-    // rho — плотность водяного пара в приземном слое.
-    const double evaporationRateKgPerM2S =
-        kEvaporationTransferVelocityMps * deficit * temperatureFactor;
+    // Bulk aerodynamic formula: E = C_E * U * (rho_sat - rho),
+    // где C_E — коэффициент Дальтона (~1.2e-3), U — скорость ветра.
+    // При штиле используем минимальную базовую скорость переноса.
+    const double effectiveWind = qMax(0.5, std::abs(windSpeedMps));
+    const double transferVelocity =
+        qMax(kEvaporationBaseTransferVelocityMps, kDaltonCoefficient * effectiveWind);
+    const double evaporationRateKgPerM2S = transferVelocity * deficit * temperatureFactor;
     return evaporationRateKgPerM2S * dtSeconds;
 }
 
@@ -187,13 +197,22 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         auto &layers = column.layers();
         if (!layers.isEmpty()) {
             // Испарение из поверхностного слоя: переносим влагу в нижний слой атмосферы.
+            const double windSpeed =
+                std::hypot(layers.first().windUMps(), layers.first().windVMps());
             const double potentialEvaporation =
-                potentialEvaporationKgPerM2(point.state, layers.first(), timeStepSeconds_);
+                potentialEvaporationKgPerM2(point.state, layers.first(),
+                                            windSpeed, timeStepSeconds_);
             const double evaporationKgPerM2 =
                 point.surfaceMoisture.applyEvaporation(potentialEvaporation);
             if (evaporationKgPerM2 > 0.0) {
                 layers[0].setWaterVaporKgPerM2(
                     layers[0].waterVaporKgPerM2() + evaporationKgPerM2);
+                // Испарительное охлаждение поверхности: Q_evap = L_v * E.
+                // Эта энергия уходит из поверхности в скрытую теплоту водяного пара.
+                // На Земле ~80 Вт/м² (глобальное среднее).
+                const double evaporativeCoolingWPerM2 =
+                    kLatentHeatVaporization * evaporationKgPerM2 / qMax(1.0, timeStepSeconds_);
+                point.state.applySurfaceFlux(-evaporativeCoolingWPerM2, timeStepSeconds_);
             }
         }
 
@@ -252,18 +271,35 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         // Поверхность и нижний слой — разные сущности: передаём температуру поверхности явно,
         // чтобы не подменять её температурой слоя и не получать самоподогрев атмосферы.
+        LayeredRadiationSolver::SurfaceRadiativeFluxes surfaceRadFluxes;
         const QVector<double> layerDeltas =
             radiationSolver_.solve(column,
                                    localInsolation,
                                    surfaceAlbedo,
                                    cloudShortwaveTransmission,
-                                   point.state.temperatureKelvin());
+                                   point.state.temperatureKelvin(),
+                                   surfaceRadFluxes);
         const int layerCount = qMin(layers.size(), layerDeltas.size());
         for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
             const double updatedTemperature =
                 qMax(0.0, layers.at(layerIndex).temperatureKelvin() + layerDeltas.at(layerIndex));
             layers[layerIndex].setTemperatureKelvin(updatedTemperature);
         }
+
+        // Применяем радиационный баланс к поверхности:
+        // Net = SW_absorbed + LW_down(backradiation) - ε σ T_surface^4.
+        // Раньше поверхность не получала ни SW от атмосферы, ни backradiation.
+        {
+            const double surfaceNetRadiativeFlux =
+                surfaceRadFluxes.shortwaveAbsorbedWPerM2 +
+                surfaceRadFluxes.longwaveDownWPerM2;
+            point.state.updateTemperature(surfaceNetRadiativeFlux, 0.0, timeStepSeconds_);
+            point.temperatureK = point.state.temperatureKelvin();
+        }
+        // Сохраняем потоки для диагностики.
+        point.shortwaveSurfaceWPerM2 = surfaceRadFluxes.shortwaveAbsorbedWPerM2;
+        point.longwaveDownWPerM2 = surfaceRadFluxes.longwaveDownWPerM2;
+        point.longwaveUpWPerM2 = point.state.surfaceEmittedFlux();
 
         convectiveSolver_.adjust(column);
 

@@ -151,21 +151,13 @@ void SurfaceAtmosphereCoupler::exchangeHeatInternal(SurfacePointState &surface,
                                                                      layerThicknessMeters);
     const double sensibleFluxWPerM2 = sensibleTransfer * (surfaceTemperature - airTemperatureKelvin);
 
-    const double surfaceEmissivity = qBound(0.0, surface.emissivity(), 1.0);
-    const double airEmissivity = qBound(0.0, longwaveEmissivity, 1.0);
-    // Лучистый обмен между поверхностью и нижним слоем:
-    // Q_LW = ε_s * ε_air * σ (T_s^4 - T_air^4).
-    const double longwaveFluxWPerM2 =
-        surfaceEmissivity * airEmissivity * kStefanBoltzmannConstant *
-        (std::pow(surfaceTemperature, 4.0) - std::pow(airTemperatureKelvin, 4.0));
+    // Длинноволновый обмен между поверхностью и атмосферой полностью рассчитывается
+    // в LayeredRadiationSolver (двухпоточная модель Эддингтона). Каплер отвечает
+    // только за турбулентный (сенсибл) теплообмен, чтобы избежать двойного учёта.
+    Q_UNUSED(longwaveEmissivity);
 
-    // Эффективный коэффициент связи для устойчивого явного шага:
-    // h_eff = h_sensible + dQ_LW/dT ≈ h_sensible + 4 σ ε_s ε_air T^3.
-    const double referenceTemperature = qMax(surfaceTemperature, airTemperatureKelvin);
-    const double longwaveDerivative =
-        4.0 * kStefanBoltzmannConstant * surfaceEmissivity * airEmissivity *
-        std::pow(referenceTemperature, 3.0);
-    const double effectiveTransfer = sensibleTransfer + qMax(0.0, longwaveDerivative);
+    // Коэффициент связи для устойчивого явного шага: только сенсибл.
+    const double effectiveTransfer = sensibleTransfer;
 
     const double maxStableDt = (effectiveTransfer > 0.0)
         ? 0.5 * qMin(surfaceHeatCapacity / effectiveTransfer,
@@ -174,8 +166,9 @@ void SurfaceAtmosphereCoupler::exchangeHeatInternal(SurfacePointState &surface,
     const double stableDt = qMin(dtSeconds, maxStableDt);
 
     // Итоговый поток (W/м²) считаем положительным при переносе энергии
-    // от поверхности к воздуху.
-    const double totalFluxWPerM2 = sensibleFluxWPerM2 + longwaveFluxWPerM2;
+    // от поверхности к воздуху. Только сенсибл — LW обрабатывается в
+    // радиационном солвере.
+    const double totalFluxWPerM2 = sensibleFluxWPerM2;
     const double airDelta = totalFluxWPerM2 * stableDt / airHeatCapacityJPerM2K;
 
     surface.applySurfaceFlux(-totalFluxWPerM2, stableDt);

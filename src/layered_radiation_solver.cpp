@@ -29,9 +29,21 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
                                               double albedo,
                                               double cloudShortwaveTransmission,
                                               double surfaceTemperatureKelvin) const {
+    SurfaceRadiativeFluxes unused;
+    return solve(column, insolationWPerM2, albedo, cloudShortwaveTransmission,
+                 surfaceTemperatureKelvin, unused);
+}
+
+QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
+                                              double insolationWPerM2,
+                                              double albedo,
+                                              double cloudShortwaveTransmission,
+                                              double surfaceTemperatureKelvin,
+                                              SurfaceRadiativeFluxes &surfaceFluxes) const {
     const auto &layers = column.layers();
     QVector<double> temperatureDeltas;
     temperatureDeltas.fill(0.0, layers.size());
+    surfaceFluxes = {};
 
     if (layers.isEmpty() || timeStepSeconds_ <= 0.0) {
         return temperatureDeltas;
@@ -53,9 +65,8 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
         shortwaveFlux = transmitted;
     }
 
-    // Поток у поверхности после атмосферы (можно использовать для связки с поверхностью).
-    const double surfaceShortwaveFlux = shortwaveFlux * (1.0 - surfaceAlbedo);
-    Q_UNUSED(surfaceShortwaveFlux);
+    // Поток у поверхности после прохождения атмосферы: SW_surface = SW_bottom * (1 - albedo).
+    surfaceFluxes.shortwaveAbsorbedWPerM2 = shortwaveFlux * (1.0 - surfaceAlbedo);
 
     // Длинноволновое излучение: двухпоточная модель Eddington по слоям.
     double surfaceTemperature = surfaceTemperatureKelvin;
@@ -117,6 +128,10 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
             downwardFlux[i] = 0.0;
         }
     }
+
+    // Нисходящий длинноволновый поток от атмосферы к поверхности (atmospheric backradiation).
+    // Это ключевой компонент парникового эффекта: атмосфера переизлучает ИК вниз.
+    surfaceFluxes.longwaveDownWPerM2 = downwardFlux[0];
 
     for (int i = 0; i < layerCount; ++i) {
         const double heatCapacity = layers.at(i).heatCapacityJPerM2K();

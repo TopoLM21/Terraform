@@ -5,6 +5,10 @@
 
 namespace {
 constexpr double kWaterVaporGasConstant = 461.5; // Дж/(кг·К).
+// Удельная теплота парообразования воды, Дж/кг.
+constexpr double kLatentHeatVaporization = 2.501e6;
+// Удельная теплота сублимации льда, Дж/кг.
+constexpr double kLatentHeatSublimation = 2.834e6;
 
 // Линейная интерполяция для плавной релаксации.
 double lerp(double a, double b, double t) {
@@ -127,6 +131,23 @@ double EvaporationModel::updateColumnWithPrecipitation(AtmosphericColumn &column
             updatedLiquidKgPerM2 *= remainingFraction;
             updatedIceKgPerM2 *= remainingFraction;
             precipitationKgPerM2 += layerPrecipitation;
+        }
+
+        // Латентный теплообмен: конденсация (пар→жидкость/лёд) нагревает слой,
+        // испарение конденсата (жидкость/лёд→пар) охлаждает слой.
+        // ΔT = L * Δm_condensed / C, где Δm_condensed = vapor_before - vapor_after > 0 при конденсации.
+        const double condensedMassKgPerM2 = vaporKgPerM2 - updatedVaporKgPerM2;
+        const double heatCapacity = layer.heatCapacityJPerM2K();
+        if (std::abs(condensedMassKgPerM2) > 1.0e-12 && heatCapacity > 0.0) {
+            // Латентная теплота зависит от фазы: жидкость получает L_v, лёд — L_s.
+            const double effectiveLatentHeat =
+                kLatentHeatVaporization * (1.0 - iceFraction) +
+                kLatentHeatSublimation * iceFraction;
+            const double latentHeatingKelvin =
+                effectiveLatentHeat * condensedMassKgPerM2 / heatCapacity;
+            // Ограничиваем шаг для устойчивости (как в радиационном солвере).
+            const double clampedHeating = qBound(-10.0, latentHeatingKelvin, 10.0);
+            layer.setTemperatureKelvin(qMax(0.0, layer.temperatureKelvin() + clampedHeating));
         }
 
         layer.setWaterVaporKgPerM2(updatedVaporKgPerM2);

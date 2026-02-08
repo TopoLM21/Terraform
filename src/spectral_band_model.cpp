@@ -98,10 +98,12 @@ double SpectralBandModel::kappa(const AtmosphereComposition &composition,
             if (band.shortwave != shortwave) {
                 continue;
             }
-            // Суммарная непрозрачность смеси = сумма по газам доли * сумма полос.
-            // Давление используем парциальное, чтобы следовые газы не получали «полное» давление.
+            // Суммарная непрозрачность смеси: κ_total = Σ_gas κ_band(T, P_partial).
+            // Парциальное давление уже учитывает долю газа через pressure broadening:
+            // при малой доле (напр. CO2 400 ppm) P_partial мало → κ мало.
+            // Дополнительное умножение на fraction.share было бы двойным учётом.
             const double partialPressurePa = pressurePa * fraction.share;
-            kappaSum += fraction.share * bandOpacity(band, temperatureKelvin, partialPressurePa);
+            kappaSum += bandOpacity(band, temperatureKelvin, partialPressurePa);
         }
         totalShare += fraction.share;
     }
