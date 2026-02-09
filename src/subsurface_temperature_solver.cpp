@@ -174,7 +174,7 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
         if (bottomBoundary_ == SubsurfaceBottomBoundaryCondition::FixedTemperature) {
             const double distBottom = 0.5 * dz[0];
             const double kInterface = conductivityAtTemperature(
-                layerPropertiesFor(0, 0.5 * (temperatures_[0] + bottomTemperatureKelvin_)),
+                layerPropertiesFor(0, temperatures_[0]),
                 0.5 * (temperatures_[0] + bottomTemperatureKelvin_));
             kBottom = kInterface / qMax(1e-6, distBottom);
         }
@@ -200,11 +200,14 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
         if (i == 0) {
             const double distDown = 0.5 * (dz[0] + dz[1]);
             const double interfaceTemperature = 0.5 * (temperatures_[0] + temperatures_[1]);
+            // Свойства материала (лёд/вода) определяются по фактической температуре
+            // каждого слоя, а не по средней межслойной: иначе при T_avg > 273.15 K
+            // замёрзший слой получит теплопроводность воды вместо льда.
             const double kInterface = 0.5 * (conductivityAtTemperature(
-                                                 layerPropertiesFor(0, interfaceTemperature),
+                                                 layerPropertiesFor(0, temperatures_[0]),
                                                  interfaceTemperature) +
                                              conductivityAtTemperature(
-                                                 layerPropertiesFor(1, interfaceTemperature),
+                                                 layerPropertiesFor(1, temperatures_[1]),
                                                  interfaceTemperature));
             const double kDown = kInterface / qMax(1e-6, distDown);
             a[i] = 0.0;
@@ -218,10 +221,10 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
             const double distUp = 0.5 * (dz[n - 2] + dz[n - 1]);
             const double interfaceTemperature = 0.5 * (temperatures_[n - 2] + temperatures_[n - 1]);
             const double kInterface = 0.5 * (conductivityAtTemperature(
-                                                 layerPropertiesFor(n - 2, interfaceTemperature),
+                                                 layerPropertiesFor(n - 2, temperatures_[n - 2]),
                                                  interfaceTemperature) +
                                              conductivityAtTemperature(
-                                                 layerPropertiesFor(n - 1, interfaceTemperature),
+                                                 layerPropertiesFor(n - 1, temperatures_[n - 1]),
                                                  interfaceTemperature));
             const double kUp = kInterface / qMax(1e-6, distUp);
             double kBottom = 0.0;
@@ -235,7 +238,7 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
                 const double interfaceTemperatureBottom =
                     0.5 * (temperatures_[n - 1] + bottomTemperatureKelvin_);
                 const double kInterfaceBottom =
-                    conductivityAtTemperature(layerPropertiesFor(n - 1, interfaceTemperatureBottom),
+                    conductivityAtTemperature(layerPropertiesFor(n - 1, temperatures_[n - 1]),
                                                interfaceTemperatureBottom);
                 kBottom = kInterfaceBottom / qMax(1e-6, distBottom);
             }
@@ -251,14 +254,14 @@ void SubsurfaceTemperatureSolver::stepImplicit(double netSurfaceFlux, double dtS
         const double upInterfaceTemperature = 0.5 * (temperatures_[i - 1] + temperatures_[i]);
         const double downInterfaceTemperature = 0.5 * (temperatures_[i] + temperatures_[i + 1]);
         const double kUpInterface =
-            0.5 * (conductivityAtTemperature(layerPropertiesFor(i - 1, upInterfaceTemperature),
+            0.5 * (conductivityAtTemperature(layerPropertiesFor(i - 1, temperatures_[i - 1]),
                                              upInterfaceTemperature) +
-                   conductivityAtTemperature(layerPropertiesFor(i, upInterfaceTemperature),
+                   conductivityAtTemperature(layerPropertiesFor(i, temperatures_[i]),
                                              upInterfaceTemperature));
         const double kDownInterface =
-            0.5 * (conductivityAtTemperature(layerPropertiesFor(i, downInterfaceTemperature),
+            0.5 * (conductivityAtTemperature(layerPropertiesFor(i, temperatures_[i]),
                                              downInterfaceTemperature) +
-                   conductivityAtTemperature(layerPropertiesFor(i + 1, downInterfaceTemperature),
+                   conductivityAtTemperature(layerPropertiesFor(i + 1, temperatures_[i + 1]),
                                              downInterfaceTemperature));
         const double kUp = kUpInterface / qMax(1e-6, distUp);
         const double kDown = kDownInterface / qMax(1e-6, distDown);
