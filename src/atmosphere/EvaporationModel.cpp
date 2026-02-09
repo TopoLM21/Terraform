@@ -207,11 +207,20 @@ double EvaporationModel::saturationVaporPressurePa(double temperatureKelvin) {
         return 0.0;
     }
 
+    const double temperatureC = temperatureKelvin - 273.15;
+    if (temperatureC < 0.0) {
+        // Аппроксимация Тетенса для льда: e_si = 610.78 * exp(21.875 * T / (T + 265.5)).
+        // Давление насыщения над льдом ниже, чем над жидкой водой, поэтому при
+        // отрицательных температурах избыточный пар конденсируется/десублимируется
+        // и удаляется осадками, давая физически корректную влажность в сценарии
+        // замёрзшей планеты.
+        const double exponent = 21.875 * temperatureC / (temperatureC + 265.5);
+        return 610.78 * std::exp(exponent);
+    }
     // Аппроксимация Тетенса для воды: e_s = 610.94 * exp(17.625 * T / (T + 243.04)).
     // Формула даёт давление насыщения в зависимости от температуры и описывает,
     // сколько пара может удерживать воздух без конденсации.
     // T в °C, диапазон подходит для тропосферы и визуализации облачности.
-    const double temperatureC = temperatureKelvin - 273.15;
     const double exponent = 17.625 * temperatureC / (temperatureC + 243.04);
     return 610.94 * std::exp(exponent);
 }

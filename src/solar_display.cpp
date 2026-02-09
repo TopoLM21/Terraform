@@ -5695,6 +5695,22 @@ private:
                                   << "minTemperatureKelvin="
                                   << input.stateDefaults.minTemperatureKelvin;
 
+        // Для плотных атмосфер (например, Венера) равновесная температура
+        // недостаточна: t_eff не учитывает парниковый разогрев нижних слоёв.
+        // Поднимаем минимальную температуру тайлов ДО инициализации поверхности,
+        // чтобы грунт и подповерхностный профиль стартовали с реалистичной базой.
+        {
+            const double tMinDense = denseAtmosphereMinTemperatureKelvin(
+                effectiveTemperatureKelvin,
+                localSeaLevelPressureAtm,
+                input.stateDefaults.greenhouseOpacity,
+                co2Share,
+                input.minDenseAtmosphereTemperatureK);
+            if (tMinDense > tileDefaults.minTemperatureKelvin) {
+                tileDefaults.minTemperatureKelvin = tMinDense;
+            }
+        }
+
         SurfaceTileTemperatureCalculator tileCalculator;
         SurfaceTileTemperatureResult tileResult =
             tileCalculator.initializeSurface(result.grid,
