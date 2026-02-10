@@ -196,9 +196,16 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
     // Каждая точка/колонка обрабатывается независимо: испарение, перемешивание
     // влаги, осадки, радиация, конвекция, теплообмен с поверхностью.
     // Все солверы используют const-методы, данные разделены по индексу i.
-    QtConcurrent::blockingMap(indices, [&](int i) {
-        auto &point = input.surfaceGrid.points()[i];
-        AtmosphericColumn &column = input.atmosphereGrid.columns()[i];
+    //
+    // ВАЖНО: QVector использует implicit sharing (copy-on-write).
+    // Неконстантный operator[] вызывает detach(), который НЕ потокобезопасен.
+    // Принудительно отделяем данные ДО параллельной секции через data().
+    SurfacePoint *pointsPtr = input.surfaceGrid.points().data();
+    AtmosphericColumn *columnsPtr = input.atmosphereGrid.columns().data();
+
+    QtConcurrent::blockingMap(indices, [&, pointsPtr, columnsPtr](int i) {
+        auto &point = pointsPtr[i];
+        AtmosphericColumn &column = columnsPtr[i];
         const double localInsolation =
             (i < input.localInsolations.size()) ? input.localInsolations.at(i) : 0.0;
         const SurfaceMaterial &material =
@@ -412,8 +419,10 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
     // ── Фаза 4: вертикальное перемешивание ветра (параллельно) ──────────
     // Каждая колонка обрабатывается независимо, mix() — const-метод.
-    QtConcurrent::blockingMap(indices, [&](int i) {
-        verticalWindMixingSolver_.mix(input.atmosphereGrid.columns()[i], timeStepSeconds_);
+    // Принудительный detach: вектор колонок мог перестроиться в фазе 1.5.
+    AtmosphericColumn *columnsForMixing = input.atmosphereGrid.columns().data();
+    QtConcurrent::blockingMap(indices, [&, columnsForMixing](int i) {
+        verticalWindMixingSolver_.mix(columnsForMixing[i], timeStepSeconds_);
     });
 
     // ── Фаза 5: горизонтальная адвекция ─────────────────────────────────

@@ -205,6 +205,9 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
         const int iterations = qBound(0, smoothingIterations, 3);
         if (iterations > 0 && !neighborIndices_.isEmpty()) {
             QVector<WindVector> smoothed = advected;
+            // Принудительный detach: копирование QVector создаёт implicit sharing,
+            // параллельная запись в smoothed[i] без detach — гонка данных.
+            smoothed.detach();
             for (int iter = 0; iter < iterations; ++iter) {
                 QtConcurrent::blockingMap(pointIndices, [&](int i) {
                     const QVector<int> &neighbors = neighborIndices_.at(i);

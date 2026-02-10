@@ -208,6 +208,10 @@ void AtmosphericDynamicsSolver::updateLayerWinds(const PlanetSurfaceGrid &grid,
         const int iterations = qBound(0, smoothingIterations, 3);
         if (iterations > 0 && !neighborIndices_.isEmpty()) {
             smoothed = nextWinds;
+            // QVector implicit sharing: после копирования оба вектора делят данные.
+            // Параллельная запись в smoothed[i] вызовет detach() из разных потоков —
+            // гонка данных. Принудительно отделяем ДО параллельной секции.
+            smoothed.detach();
             for (int iter = 0; iter < iterations; ++iter) {
                 QtConcurrent::blockingMap(pointIndices, [&](int i) {
                     const QVector<int> &neighbors = neighborIndices_.at(i);
