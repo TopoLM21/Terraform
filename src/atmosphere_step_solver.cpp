@@ -6,11 +6,13 @@
 #include "atmosphere/EvaporationModel.h"
 #include "fluids/PhaseModel.h"
 
+#include <QtConcurrent/QtConcurrentMap>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QString>
 #include <QtCore/QtMath>
 
 #include <cmath>
+#include <numeric>
 
 Q_LOGGING_CATEGORY(atmosphereProfileLog, "solar.atmosphere.profile")
 Q_LOGGING_CATEGORY(atmosphereMassLog, "solar.atmosphere.mass")
@@ -177,10 +179,24 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
     const double minTopPressureAtm = input.atmosphereGrid.minTopPressureAtm();
 
-    // Последовательность шага атмосферы:
-    // (1) радиация по слоям, (2) конвективная коррекция,
-    // (3) обмен с поверхностью, (4) обновление ветра, (5) горизонтальная адвекция.
-    for (int i = 0; i < processedCount; ++i) {
+    // Структура для отложенного изменения числа слоёв в колонке.
+    // Собираем запросы параллельно, применяем последовательно,
+    // чтобы не вызывать updateColumnLayerCountFixedThickness из нескольких потоков.
+    struct LayerResizeRequest {
+        int newLayerCount = 0;
+        double layerThicknessMeters = 0.0;
+    };
+    QVector<LayerResizeRequest> resizeRequests(processedCount);
+
+    // Индексы точек для параллельной обработки.
+    QVector<int> indices(processedCount);
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // ── Фаза 1: поколоночная физика (параллельно) ──────────────────────
+    // Каждая точка/колонка обрабатывается независимо: испарение, перемешивание
+    // влаги, осадки, радиация, конвекция, теплообмен с поверхностью.
+    // Все солверы используют const-методы, данные разделены по индексу i.
+    QtConcurrent::blockingMap(indices, [&](int i) {
         auto &point = input.surfaceGrid.points()[i];
         AtmosphericColumn &column = input.atmosphereGrid.columns()[i];
         const double localInsolation =
@@ -307,7 +323,7 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
         if (layers.isEmpty()) {
             point.airTemperatureK = initialAirTemperature;
-            continue;
+            return;
         }
 
         point.airTemperatureK = layers.first().temperatureKelvin();
@@ -327,6 +343,7 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         updateLayerPressures(point.pressureAtm, layers);
 
+        // Собираем запросы на изменение числа слоёв (применим после параллельной фазы).
         if (minTopPressureAtm > 0.0 && !layers.isEmpty()) {
             const AtmosphericLayerState &topLayer = layers.last();
             const double fixedLayerThicknessMeters = topLayer.thicknessMeters();
@@ -345,49 +362,61 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                         topLayer.pressureAtm() *
                         qExp(-fixedLayerThicknessMeters / scaleHeightMeters);
                     if (nextLayerPressureAtm > minTopPressureAtm) {
-                        input.atmosphereGrid.updateColumnLayerCountFixedThickness(
-                            i,
-                            layers.size() + 1,
-                            fixedLayerThicknessMeters);
+                        resizeRequests[i] = {layers.size() + 1, fixedLayerThicknessMeters};
                     } else if (topLayer.pressureAtm() < minTopPressureAtm &&
                                layers.size() > 1) {
-                        input.atmosphereGrid.updateColumnLayerCountFixedThickness(
-                            i,
-                            layers.size() - 1,
-                            fixedLayerThicknessMeters);
+                        resizeRequests[i] = {layers.size() - 1, fixedLayerThicknessMeters};
                     }
                 }
             }
         }
+    }); // конец параллельной фазы 1
 
-        if (i == logPointIndex) {
-            qCInfo(atmosphereProfileLog) << "Atmosphere profile (layered step)"
-                                         << "index=" << i
-                                         << "layerCount=" << layers.size();
-            for (int layerIndex = 0; layerIndex < layers.size(); ++layerIndex) {
-                const AtmosphericLayerState &layer = layers.at(layerIndex);
-                qCInfo(atmosphereProfileLog) << "Layer"
-                                             << layerIndex
-                                             << "heightKm=" << layer.heightMeters() / 1000.0
-                                             << "temperatureK=" << layer.temperatureKelvin()
-                                             << "pressureAtm=" << layer.pressureAtm();
-            }
+    // ── Фаза 1.5: отложенное обновление числа слоёв (последовательно) ──
+    // updateColumnLayerCountFixedThickness обновляет общий layerCount_,
+    // поэтому вызываем строго последовательно.
+    for (int i = 0; i < processedCount; ++i) {
+        const auto &request = resizeRequests.at(i);
+        if (request.newLayerCount > 0) {
+            input.atmosphereGrid.updateColumnLayerCountFixedThickness(
+                i, request.newLayerCount, request.layerThicknessMeters);
         }
     }
 
-    // Растительность обновляем после теплового шага, чтобы использовать свежие
-    // температуру/влажность/осадки и стабильные соседние значения.
+    // Логирование профиля для выбранной точки.
+    {
+        const auto &logLayers = input.atmosphereGrid.columns()[logPointIndex].layers();
+        qCInfo(atmosphereProfileLog) << "Atmosphere profile (layered step)"
+                                     << "index=" << logPointIndex
+                                     << "layerCount=" << logLayers.size();
+        for (int layerIndex = 0; layerIndex < logLayers.size(); ++layerIndex) {
+            const AtmosphericLayerState &layer = logLayers.at(layerIndex);
+            qCInfo(atmosphereProfileLog) << "Layer"
+                                         << layerIndex
+                                         << "heightKm=" << layer.heightMeters() / 1000.0
+                                         << "temperatureK=" << layer.temperatureKelvin()
+                                         << "pressureAtm=" << layer.pressureAtm();
+        }
+    }
+
+    // ── Фаза 2: растительность (последовательно — диффузия по соседям) ──
     vegetationModel_.update(input.surfaceGrid.points(), timeStepSeconds_, co2Share_);
 
+    // ── Фаза 3: динамика ветра (соседние градиенты) ─────────────────────
     dynamicsSolver_.updateLayerWinds(input.surfaceGrid,
                                     input.atmosphereGrid,
                                     dayLengthSeconds_,
                                     isRetrograde_,
                                     timeStepSeconds_,
                                     1);
-    for (int i = 0; i < processedCount; ++i) {
+
+    // ── Фаза 4: вертикальное перемешивание ветра (параллельно) ──────────
+    // Каждая колонка обрабатывается независимо, mix() — const-метод.
+    QtConcurrent::blockingMap(indices, [&](int i) {
         verticalWindMixingSolver_.mix(input.atmosphereGrid.columns()[i], timeStepSeconds_);
-    }
+    });
+
+    // ── Фаза 5: горизонтальная адвекция ─────────────────────────────────
     advectionSolver_.advectLayerWinds(input.surfaceGrid,
                                       input.atmosphereGrid,
                                       dayLengthSeconds_,

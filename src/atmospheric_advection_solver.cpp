@@ -4,9 +4,11 @@
 #include "atmosphere/EvaporationModel.h"
 
 #include <QVector3D>
+#include <QtConcurrent/QtConcurrentMap>
 #include <QtMath>
 
 #include <cmath>
+#include <numeric>
 
 namespace {
 constexpr int kNeighborCount = 6;
@@ -149,6 +151,9 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
     const QVector<AtmosphericColumn> &columns = atmosphereGrid.columns();
     WindFieldModel windModel;
 
+    QVector<int> pointIndices(pointCount);
+    std::iota(pointIndices.begin(), pointIndices.end(), 0);
+
     for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
         QVector<double> pressuresAtm;
         QVector<double> temperaturesK;
@@ -175,9 +180,10 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
             continue;
         }
 
+        // Полулагранжева адвекция — параллельно по точкам (read-only из wind).
         QVector<WindVector> advected;
         advected.resize(pointCount);
-        for (int i = 0; i < pointCount; ++i) {
+        QtConcurrent::blockingMap(pointIndices, [&](int i) {
             const SurfacePoint &point = grid.points().at(i);
             // Полулагранжева схема для поля скорости:
             // назад по ветру на шаг dt, затем выбираем ближайший тайл в сетке.
@@ -193,17 +199,18 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
                                                       sourceLat,
                                                       sourceLon);
             advected[i] = wind.at(bestIndex);
-        }
+        });
 
+        // Сглаживание — параллельно по точкам (read-only из advected).
         const int iterations = qBound(0, smoothingIterations, 3);
         if (iterations > 0 && !neighborIndices_.isEmpty()) {
             QVector<WindVector> smoothed = advected;
             for (int iter = 0; iter < iterations; ++iter) {
-                for (int i = 0; i < pointCount; ++i) {
+                QtConcurrent::blockingMap(pointIndices, [&](int i) {
                     const QVector<int> &neighbors = neighborIndices_.at(i);
                     if (neighbors.isEmpty()) {
                         smoothed[i] = advected.at(i);
-                        continue;
+                        return;
                     }
                     double sumEast = 0.0;
                     double sumNorth = 0.0;
@@ -218,7 +225,7 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
                     }
                     if (count <= 0) {
                         smoothed[i] = advected.at(i);
-                        continue;
+                        return;
                     }
                     const double avgEast = sumEast / static_cast<double>(count);
                     const double avgNorth = sumNorth / static_cast<double>(count);
@@ -229,7 +236,7 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
                     smoothed[i].northMps =
                         advected.at(i).northMps + kSmoothingFactor * (avgNorth - advected.at(i).northMps);
                     smoothed[i] = clampWind(smoothed[i]);
-                }
+                });
                 advected.swap(smoothed);
             }
         }
@@ -266,6 +273,10 @@ void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &gr
     ensureNeighbors(grid);
 
     const int layerCount = atmosphereGrid.layerCount();
+
+    QVector<int> pointIndices(pointCount);
+    std::iota(pointIndices.begin(), pointIndices.end(), 0);
+
     for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
         QVector<double> vaporAdvected;
         QVector<double> liquidAdvected;
@@ -274,13 +285,14 @@ void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &gr
         liquidAdvected.resize(pointCount);
         iceAdvected.resize(pointCount);
 
-        for (int i = 0; i < pointCount; ++i) {
+        // Полулагранжева адвекция влаги — параллельно по точкам (read-only из columns).
+        QtConcurrent::blockingMap(pointIndices, [&](int i) {
             const auto &layers = atmosphereGrid.columns().at(i).layers();
             if (layerIndex >= layers.size()) {
                 vaporAdvected[i] = 0.0;
                 liquidAdvected[i] = 0.0;
                 iceAdvected[i] = 0.0;
-                continue;
+                return;
             }
 
             const SurfacePoint &point = grid.points().at(i);
@@ -304,14 +316,14 @@ void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &gr
                 vaporAdvected[i] = 0.0;
                 liquidAdvected[i] = 0.0;
                 iceAdvected[i] = 0.0;
-                continue;
+                return;
             }
 
             const AtmosphericLayerState &sourceLayer = sourceLayers.at(layerIndex);
             vaporAdvected[i] = sourceLayer.waterVaporKgPerM2();
             liquidAdvected[i] = sourceLayer.liquidWaterKgPerM2();
             iceAdvected[i] = sourceLayer.iceWaterKgPerM2();
-        }
+        });
 
         for (int i = 0; i < pointCount; ++i) {
             auto &layers = atmosphereGrid.columns()[i].layers();
