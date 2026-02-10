@@ -279,6 +279,15 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         auto &layers = column.layers();
         if (!layers.isEmpty()) {
+            // Океан — неограниченный источник воды для испарения.
+            // Без пополнения surfaceMoisture вода истощается за несколько дней
+            // (ветер уносит влагу → осадки на суше → не возвращается обратно),
+            // и атмосфера высыхает до ~0.3 кг/м² пара независимо от температуры.
+            if (point.materialId == QLatin1String("ocean")) {
+                point.surfaceMoisture.setWaterKgPerM2(
+                    point.surfaceMoisture.settings().maxStorageKgPerM2);
+            }
+
             // Испарение из поверхностного слоя: переносим влагу в нижний слой атмосферы.
             const double windSpeed =
                 std::hypot(layers.first().windUMps(), layers.first().windVMps());

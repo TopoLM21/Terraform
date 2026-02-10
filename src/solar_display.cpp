@@ -157,9 +157,13 @@ double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
         (safePressureAtm >= 0.1 && safePressureAtm <= 2.0) ? mildPressureBoost : rawPressureBoost;
     const double greenhouseBoost = 1.0 + 0.2 * qBound(0.0, greenhouseOpacity, 1.0);
     const double compositionBoost = 1.0 + 0.8 * co2Fraction;
+    // Дополнительный буст для сверхплотных атмосфер (>10 атм): тепловой
+    // перенос через столкновения и уширение линий. Коэффициент 0.1 подобран
+    // так, чтобы для Венеры (92 атм) вычисленный минимум (~685 K) оставался
+    // ниже ручной границы (700 K), позволяя модели сходиться к равновесию.
     const double superDenseBoost =
         (safePressureAtm > 10.0)
-            ? (1.0 + 0.25 * std::log1p(safePressureAtm / 10.0))
+            ? (1.0 + 0.1 * std::log1p(safePressureAtm / 10.0))
             : 1.0;
     double combinedBoost = pressureBoost * greenhouseBoost * compositionBoost;
     // В области ~0.1–2 атм рост парникового эффекта по давлению и составу
