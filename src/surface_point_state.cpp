@@ -19,6 +19,11 @@ constexpr double kIceSpecificHeat = 2100.0;
 constexpr double kWaterThermalConductivity = 0.6;
 constexpr double kWaterDensity = 1000.0;
 constexpr double kWaterSpecificHeat = 4180.0;
+// Эффективная теплопроводность океана: турбулентное перемешивание даёт
+// вихревую диффузию ~1e-4–1e-2 м²/с, что на 2–4 порядка выше молекулярной.
+// k_eff = α_eff * ρ * c ≈ 5e-5 * 1000 * 4180 ≈ 200 Вт/(м·К).
+// Это обеспечивает выравнивание температуры по 2-метровому столбу за ~1 день.
+constexpr double kOceanEffectiveThermalConductivity = 200.0;
 }
 
 SurfacePointState::SurfacePointState(double initialTemperatureKelvin,
@@ -67,7 +72,7 @@ SurfacePointState::SurfacePointState(double initialTemperatureKelvin,
                         kIceSpecificHeat};
                 }
                 return SubsurfaceLayerProperties{
-                    kWaterThermalConductivity,
+                    kOceanEffectiveThermalConductivity,
                     {ThermalConductivityModelType::Constant, kWaterFreezeTemperatureKelvin, 0.0},
                     kWaterDensity,
                     kWaterSpecificHeat};

@@ -82,6 +82,66 @@ double columnWaterMassKgPerM2(const AtmosphericColumn &column) {
     return total;
 }
 
+// Вертикальная турбулентная диффузия температуры между слоями.
+// Дополняет конвективную коррекцию: конвекция исправляет сверхадиабатические
+// градиенты (нижний слой горячее), а диффузия рассасывает устойчивые инверсии
+// (верхний слой горячее). Без этого горячие верхние слои остывают только
+// радиационно, что при малой оптической толщине занимает сотни шагов.
+void applyVerticalTemperatureDiffusion(QVector<AtmosphericLayerState> &layers,
+                                       double kz, double dtSeconds) {
+    const int n = layers.size();
+    if (n < 2 || kz <= 0.0 || dtSeconds <= 0.0) {
+        return;
+    }
+    constexpr double kMinDz = 1.0e-3;
+    constexpr double kMaxCourant = 0.5;
+
+    QVector<double> temps(n);
+    QVector<double> thickness(n);
+    double minDz = 1.0e30;
+    for (int i = 0; i < n; ++i) {
+        temps[i] = layers[i].temperatureKelvin();
+        thickness[i] = qMax(layers[i].thicknessMeters(), kMinDz);
+        minDz = qMin(minDz, thickness[i]);
+    }
+    minDz = qMax(minDz, kMinDz);
+
+    // Ограничение диффузионного числа Куранта: dt <= C * dz^2 / Kz.
+    const double maxStableDt = kMaxCourant * minDz * minDz / kz;
+    if (maxStableDt <= 0.0) {
+        return;
+    }
+
+    const int substeps = qMax(1, static_cast<int>(qCeil(dtSeconds / maxStableDt)));
+    const double stepDt = dtSeconds / static_cast<double>(substeps);
+    const int ifaceCount = n - 1;
+    QVector<double> flux(ifaceCount);
+    QVector<double> nextTemps(n);
+
+    for (int step = 0; step < substeps; ++step) {
+        for (int i = 0; i < ifaceCount; ++i) {
+            const double dz = qMax(0.5 * (thickness[i] + thickness[i + 1]), kMinDz);
+            // Поток температуры на границе слоёв: F = -Kz * dT/dz.
+            flux[i] = -kz * (temps[i + 1] - temps[i]) / dz;
+        }
+
+        for (int k = 0; k < n; ++k) {
+            const double dzLayer = thickness[k];
+            // Нижняя граница: нулевой поток (поверхность обменивается через coupler).
+            const double fluxBelow = (k > 0) ? flux[k - 1] : 0.0;
+            // Верхняя граница: нулевой поток (нет перемешивания через верх атмосферы).
+            const double fluxAbove = (k < ifaceCount) ? flux[k] : 0.0;
+            nextTemps[k] = qMax(0.0, temps[k] + (fluxBelow - fluxAbove) * stepDt / dzLayer);
+        }
+
+        temps.swap(nextTemps);
+    }
+
+    for (int i = 0; i < n; ++i) {
+        layers[i].setTemperatureKelvin(temps[i]);
+    }
+}
+
 double gasShareById(const AtmosphereComposition &composition, const QString &gasId) {
     const auto fractions = composition.fractions();
     for (const auto &fraction : fractions) {
@@ -325,6 +385,12 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         point.longwaveUpWPerM2 = point.state.surfaceEmittedFlux();
 
         convectiveSolver_.adjust(column);
+
+        // Вертикальная диффузия температуры — турбулентное перемешивание сверх
+        // конвективной коррекции: рассасывает устойчивые инверсии (горячий слой
+        // над холодным), которые конвекция не трогает.
+        applyVerticalTemperatureDiffusion(
+            layers, input.verticalMoistureMixingCoefficientKz, timeStepSeconds_);
 
         const double initialAirTemperature =
             (point.airTemperatureK > 0.0) ? point.airTemperatureK : point.temperatureK;
