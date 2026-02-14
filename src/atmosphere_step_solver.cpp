@@ -29,6 +29,12 @@ constexpr double kEvaporationTempRangeK = 20.0;
 constexpr double kWaterMassTolerance = 1.0e-6;
 // Удельная теплота парообразования воды, Дж/кг.
 constexpr double kLatentHeatVaporization = 2.501e6;
+// Массовый коэффициент поглощения водяного пара в длинноволновом (ИК) диапазоне.
+// Типичные значения для полосно-осреднённого H₂O: 0.08–0.3 м²/кг.
+// При 25 кг/м² (средний столбик) даёт τ ≈ 2.5 — реалистичный парниковый эффект.
+constexpr double kH2OMassAbsorptionLw = 0.1;
+// Поглощение H₂O в коротковолновом ближнем ИК (слабее, чем длинноволновое).
+constexpr double kH2OMassAbsorptionSw = 0.01;
 // Время сглаживания для интенсивности осадков (EMA) в секундах.
 constexpr double kPrecipitationEmaTimeSeconds = 3600.0;
 
@@ -279,13 +285,16 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         auto &layers = column.layers();
         if (!layers.isEmpty()) {
-            // Океан — неограниченный источник воды для испарения.
-            // Без пополнения surfaceMoisture вода истощается за несколько дней
-            // (ветер уносит влагу → осадки на суше → не возвращается обратно),
-            // и атмосфера высыхает до ~0.3 кг/м² пара независимо от температуры.
+            // Океан — неограниченный источник воды для испарения, но только
+            // когда поверхность жидкая. Замёрзший океан (лёд) не даёт жидкой
+            // воды: sublimation намного слабее и уже учтена через temperatureFactor.
             if (point.materialId == QLatin1String("ocean")) {
-                point.surfaceMoisture.setWaterKgPerM2(
-                    point.surfaceMoisture.settings().maxStorageKgPerM2);
+                if (point.waterPhase == PhaseModel::Phase::Liquid) {
+                    point.surfaceMoisture.setWaterKgPerM2(
+                        point.surfaceMoisture.settings().maxStorageKgPerM2);
+                } else {
+                    point.surfaceMoisture.setWaterKgPerM2(0.0);
+                }
             }
 
             // Испарение из поверхностного слоя: переносим влагу в нижний слой атмосферы.
@@ -361,6 +370,19 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                    input.cloudShortwaveTransmission * (1.0 - condensationAlbedo),
                    1.0);
 
+        // Динамический парниковый эффект водяного пара: добавляем вклад H₂O
+        // в оптическую толщину каждого слоя перед расчётом радиации.
+        // Базовая τ (от CO₂ и других газов) задана при инициализации сетки,
+        // а H₂O — переменный: больше влаги → сильнее парник → теплее поверхность
+        // → больше испарения → положительная обратная связь, стабилизирующая климат.
+        for (int li = 0; li < layers.size(); ++li) {
+            const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
+            layers[li].setOpticalDepthLongwave(
+                layers.at(li).opticalDepthLongwave() + kH2OMassAbsorptionLw * h2oKg);
+            layers[li].setOpticalDepthShortwave(
+                layers.at(li).opticalDepthShortwave() + kH2OMassAbsorptionSw * h2oKg);
+        }
+
         // Поверхность и нижний слой — разные сущности: передаём температуру поверхности явно,
         // чтобы не подменять её температурой слоя и не получать самоподогрев атмосферы.
         LayeredRadiationSolver::SurfaceRadiativeFluxes surfaceRadFluxes;
@@ -376,6 +398,16 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             const double updatedTemperature =
                 qMax(0.0, layers.at(layerIndex).temperatureKelvin() + layerDeltas.at(layerIndex));
             layers[layerIndex].setTemperatureKelvin(updatedTemperature);
+        }
+
+        // Восстанавливаем базовую оптическую толщину (без H₂O), чтобы
+        // на следующем шаге не накапливать вклад водяного пара повторно.
+        for (int li = 0; li < layers.size(); ++li) {
+            const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
+            layers[li].setOpticalDepthLongwave(
+                layers.at(li).opticalDepthLongwave() - kH2OMassAbsorptionLw * h2oKg);
+            layers[li].setOpticalDepthShortwave(
+                layers.at(li).opticalDepthShortwave() - kH2OMassAbsorptionSw * h2oKg);
         }
 
         // Применяем радиационный баланс к поверхности:
