@@ -141,39 +141,16 @@ double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
                                            double greenhouseOpacity,
                                            double co2Share,
                                            double minDenseAtmosphereTemperatureK) {
-    if (effectiveTemperatureKelvin <= 0.0) {
-        return 0.0;
-    }
-    // t_eff отражает баланс излучения на ВГБ (TOA), но в плотных атмосферах
-    // излучающий слой поднимается вверх, а нижние слои дополнительно греются
-    // из-за оптической толщины, давления и уширения линий (особенно CO₂).
-    // Поэтому для базовой температуры берём повышающую поправку по давлению,
-    // составу и (для сверхплотных атмосфер) отдельный коэффициент.
-    const double safePressureAtm = qMax(0.0, pressureAtm);
-    const double co2Fraction = qBound(0.0, co2Share, 1.0);
-    const double rawPressureBoost = 1.0 + 0.035 * std::log1p(safePressureAtm);
-    const double mildPressureBoost = 1.0 + 0.015 * std::log1p(safePressureAtm);
-    const double pressureBoost =
-        (safePressureAtm >= 0.1 && safePressureAtm <= 2.0) ? mildPressureBoost : rawPressureBoost;
-    const double greenhouseBoost = 1.0 + 0.2 * qBound(0.0, greenhouseOpacity, 1.0);
-    const double compositionBoost = 1.0 + 0.8 * co2Fraction;
-    const double superDenseBoost =
-        (safePressureAtm > 10.0)
-            ? (1.0 + 0.25 * std::log1p(safePressureAtm / 10.0))
-            : 1.0;
-    double combinedBoost = pressureBoost * greenhouseBoost * compositionBoost;
-    // В области ~0.1–2 атм рост парникового эффекта по давлению и составу
-    // уже замедляется: сильное уширение линий не линейно, а часть энергии
-    // «уходит» в более высокие слои. Поэтому ограничиваем суммарный буст,
-    // чтобы «землеподобные» условия стартовали около 280–320 K.
-    if (safePressureAtm >= 0.1 && safePressureAtm <= 2.0) {
-        combinedBoost = qBound(1.0, combinedBoost, 1.4);
-    }
-    double minTemperature = effectiveTemperatureKelvin * combinedBoost * superDenseBoost;
-    if (minDenseAtmosphereTemperatureK > 0.0) {
-        minTemperature = qMax(minTemperature, minDenseAtmosphereTemperatureK);
-    }
-    return minTemperature;
+    Q_UNUSED(effectiveTemperatureKelvin)
+    Q_UNUSED(pressureAtm)
+    Q_UNUSED(greenhouseOpacity)
+    Q_UNUSED(co2Share)
+    Q_UNUSED(minDenseAtmosphereTemperatureK)
+    // Никаких искусственных минимумов: физика (радиация, парниковый эффект,
+    // адвекция) сама определяет равновесную температуру. Это позволяет
+    // свободно охлаждать/нагревать планеты при терраформинге.
+    // Единственный пол — 3 K (реликтовое излучение).
+    return 3.0;
 }
 
 constexpr int kRoleSemiMajorAxis = Qt::UserRole;
@@ -5695,11 +5672,13 @@ private:
                                   << "minTemperatureKelvin="
                                   << input.stateDefaults.minTemperatureKelvin;
 
-        // Для плотных атмосфер (например, Венера) равновесная температура
-        // недостаточна: t_eff не учитывает парниковый разогрев нижних слоёв.
-        // Поднимаем минимальную температуру тайлов ДО инициализации поверхности,
+        // Для планет с явно заданной нижней границей температуры плотной
+        // атмосферы (например, Венера: minDenseAtmosphereTemperatureK = 700 K)
+        // поднимаем минимальную температуру тайлов ДО инициализации поверхности,
         // чтобы грунт и подповерхностный профиль стартовали с реалистичной базой.
-        {
+        // Без этого условия функция denseAtmosphereMinTemperatureKelvin завысит
+        // минимум для всех планет (например, для Марса ~323 K из-за CO₂-буста).
+        if (input.minDenseAtmosphereTemperatureK > 0.0) {
             const double tMinDense = denseAtmosphereMinTemperatureKelvin(
                 effectiveTemperatureKelvin,
                 localSeaLevelPressureAtm,
@@ -6041,12 +6020,17 @@ private:
                                                 : qMax(1.0, input.stateDefaults.minTemperatureKelvin);
         }
         if (meanSurfaceTemperatureKelvin > 0.0) {
+            // Безводные планеты (surfaceWaterGigatons == 0) не имеют источника
+            // водяного пара, поэтому стартовая влажность атмосферы должна быть нулевой.
+            const double atmosphereInitialHumidity =
+                (input.surfaceWaterGigatons > 0.0 && !input.disableWaterAndClouds) ? -1.0 : 0.0;
             result.grid.initializeAtmosphericGrid(input.atmosphere,
                                                   input.massEarths,
                                                   baseTemperatureKelvin,
                                                   0,
                                                   input.minBottomLayerThicknessMeters,
-                                                  input.minTopPressureAtm);
+                                                  input.minTopPressureAtm,
+                                                  atmosphereInitialHumidity);
         }
 
         if (shouldCancel()) {
@@ -6409,12 +6393,17 @@ private:
                                                     minDenseAtmosphereTemperatureK);
             baseTemperatureKelvin = qMax(baseTemperatureKelvin, denseAtmosphereBase);
         }
-        surfaceGrid_.initializeAtmosphericGrid(atmosphere,
-                                               massEarths,
-                                               baseTemperatureKelvin,
-                                               0,
-                                               currentAtmosphereBottomLayerThicknessMeters(),
-                                               currentMinTopPressureAtm());
+        {
+            const double atmosphereInitialHumidity =
+                (surfaceWaterGigatons > 0.0 && !disableWaterAndClouds) ? -1.0 : 0.0;
+            surfaceGrid_.initializeAtmosphericGrid(atmosphere,
+                                                   massEarths,
+                                                   baseTemperatureKelvin,
+                                                   0,
+                                                   currentAtmosphereBottomLayerThicknessMeters(),
+                                                   currentMinTopPressureAtm(),
+                                                   atmosphereInitialHumidity);
+        }
 
         input.grid = surfaceGrid_;
         input.atmosphere = atmosphere;

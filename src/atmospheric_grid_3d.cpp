@@ -124,7 +124,8 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
                                   int columnCount,
                                   int layerCount,
                                   double minBottomLayerThicknessMeters,
-                                  double minTopPressureAtm) {
+                                  double minTopPressureAtm,
+                                  double initialRelativeHumidity) {
     minTopPressureAtm_ = minTopPressureAtm;
     // Сохраняем фактический минимум толщины нижнего слоя, чтобы повторять
     // «уплотнённую» геометрию при пересборке сетки.
@@ -197,7 +198,12 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
     }
 
     EvaporationModel evaporationModel;
-    const double baseRelativeHumidity = evaporationModel.settings().baseRelativeHumidity;
+    // initialRelativeHumidity < 0 означает «использовать значение модели по умолчанию».
+    // Для безводных планет (Венера, Марс) вызывающий код передаёт 0.0,
+    // чтобы не создавать водяной пар в атмосфере без источника воды.
+    const double baseRelativeHumidity =
+        (initialRelativeHumidity >= 0.0) ? initialRelativeHumidity
+                                         : evaporationModel.settings().baseRelativeHumidity;
     for (auto &column : columns_) {
         column.resize(resolvedLayerCount);
         auto &layers = column.layers();

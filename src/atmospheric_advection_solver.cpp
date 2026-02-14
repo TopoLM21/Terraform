@@ -4,9 +4,11 @@
 #include "atmosphere/EvaporationModel.h"
 
 #include <QVector3D>
+#include <QtConcurrent/QtConcurrentMap>
 #include <QtMath>
 
 #include <cmath>
+#include <numeric>
 
 namespace {
 constexpr int kNeighborCount = 6;
@@ -85,42 +87,87 @@ WindVector clampWind(const WindVector &wind) {
     return {wind.eastMps * scale, wind.northMps * scale};
 }
 
-int findBestSourceIndex(const PlanetSurfaceGrid &grid,
-                        const QVector<QVector<int>> &neighborIndices,
-                        int pointIndex,
-                        double sourceLat,
-                        double sourceLon) {
+// Минимальное расстояние (в cos-дополнении) для избежания деления на ноль при IDW.
+constexpr double kMinAngularDistance = 1.0e-12;
+// Показатель степени для обратно-взвешенной интерполяции (IDW).
+// p=2 — стандартный выбор Шепарда, хороший баланс гладкости и локальности.
+constexpr double kIdwPower = 2.0;
+
+struct InterpolationEntry {
+    int index;
+    double weight;
+};
+
+// Обратно-взвешенная интерполяция (IDW) по ближайшим соседям.
+// Возвращает массив (индекс, вес) для точки-источника (sourceLat, sourceLon).
+// Веса нормированы (сумма = 1). Если источник совпадает с узлом сетки,
+// возвращается единственный элемент с весом 1.
+QVector<InterpolationEntry> interpolationWeights(
+    const PlanetSurfaceGrid &grid,
+    const QVector<QVector<int>> &neighborIndices,
+    int pointIndex,
+    double sourceLat,
+    double sourceLon) {
     const int pointCount = grid.pointCount();
     const double sinSource = qSin(sourceLat);
     const double cosSource = qCos(sourceLat);
-    const QVector<int> &neighbors =
-        (pointIndex < neighborIndices.size()) ? neighborIndices.at(pointIndex) : QVector<int>();
-    int bestIndex = pointIndex;
-    double bestCos = -1.0;
-    for (const int neighborIndex : neighbors) {
-        if (neighborIndex < 0 || neighborIndex >= pointCount) {
-            continue;
-        }
-        const SurfacePoint &candidate = grid.points().at(neighborIndex);
-        const double cosDistance = sinSource * candidate.sinLatitude +
-            cosSource * candidate.cosLatitude *
-            qCos(sourceLon - candidate.longitudeRadians);
-        if (cosDistance > bestCos) {
-            bestCos = cosDistance;
-            bestIndex = neighborIndex;
-        }
-    }
+
+    // Собираем кандидатов: текущая точка + её соседи.
+    QVector<int> candidates;
+    candidates.reserve(kNeighborCount + 1);
     if (pointIndex >= 0 && pointIndex < pointCount) {
-        const SurfacePoint &candidate = grid.points().at(pointIndex);
+        candidates.push_back(pointIndex);
+    }
+    if (pointIndex < neighborIndices.size()) {
+        const QVector<int> &neighbors = neighborIndices.at(pointIndex);
+        for (const int neighborIndex : neighbors) {
+            if (neighborIndex >= 0 && neighborIndex < pointCount) {
+                candidates.push_back(neighborIndex);
+            }
+        }
+    }
+
+    if (candidates.isEmpty()) {
+        return {{pointIndex, 1.0}};
+    }
+
+    // Вычисляем угловые расстояния до каждого кандидата.
+    QVector<InterpolationEntry> entries;
+    entries.reserve(candidates.size());
+    for (const int idx : candidates) {
+        const SurfacePoint &candidate = grid.points().at(idx);
         const double cosDistance = sinSource * candidate.sinLatitude +
             cosSource * candidate.cosLatitude *
             qCos(sourceLon - candidate.longitudeRadians);
-        if (cosDistance > bestCos) {
-            bestCos = cosDistance;
-            bestIndex = pointIndex;
+        // angularDistance ≈ acos(cosDistance), но для IDW достаточно
+        // (1 - cosDistance) как монотонной меры расстояния.
+        const double dist = qMax(kMinAngularDistance, 1.0 - cosDistance);
+        // Если точка практически совпадает с узлом — вернуть его напрямую.
+        if (dist <= kMinAngularDistance) {
+            return {{idx, 1.0}};
+        }
+        entries.push_back({idx, dist});
+    }
+
+    // IDW: w_i = 1/d_i^p, затем нормируем.
+    double totalWeight = 0.0;
+    for (auto &entry : entries) {
+        entry.weight = 1.0 / std::pow(entry.weight, kIdwPower);
+        totalWeight += entry.weight;
+    }
+    if (totalWeight > 0.0) {
+        for (auto &entry : entries) {
+            entry.weight /= totalWeight;
+        }
+    } else {
+        // Аварийный случай: равные веса.
+        const double uniformWeight = 1.0 / static_cast<double>(entries.size());
+        for (auto &entry : entries) {
+            entry.weight = uniformWeight;
         }
     }
-    return bestIndex;
+
+    return entries;
 }
 } // namespace
 
@@ -149,6 +196,9 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
     const QVector<AtmosphericColumn> &columns = atmosphereGrid.columns();
     WindFieldModel windModel;
 
+    QVector<int> pointIndices(pointCount);
+    std::iota(pointIndices.begin(), pointIndices.end(), 0);
+
     for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
         QVector<double> pressuresAtm;
         QVector<double> temperaturesK;
@@ -175,35 +225,45 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
             continue;
         }
 
+        // Полулагранжева адвекция с IDW-интерполяцией — параллельно по точкам
+        // (read-only из wind).
         QVector<WindVector> advected;
         advected.resize(pointCount);
-        for (int i = 0; i < pointCount; ++i) {
+        QtConcurrent::blockingMap(pointIndices, [&](int i) {
             const SurfacePoint &point = grid.points().at(i);
-            // Полулагранжева схема для поля скорости:
-            // назад по ветру на шаг dt, затем выбираем ближайший тайл в сетке.
             const double cosLat = qMax(kMinCosLatitude, std::abs(point.cosLatitude));
             const double dLat = (wind.at(i).northMps * dtSeconds) / radiusMeters;
             const double dLon = (wind.at(i).eastMps * dtSeconds) / (radiusMeters * cosLat);
             const double sourceLat = qBound(-kHalfPi, point.latitudeRadians - dLat, kHalfPi);
             const double sourceLon = normalizeLongitude(point.longitudeRadians - dLon);
 
-            const int bestIndex = findBestSourceIndex(grid,
-                                                      neighborIndices_,
-                                                      i,
-                                                      sourceLat,
-                                                      sourceLon);
-            advected[i] = wind.at(bestIndex);
-        }
+            const auto weights = interpolationWeights(grid,
+                                                       neighborIndices_,
+                                                       i,
+                                                       sourceLat,
+                                                       sourceLon);
+            double interpEast = 0.0;
+            double interpNorth = 0.0;
+            for (const auto &entry : weights) {
+                interpEast += entry.weight * wind.at(entry.index).eastMps;
+                interpNorth += entry.weight * wind.at(entry.index).northMps;
+            }
+            advected[i] = {interpEast, interpNorth};
+        });
 
+        // Сглаживание — параллельно по точкам (read-only из advected).
         const int iterations = qBound(0, smoothingIterations, 3);
         if (iterations > 0 && !neighborIndices_.isEmpty()) {
             QVector<WindVector> smoothed = advected;
+            // Принудительный detach: копирование QVector создаёт implicit sharing,
+            // параллельная запись в smoothed[i] без detach — гонка данных.
+            smoothed.detach();
             for (int iter = 0; iter < iterations; ++iter) {
-                for (int i = 0; i < pointCount; ++i) {
+                QtConcurrent::blockingMap(pointIndices, [&](int i) {
                     const QVector<int> &neighbors = neighborIndices_.at(i);
                     if (neighbors.isEmpty()) {
                         smoothed[i] = advected.at(i);
-                        continue;
+                        return;
                     }
                     double sumEast = 0.0;
                     double sumNorth = 0.0;
@@ -218,7 +278,7 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
                     }
                     if (count <= 0) {
                         smoothed[i] = advected.at(i);
-                        continue;
+                        return;
                     }
                     const double avgEast = sumEast / static_cast<double>(count);
                     const double avgNorth = sumNorth / static_cast<double>(count);
@@ -229,7 +289,7 @@ void AtmosphericAdvectionSolver::advectLayerWinds(const PlanetSurfaceGrid &grid,
                     smoothed[i].northMps =
                         advected.at(i).northMps + kSmoothingFactor * (avgNorth - advected.at(i).northMps);
                     smoothed[i] = clampWind(smoothed[i]);
-                }
+                });
                 advected.swap(smoothed);
             }
         }
@@ -266,6 +326,10 @@ void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &gr
     ensureNeighbors(grid);
 
     const int layerCount = atmosphereGrid.layerCount();
+
+    QVector<int> pointIndices(pointCount);
+    std::iota(pointIndices.begin(), pointIndices.end(), 0);
+
     for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
         QVector<double> vaporAdvected;
         QVector<double> liquidAdvected;
@@ -274,44 +338,48 @@ void AtmosphericAdvectionSolver::advectLayerMoisture(const PlanetSurfaceGrid &gr
         liquidAdvected.resize(pointCount);
         iceAdvected.resize(pointCount);
 
-        for (int i = 0; i < pointCount; ++i) {
+        // Полулагранжева адвекция влаги с IDW-интерполяцией — параллельно по
+        // точкам (read-only из columns).
+        QtConcurrent::blockingMap(pointIndices, [&](int i) {
             const auto &layers = atmosphereGrid.columns().at(i).layers();
             if (layerIndex >= layers.size()) {
                 vaporAdvected[i] = 0.0;
                 liquidAdvected[i] = 0.0;
                 iceAdvected[i] = 0.0;
-                continue;
+                return;
             }
 
             const SurfacePoint &point = grid.points().at(i);
             const AtmosphericLayerState &layer = layers.at(layerIndex);
-            // Полулагранжева адвекция влаги: ищем точку источника, откуда приходит
-            // воздух за шаг dt, и переносим состав (пар/капли) без явного диффузионного
-            // сглаживания — это стабильнее для больших dt на сферической сетке.
             const double cosLat = qMax(kMinCosLatitude, std::abs(point.cosLatitude));
             const double dLat = (layer.windVMps() * dtSeconds) / radiusMeters;
             const double dLon = (layer.windUMps() * dtSeconds) / (radiusMeters * cosLat);
             const double sourceLat = qBound(-kHalfPi, point.latitudeRadians - dLat, kHalfPi);
             const double sourceLon = normalizeLongitude(point.longitudeRadians - dLon);
 
-            const int bestIndex = findBestSourceIndex(grid,
-                                                      neighborIndices_,
-                                                      i,
-                                                      sourceLat,
-                                                      sourceLon);
-            const auto &sourceLayers = atmosphereGrid.columns().at(bestIndex).layers();
-            if (layerIndex >= sourceLayers.size()) {
-                vaporAdvected[i] = 0.0;
-                liquidAdvected[i] = 0.0;
-                iceAdvected[i] = 0.0;
-                continue;
+            const auto weights = interpolationWeights(grid,
+                                                       neighborIndices_,
+                                                       i,
+                                                       sourceLat,
+                                                       sourceLon);
+            double vaporSum = 0.0;
+            double liquidSum = 0.0;
+            double iceSum = 0.0;
+            for (const auto &entry : weights) {
+                const auto &sourceLayers =
+                    atmosphereGrid.columns().at(entry.index).layers();
+                if (layerIndex >= sourceLayers.size()) {
+                    continue;
+                }
+                const AtmosphericLayerState &sourceLayer = sourceLayers.at(layerIndex);
+                vaporSum += entry.weight * sourceLayer.waterVaporKgPerM2();
+                liquidSum += entry.weight * sourceLayer.liquidWaterKgPerM2();
+                iceSum += entry.weight * sourceLayer.iceWaterKgPerM2();
             }
-
-            const AtmosphericLayerState &sourceLayer = sourceLayers.at(layerIndex);
-            vaporAdvected[i] = sourceLayer.waterVaporKgPerM2();
-            liquidAdvected[i] = sourceLayer.liquidWaterKgPerM2();
-            iceAdvected[i] = sourceLayer.iceWaterKgPerM2();
-        }
+            vaporAdvected[i] = vaporSum;
+            liquidAdvected[i] = liquidSum;
+            iceAdvected[i] = iceSum;
+        });
 
         for (int i = 0; i < pointCount; ++i) {
             auto &layers = atmosphereGrid.columns()[i].layers();

@@ -296,7 +296,8 @@ void PlanetSurfaceGrid::initializeAtmosphericGrid(const AtmosphereComposition &c
                                                   double baseTemperatureKelvin,
                                                   int layerCount,
                                                   double minBottomLayerThicknessMeters,
-                                                  double minTopPressureAtm) {
+                                                  double minTopPressureAtm,
+                                                  double initialRelativeHumidity) {
     atmosphericGrid_.initialize(composition,
                                 planetMassEarths,
                                 radiusKm_,
@@ -304,7 +305,8 @@ void PlanetSurfaceGrid::initializeAtmosphericGrid(const AtmosphereComposition &c
                                 points_.size(),
                                 layerCount,
                                 minBottomLayerThicknessMeters,
-                                minTopPressureAtm);
+                                minTopPressureAtm,
+                                initialRelativeHumidity);
 }
 
 void PlanetSurfaceGrid::setHeightSource(HeightSourceType sourceType,

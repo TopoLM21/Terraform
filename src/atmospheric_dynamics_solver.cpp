@@ -2,9 +2,11 @@
 #include "wind_field_model.h"
 
 #include <QVector3D>
+#include <QtConcurrent/QtConcurrentMap>
 #include <QtMath>
 
 #include <cmath>
+#include <numeric>
 
 namespace {
 constexpr int kNeighborCount = 6;
@@ -118,12 +120,19 @@ void AtmosphericDynamicsSolver::updateLayerWinds(const PlanetSurfaceGrid &grid,
     QVector<WindVector> nextWinds;
     QVector<WindVector> smoothed;
 
+    QVector<int> pointIndices(pointCount);
+    std::iota(pointIndices.begin(), pointIndices.end(), 0);
+
     for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
         nextWinds.resize(pointCount);
-        for (int i = 0; i < pointCount; ++i) {
+
+        // Вычисление градиентов давления и обновление ветра — параллельно по точкам.
+        // Каждая точка читает только свои и соседние данные (read-only),
+        // записывает в свой элемент nextWinds[i].
+        QtConcurrent::blockingMap(pointIndices, [&](int i) {
             if (layerIndex >= columns.at(i).layers().size()) {
                 nextWinds[i] = WindVector{};
-                continue;
+                return;
             }
 
             const SurfacePoint &point = grid.points().at(i);
@@ -135,7 +144,7 @@ void AtmosphericDynamicsSolver::updateLayerWinds(const PlanetSurfaceGrid &grid,
                                        : 0.0;
             if (density <= 0.0) {
                 nextWinds[i] = WindVector{};
-                continue;
+                return;
             }
 
             const QVector<int> &neighbors = (i < neighborIndices_.size())
@@ -192,17 +201,23 @@ void AtmosphericDynamicsSolver::updateLayerWinds(const PlanetSurfaceGrid &grid,
             updated.eastMps += accelU * dtSeconds;
             updated.northMps += accelV * dtSeconds;
             nextWinds[i] = clampWind(updated);
-        }
+        });
 
+        // Сглаживание — параллельно по точкам.
+        // Каждая точка читает nextWinds (read-only), записывает в smoothed[i].
         const int iterations = qBound(0, smoothingIterations, 3);
         if (iterations > 0 && !neighborIndices_.isEmpty()) {
             smoothed = nextWinds;
+            // QVector implicit sharing: после копирования оба вектора делят данные.
+            // Параллельная запись в smoothed[i] вызовет detach() из разных потоков —
+            // гонка данных. Принудительно отделяем ДО параллельной секции.
+            smoothed.detach();
             for (int iter = 0; iter < iterations; ++iter) {
-                for (int i = 0; i < pointCount; ++i) {
+                QtConcurrent::blockingMap(pointIndices, [&](int i) {
                     const QVector<int> &neighbors = neighborIndices_.at(i);
                     if (neighbors.isEmpty()) {
                         smoothed[i] = nextWinds.at(i);
-                        continue;
+                        return;
                     }
                     double sumEast = 0.0;
                     double sumNorth = 0.0;
@@ -217,7 +232,7 @@ void AtmosphericDynamicsSolver::updateLayerWinds(const PlanetSurfaceGrid &grid,
                     }
                     if (count <= 0) {
                         smoothed[i] = nextWinds.at(i);
-                        continue;
+                        return;
                     }
                     const double avgEast = sumEast / static_cast<double>(count);
                     const double avgNorth = sumNorth / static_cast<double>(count);
@@ -227,7 +242,7 @@ void AtmosphericDynamicsSolver::updateLayerWinds(const PlanetSurfaceGrid &grid,
                     smoothed[i].northMps =
                         nextWinds.at(i).northMps + kViscosityFactor * (avgNorth - nextWinds.at(i).northMps);
                     smoothed[i] = clampWind(smoothed[i]);
-                }
+                });
                 nextWinds.swap(smoothed);
             }
         }

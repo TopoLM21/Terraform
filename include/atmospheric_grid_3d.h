@@ -22,7 +22,8 @@ public:
                     int columnCount,
                     int layerCount,
                     double minBottomLayerThicknessMeters,
-                    double minTopPressureAtm = 0.0);
+                    double minTopPressureAtm = 0.0,
+                    double initialRelativeHumidity = -1.0);
 
     bool updateLayerCountForTopPressure(double surfacePressureAtm,
                                         double minTopPressureAtm,

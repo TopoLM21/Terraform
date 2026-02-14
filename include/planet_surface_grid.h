@@ -35,7 +35,8 @@ public:
                                    double baseTemperatureKelvin,
                                    int layerCount = 0,
                                    double minBottomLayerThicknessMeters = 0.0,
-                                   double minTopPressureAtm = 0.0);
+                                   double minTopPressureAtm = 0.0,
+                                   double initialRelativeHumidity = -1.0);
 
     void setHeightSource(HeightSourceType sourceType,
                          const QString &heightmapPath,
