@@ -35,6 +35,13 @@ constexpr double kLatentHeatVaporization = 2.501e6;
 constexpr double kH2OMassAbsorptionLw = 0.1;
 // Поглощение H₂O в коротковолновом ближнем ИК (слабее, чем длинноволновое).
 constexpr double kH2OMassAbsorptionSw = 0.01;
+// Доля сублимации: ледяной океан обеспечивает ~10% влаги от жидкого.
+// В реальности сублимация льда при -10°C ≈ 10–15% от испарения воды при 0°C.
+constexpr double kIceSublimationFraction = 0.1;
+// Массовый коэффициент поглощения CO₂ в длинноволновом ИК (15-мкм полоса).
+// При 1 атм уширение линий давлением включено: k_eff = k_base × P.
+// Для Земли (1 атм): k × P × co2_column ≈ 0.35 × 1 × 3 ≈ 1.05 → реалистично.
+constexpr double kCO2MassAbsorptionLw = 0.35;
 // Время сглаживания для интенсивности осадков (EMA) в секундах.
 constexpr double kPrecipitationEmaTimeSeconds = 3600.0;
 
@@ -285,15 +292,21 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         auto &layers = column.layers();
         if (!layers.isEmpty()) {
-            // Океан — неограниченный источник воды для испарения, но только
-            // когда поверхность жидкая. Замёрзший океан (лёд) не даёт жидкой
-            // воды: sublimation намного слабее и уже учтена через temperatureFactor.
+            // Океан — неограниченный источник воды для испарения.
+            // Жидкий океан даёт полный запас влаги, замёрзший — сублимацию
+            // (≈10% от испарения). Без сублимации атмосфера полностью
+            // теряет водяной пар → исчезает парниковый эффект H₂O →
+            // необратимый снежок (ice-albedo death spiral).
             if (point.materialId == QLatin1String("ocean")) {
+                const double maxWater =
+                    point.surfaceMoisture.settings().maxStorageKgPerM2;
                 if (point.waterPhase == PhaseModel::Phase::Liquid) {
-                    point.surfaceMoisture.setWaterKgPerM2(
-                        point.surfaceMoisture.settings().maxStorageKgPerM2);
+                    point.surfaceMoisture.setWaterKgPerM2(maxWater);
                 } else {
-                    point.surfaceMoisture.setWaterKgPerM2(0.0);
+                    // Сублимация: лёд → пар напрямую, без промежуточной
+                    // жидкой фазы. Скорость ~10–15% от испарения при 0°C.
+                    point.surfaceMoisture.setWaterKgPerM2(
+                        maxWater * kIceSublimationFraction);
                 }
             }
 
@@ -370,15 +383,29 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                    input.cloudShortwaveTransmission * (1.0 - condensationAlbedo),
                    1.0);
 
-        // Динамический парниковый эффект водяного пара: добавляем вклад H₂O
+        // Динамический парниковый эффект H₂O и CO₂: добавляем вклад обоих
         // в оптическую толщину каждого слоя перед расчётом радиации.
-        // Базовая τ (от CO₂ и других газов) задана при инициализации сетки,
-        // а H₂O — переменный: больше влаги → сильнее парник → теплее поверхность
-        // → больше испарения → положительная обратная связь, стабилизирующая климат.
+        //
+        // H₂O — переменный: больше влаги → сильнее парник → теплее поверхность
+        // → больше испарения → положительная обратная связь.
+        //
+        // CO₂ — фиксированный, но с уширением линий давлением (pressure broadening).
+        // Базовая τ при инициализации слишком мала для земных условий (0.06% CO₂
+        // при 1 атм → τ ≈ 0.05). Реальный CO₂ даёт τ ≈ 1.0 из-за уширения.
+        // Добавляем поправку: k_co2 × co2_fraction × density × thickness × P.
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
+            // CO₂ column mass in layer (kg/m²) × pressure broadening factor.
+            const double co2ColumnKg = co2Share_ *
+                qMax(0.0, layers.at(li).densityKgPerM3()) *
+                qMax(0.0, layers.at(li).thicknessMeters());
+            const double pressureBroadening =
+                qMax(0.0, layers.at(li).pressureAtm());
+            const double co2TauLw =
+                kCO2MassAbsorptionLw * co2ColumnKg * pressureBroadening;
             layers[li].setOpticalDepthLongwave(
-                layers.at(li).opticalDepthLongwave() + kH2OMassAbsorptionLw * h2oKg);
+                layers.at(li).opticalDepthLongwave() +
+                kH2OMassAbsorptionLw * h2oKg + co2TauLw);
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() + kH2OMassAbsorptionSw * h2oKg);
         }
@@ -400,12 +427,20 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             layers[layerIndex].setTemperatureKelvin(updatedTemperature);
         }
 
-        // Восстанавливаем базовую оптическую толщину (без H₂O), чтобы
-        // на следующем шаге не накапливать вклад водяного пара повторно.
+        // Восстанавливаем базовую оптическую толщину (без H₂O и CO₂-поправки),
+        // чтобы на следующем шаге не накапливать вклад повторно.
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
+            const double co2ColumnKg = co2Share_ *
+                qMax(0.0, layers.at(li).densityKgPerM3()) *
+                qMax(0.0, layers.at(li).thicknessMeters());
+            const double pressureBroadening =
+                qMax(0.0, layers.at(li).pressureAtm());
+            const double co2TauLw =
+                kCO2MassAbsorptionLw * co2ColumnKg * pressureBroadening;
             layers[li].setOpticalDepthLongwave(
-                layers.at(li).opticalDepthLongwave() - kH2OMassAbsorptionLw * h2oKg);
+                layers.at(li).opticalDepthLongwave() -
+                kH2OMassAbsorptionLw * h2oKg - co2TauLw);
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() - kH2OMassAbsorptionSw * h2oKg);
         }
