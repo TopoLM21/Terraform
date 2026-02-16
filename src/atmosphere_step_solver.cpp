@@ -100,6 +100,11 @@ double columnWaterMassKgPerM2(const AtmosphericColumn &column) {
 // градиенты (нижний слой горячее), а диффузия рассасывает устойчивые инверсии
 // (верхний слой горячее). Без этого горячие верхние слои остывают только
 // радиационно, что при малой оптической толщине занимает сотни шагов.
+//
+// ВАЖНО: используем плотность × Cp × h (теплоёмкость слоя) для определения
+// скорости изменения температуры. Без учёта массы плотный нижний слой (1 атм)
+// терял бы тепло к разрежённому верхнему (0.01 атм) в ~100 раз быстрее
+// реального → искусственное переохлаждение поверхности.
 void applyVerticalTemperatureDiffusion(QVector<AtmosphericLayerState> &layers,
                                        double kz, double dtSeconds) {
     const int n = layers.size();
@@ -107,19 +112,25 @@ void applyVerticalTemperatureDiffusion(QVector<AtmosphericLayerState> &layers,
         return;
     }
     constexpr double kMinDz = 1.0e-3;
+    constexpr double kMinHeatCapacity = 1.0;
     constexpr double kMaxCourant = 0.5;
 
     QVector<double> temps(n);
     QVector<double> thickness(n);
+    QVector<double> heatCap(n);    // C = ρ × Cp × h [J/(m²·K)]
+    QVector<double> density(n);    // ρ [kg/m³]
     double minDz = 1.0e30;
     for (int i = 0; i < n; ++i) {
         temps[i] = layers[i].temperatureKelvin();
         thickness[i] = qMax(layers[i].thicknessMeters(), kMinDz);
+        heatCap[i] = qMax(layers[i].heatCapacityJPerM2K(), kMinHeatCapacity);
+        density[i] = qMax(layers[i].densityKgPerM3(), 1.0e-6);
         minDz = qMin(minDz, thickness[i]);
     }
     minDz = qMax(minDz, kMinDz);
 
-    // Ограничение диффузионного числа Куранта: dt <= C * dz^2 / Kz.
+    // Ограничение диффузионного числа Куранта: dt <= C_vol * dz² / (ρ × Cp × Kz).
+    // Для нижнего слоя (максимальная плотность) Courant наибольший.
     const double maxStableDt = kMaxCourant * minDz * minDz / kz;
     if (maxStableDt <= 0.0) {
         return;
@@ -128,23 +139,32 @@ void applyVerticalTemperatureDiffusion(QVector<AtmosphericLayerState> &layers,
     const int substeps = qMax(1, static_cast<int>(qCeil(dtSeconds / maxStableDt)));
     const double stepDt = dtSeconds / static_cast<double>(substeps);
     const int ifaceCount = n - 1;
-    QVector<double> flux(ifaceCount);
+    QVector<double> flux(ifaceCount);      // Энергетический поток [W/m²]
     QVector<double> nextTemps(n);
 
     for (int step = 0; step < substeps; ++step) {
         for (int i = 0; i < ifaceCount; ++i) {
             const double dz = qMax(0.5 * (thickness[i] + thickness[i + 1]), kMinDz);
-            // Поток температуры на границе слоёв: F = -Kz * dT/dz.
-            flux[i] = -kz * (temps[i + 1] - temps[i]) / dz;
+            // Плотность на границе: среднее из соседних слоёв.
+            const double rhoInterface = 0.5 * (density[i] + density[i + 1]);
+            // Энергетический поток: F = -ρ × Cp × Kz × dT/dz [W/m²].
+            // Cp ≈ 1004 J/(kg·K) для сухого воздуха.
+            // Реальный поток масштабируется плотностью на границе, чтобы
+            // обмен между плотным нижним и разрежённым верхним слоями
+            // соответствовал реальному турбулентному переносу тепла.
+            constexpr double kAirCp = 1004.0;
+            flux[i] = -rhoInterface * kAirCp * kz *
+                (temps[i + 1] - temps[i]) / dz;
         }
 
         for (int k = 0; k < n; ++k) {
-            const double dzLayer = thickness[k];
             // Нижняя граница: нулевой поток (поверхность обменивается через coupler).
             const double fluxBelow = (k > 0) ? flux[k - 1] : 0.0;
             // Верхняя граница: нулевой поток (нет перемешивания через верх атмосферы).
             const double fluxAbove = (k < ifaceCount) ? flux[k] : 0.0;
-            nextTemps[k] = qMax(0.0, temps[k] + (fluxBelow - fluxAbove) * stepDt / dzLayer);
+            // ΔT = ΔF × dt / C_layer, где C_layer = ρ × Cp × h [J/(m²·K)].
+            nextTemps[k] = qMax(0.0,
+                temps[k] + (fluxBelow - fluxAbove) * stepDt / heatCap[k]);
         }
 
         temps.swap(nextTemps);
