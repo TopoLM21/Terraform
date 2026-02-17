@@ -114,8 +114,12 @@ void setSolarDebugLoggingEnabled(bool enabled) {
                                 "solar.radiation.debug=%1\n"
                                 "solar.atmosphere.profile.info=%1\n"
                                 "solar.atmosphere.profile.debug=%1\n"
+                                "solar.atmosphere.mass.info=%1\n"
+                                "solar.atmosphere.mass.debug=%1\n"
                                 "solar.atmosphere.vertical_mixing.info=%1\n"
-                                "solar.atmosphere.vertical_mixing.debug=%1")
+                                "solar.atmosphere.vertical_mixing.debug=%1\n"
+                                "solar.atmosphere.vertical_moisture_mixing.info=%1\n"
+                                "solar.atmosphere.vertical_moisture_mixing.debug=%1")
                      .arg(flagValue));
     QLoggingCategory::setFilterRules(rules);
 }
