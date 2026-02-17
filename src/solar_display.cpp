@@ -146,21 +146,17 @@ double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
                                            double co2Share,
                                            double minDenseAtmosphereTemperatureK) {
     Q_UNUSED(greenhouseOpacity)
-    // Используем пресетный минимум (например, 700 K для Венеры) как начальную
-    // точку инициализации: физика (радиация + парник) сама поддержит эту
-    // температуру, если оптическая толщина достаточна. Без этого Венера
-    // стартует с ~230 K (t_eff) и не успевает разогреться до 735 K.
+    Q_UNUSED(minDenseAtmosphereTemperatureK)
+    // Оценка парникового прогрева: T_surface ≈ T_eff × (1 + 0.75 × τ)^0.25.
+    // τ ∝ P² × f_co2 (уширение линий давлением + логарифмическое насыщение).
+    // Никаких пресетных минимумов — физика сама определяет температуру.
     //
-    // Для терраформинга это не мешает: при изменении состава атмосферы
-    // пресетный минимум не пересчитывается, а радиация свободно двигает
-    // температуру в любую сторону.
-    if (minDenseAtmosphereTemperatureK > 0.0) {
-        return minDenseAtmosphereTemperatureK;
-    }
-    // Для планет без явного минимума: оценка парникового прогрева поверхности.
-    // T_surface ≈ T_eff × (1 + 0.75 × τ)^0.25, τ ∝ P² × f_co2.
+    // Для Венеры (92 атм, 96% CO₂): τ ≈ 9.1, фактор ≈ 2.9, T_init ≈ 660 K.
+    // Для Земли (1 атм, 0.06% CO₂): τ ≈ 1.0, фактор ≈ 1.2, T_init ≈ 306 K.
+    // Для Марса (0.006 атм, 95% CO₂): τ ≈ 0.15, фактор ≈ 1.03, T_init ≈ 215 K.
     if (effectiveTemperatureKelvin > 0.0 && pressureAtm > 0.0 && co2Share > 0.0) {
-        const double tauEstimate = 0.5 * std::log1p(10000.0 * pressureAtm * pressureAtm * co2Share);
+        const double tauEstimate =
+            0.5 * std::log1p(10000.0 * pressureAtm * pressureAtm * co2Share);
         const double greenhouseFactor = std::pow(1.0 + 0.75 * tauEstimate, 0.25);
         return effectiveTemperatureKelvin * greenhouseFactor;
     }

@@ -387,11 +387,6 @@ QVector<PlanetPreset> solarSystemPresets() {
          true,
          true},
     };
-    for (auto &preset : presets) {
-        if (preset.name == QStringLiteral("Венера")) {
-            preset.minDenseAtmosphereTemperatureK = 700.0;
-        }
-    }
     return presets;
 }
 
