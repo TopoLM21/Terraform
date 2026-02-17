@@ -186,10 +186,23 @@ void AtmosphericGrid3D::initialize(const AtmosphereComposition &composition,
         return;
     }
 
-    // Оптическая толщина: увеличивается с долей парниковых газов и распределяется по слоям.
+    // Оптическая толщина CO₂ с учётом уширения линий давлением и
+    // логарифмического насыщения полос поглощения.
+    //
+    // Физика: масса столба CO₂ ∝ P × f_co2, коэффициент поглощения ∝ P
+    // (pressure broadening), итого эффективный путь ∝ P² × f_co2.
+    // Логарифм учитывает насыщение центральных линий 15-мкм полосы.
+    //
+    // Калибровка (TOTAL τ через все слои):
+    //   Земля  (1 атм, 0.06% CO₂): τ_LW ≈ 0.97 → ~7–8 K парниковый эффект
+    //   Венера (92 атм, 96% CO₂):  τ_LW ≈ 9.1  → сильно непрозрачная
+    //   Марс   (0.006 атм, 95% CO₂): τ_LW ≈ 0.15 → слабый парник
     const double greenhouseShare = greenhouseMassFraction(composition);
-    const double baseTauSw = 0.02 + 0.3 * greenhouseShare;
-    const double baseTauLw = 0.05 + 1.2 * greenhouseShare;
+    const double safePressure = qMax(0.0, surfacePressureAtm);
+    const double pressureSquared = safePressure * safePressure;
+    const double ghgPathLength = 10000.0 * pressureSquared * greenhouseShare;
+    const double baseTauSw = 0.02 + 0.05 * std::log1p(ghgPathLength);
+    const double baseTauLw = 0.05 + 0.5 * std::log1p(ghgPathLength);
     const double dryLapseRateKPerM = AtmosphericThermodynamics::dryAdiabaticLapseRate(
         composition, gravity);
     double topHeightMeters = 0.0;
