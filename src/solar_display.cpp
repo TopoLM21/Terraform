@@ -145,16 +145,26 @@ double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
                                            double greenhouseOpacity,
                                            double co2Share,
                                            double minDenseAtmosphereTemperatureK) {
-    Q_UNUSED(effectiveTemperatureKelvin)
-    Q_UNUSED(pressureAtm)
     Q_UNUSED(greenhouseOpacity)
-    Q_UNUSED(co2Share)
-    Q_UNUSED(minDenseAtmosphereTemperatureK)
-    // Никаких искусственных минимумов: физика (радиация, парниковый эффект,
-    // адвекция) сама определяет равновесную температуру. Это позволяет
-    // свободно охлаждать/нагревать планеты при терраформинге.
-    // Единственный пол — 3 K (реликтовое излучение).
-    return 3.0;
+    // Используем пресетный минимум (например, 700 K для Венеры) как начальную
+    // точку инициализации: физика (радиация + парник) сама поддержит эту
+    // температуру, если оптическая толщина достаточна. Без этого Венера
+    // стартует с ~230 K (t_eff) и не успевает разогреться до 735 K.
+    //
+    // Для терраформинга это не мешает: при изменении состава атмосферы
+    // пресетный минимум не пересчитывается, а радиация свободно двигает
+    // температуру в любую сторону.
+    if (minDenseAtmosphereTemperatureK > 0.0) {
+        return minDenseAtmosphereTemperatureK;
+    }
+    // Для планет без явного минимума: оценка парникового прогрева поверхности.
+    // T_surface ≈ T_eff × (1 + 0.75 × τ)^0.25, τ ∝ P² × f_co2.
+    if (effectiveTemperatureKelvin > 0.0 && pressureAtm > 0.0 && co2Share > 0.0) {
+        const double tauEstimate = 0.5 * std::log1p(10000.0 * pressureAtm * pressureAtm * co2Share);
+        const double greenhouseFactor = std::pow(1.0 + 0.75 * tauEstimate, 0.25);
+        return effectiveTemperatureKelvin * greenhouseFactor;
+    }
+    return qMax(3.0, effectiveTemperatureKelvin);
 }
 
 constexpr int kRoleSemiMajorAxis = Qt::UserRole;
@@ -6686,6 +6696,13 @@ private:
                 segmentSolarConstant * clampedCosZenith;
             localInsolations.push_back(localInsolation);
             localCosZeniths.push_back(clampedCosZenith);
+            // В послойном режиме радиационный баланс целиком рассчитывается
+            // в AtmosphereStepSolver::runLayeredStep (двухпоточная модель Эддингтона).
+            // Простая модель здесь НЕ должна обновлять температуру поверхности,
+            // иначе поверхность получает ДВОЙНОЕ радиационное воздействие за шаг:
+            // слабый парник простой модели добавляет лишнее охлаждение ночью →
+            // неразрушимый снежок даже при 4 кВт/м².
+            if (!useLayeredAtmosphere) {
             // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
             // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
             // поэтому минимальная база зависит от давления и состава.
@@ -6740,6 +6757,7 @@ private:
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             // Обновляем поверхностную температуру до переноса в соседние точки.
             point.temperatureK = point.state.temperatureKelvin();
+            } // !useLayeredAtmosphere
             updateOceanPhaseAndAlbedo(point, clampedCosZenith);
         }
 
