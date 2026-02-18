@@ -8,5 +8,6 @@ enum class SurfaceMapMode {
     Pressure,
     Precipitation,
     Biomass,
+    OceanCurrents,
     Realistic
 };

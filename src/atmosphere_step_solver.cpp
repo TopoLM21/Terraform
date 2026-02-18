@@ -571,6 +571,12 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
     // ── Фаза 2: растительность (последовательно — диффузия по соседям) ──
     vegetationModel_.update(input.surfaceGrid.points(), timeStepSeconds_, co2Share_);
 
+    // ── Фаза 2.5: океанские течения и горизонтальный перенос тепла ──────
+    oceanCurrentSolver_.step(input.surfaceGrid,
+                              dayLengthSeconds_,
+                              isRetrograde_,
+                              timeStepSeconds_);
+
     // ── Фаза 3: динамика ветра (соседние градиенты) ─────────────────────
     dynamicsSolver_.updateLayerWinds(input.surfaceGrid,
                                     input.atmosphereGrid,

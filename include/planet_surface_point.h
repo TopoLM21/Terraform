@@ -54,5 +54,9 @@ struct SurfacePoint {
     double vegetationBiomass = 0.0;
     // Маска/вес для визуального смешивания растительности (0..1).
     double vegetationBlendMask = 0.0;
+    // Горизонтальные океанские течения (м/с), обновляются OceanCurrentSolver.
+    double oceanCurrentEastMps = 0.0;
+    double oceanCurrentNorthMps = 0.0;
+    double oceanCurrentSpeedMps = 0.0;
     QVector<int> neighborIndices;
 };

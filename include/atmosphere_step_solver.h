@@ -8,6 +8,7 @@
 #include "layered_radiation_solver.h"
 #include "planet_presets.h"
 #include "planet_surface_grid.h"
+#include "ocean_current_solver.h"
 #include "surface/VegetationModel.h"
 #include "vertical_wind_mixing_solver.h"
 #include "vertical_moisture_mixing_solver.h"
@@ -54,6 +55,7 @@ private:
     VerticalMoistureMixingSolver verticalMoistureMixingSolver_;
     EvaporationModel evaporationModel_;
     VegetationModel vegetationModel_;
+    OceanCurrentSolver oceanCurrentSolver_;
     double co2Share_ = 0.0;
     double gravityMps2_ = 0.0;
     double rSpecific_ = 0.0;
