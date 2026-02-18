@@ -22,7 +22,10 @@ void SnowModel::updatePoint(SurfacePoint &point, double dtSeconds) const {
     if (dtSeconds <= 0.0) {
         return;
     }
-    if (point.materialId == QLatin1String("ocean")) {
+    // Пропускаем жидкий океан — снег не ложится на воду.
+    // Замёрзший океан (морской лёд) обрабатываем как сушу.
+    if (point.materialId == QLatin1String("ocean") &&
+        point.waterPhase == PhaseModel::Phase::Liquid) {
         return;
     }
     if (point.snowKgPerM2 <= 0.0) {

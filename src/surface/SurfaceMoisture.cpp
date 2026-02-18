@@ -72,6 +72,7 @@ void SurfaceMoisture::returnWaterKgPerM2(double returnedKgPerM2) {
 }
 
 double SurfaceMoisture::clampedWater(double waterKgPerM2) const {
-    const double maxStorage = qMax(0.0, settings_.maxStorageKgPerM2);
-    return qBound(0.0, waterKgPerM2, maxStorage);
+    // Нет верхнего предела: избыток стекает через дренажную фазу.
+    // maxStorageKgPerM2 используется только в moistureFraction() (полевая влагоёмкость).
+    return qMax(0.0, waterKgPerM2);
 }

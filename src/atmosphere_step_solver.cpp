@@ -381,15 +381,21 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             (1.0 - precipitationAlpha) * point.precipitationKgPerM2 +
             precipitationAlpha * precipitationKgPerM2;
         if (precipitationKgPerM2 > 0.0) {
+            const bool isOcean = (point.materialId == QLatin1String("ocean"));
+            const bool isLiquidOcean = isOcean &&
+                (point.waterPhase == PhaseModel::Phase::Liquid);
             const double phaseTemperatureK =
                 (point.temperatureK > 0.0) ? point.temperatureK : point.airTemperatureK;
             // Упрощённый фазовый порог: ниже 273.15 K осадки считаем снегом.
+            // Снег накапливается на суше и замёрзшем океане (морской лёд).
             const bool isSnow =
                 (phaseTemperatureK > 0.0 && phaseTemperatureK <= 273.15) &&
-                point.materialId != QLatin1String("ocean");
+                !isLiquidOcean;
             if (isSnow) {
                 point.snowKgPerM2 += precipitationKgPerM2;
-            } else {
+            } else if (!isLiquidOcean) {
+                // На жидком океане дождь просто возвращается в воду —
+                // surfaceMoisture не накапливается.
                 point.surfaceMoisture.addPrecipitation(precipitationKgPerM2);
             }
         }
@@ -497,13 +503,25 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
 
         point.airTemperatureK = layers.first().temperatureKelvin();
 
+        // Снежная изоляция: термическое сопротивление R = d / k_snow.
+        // Снег (плотность ~300 кг/м³, теплопроводность ~0.2 Вт/(м·К))
+        // замедляет теплообмен поверхности с воздухом.
+        double snowResistance = 0.0;
+        if (point.snowKgPerM2 > 0.0) {
+            constexpr double kSnowConductivity = 0.2;    // Вт/(м·К)
+            constexpr double kSnowDensityKgPerM3 = 300.0; // кг/м³
+            const double snowDepthM = point.snowKgPerM2 / kSnowDensityKgPerM3;
+            snowResistance = snowDepthM / kSnowConductivity;
+        }
+
         SurfaceAtmosphereCoupler coupler(input.heatTransferCoefficientWPerM2K);
         double surfaceAirFluxWPerM2 = 0.0;
         coupler.exchangeHeat(point.state,
                              layers[0],
                              material.roughnessLengthMeters,
                              timeStepSeconds_,
-                             &surfaceAirFluxWPerM2);
+                             &surfaceAirFluxWPerM2,
+                             snowResistance);
         point.airTemperatureK = layers[0].temperatureKelvin();
         point.temperatureK = point.state.temperatureKelvin();
         point.surfaceAirFluxWPerM2 = surfaceAirFluxWPerM2;
@@ -576,6 +594,63 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                               dayLengthSeconds_,
                               isRetrograde_,
                               timeStepSeconds_);
+
+    // ── Фаза 2.7: сток поверхностных вод (последовательно — соседи) ─────
+    // Вода стекает от каждой точки к наиболее низкому соседу. Если сосед —
+    // жидкий океан, вода удаляется (возвращается в океан). Это создаёт
+    // условия для жизни в долинах и низинах, куда собирается вода.
+    {
+        constexpr double kDrainageFraction = 0.15;     // доля стока за шаг
+        constexpr double kFieldCapacityKgPerM2 = 200.0; // полевая влагоёмкость
+        auto &points = input.surfaceGrid.points();
+        const int n = points.size();
+        // Буфер изменений: delta[i] — сколько воды добавить/убрать из точки i.
+        QVector<double> drainageDelta(n, 0.0);
+        for (int i = 0; i < n; ++i) {
+            auto &pt = points[i];
+            // Жидкий океан не содержит «поверхностной влаги» — пропускаем.
+            if (pt.materialId == QLatin1String("ocean") &&
+                pt.waterPhase == PhaseModel::Phase::Liquid) {
+                continue;
+            }
+            const double water = pt.surfaceMoisture.waterKgPerM2();
+            // Стекает только излишек сверх полевой влагоёмкости.
+            const double excess = water - kFieldCapacityKgPerM2;
+            if (excess <= 0.0) {
+                continue;
+            }
+            // Найти самого низкого соседа.
+            int lowestIdx = -1;
+            double lowestHeight = pt.heightKm;
+            for (int ni : pt.neighborIndices) {
+                if (ni >= 0 && ni < n && points.at(ni).heightKm < lowestHeight) {
+                    lowestHeight = points.at(ni).heightKm;
+                    lowestIdx = ni;
+                }
+            }
+            if (lowestIdx < 0) {
+                continue; // нет соседей ниже — вода стоит
+            }
+            const double drainAmount = excess * kDrainageFraction;
+            drainageDelta[i] -= drainAmount;
+            // Если сосед — жидкий океан, вода просто исчезает (в океан).
+            const auto &neighbor = points.at(lowestIdx);
+            if (neighbor.materialId == QLatin1String("ocean") &&
+                neighbor.waterPhase == PhaseModel::Phase::Liquid) {
+                // вода уходит в океан — не добавляем соседу
+            } else {
+                drainageDelta[lowestIdx] += drainAmount;
+            }
+        }
+        // Применяем все изменения одним проходом.
+        for (int i = 0; i < n; ++i) {
+            if (drainageDelta.at(i) != 0.0) {
+                const double newWater = qMax(0.0,
+                    points[i].surfaceMoisture.waterKgPerM2() + drainageDelta.at(i));
+                points[i].surfaceMoisture.setWaterKgPerM2(newWater);
+            }
+        }
+    }
 
     // ── Фаза 3: динамика ветра (соседние градиенты) ─────────────────────
     dynamicsSolver_.updateLayerWinds(input.surfaceGrid,

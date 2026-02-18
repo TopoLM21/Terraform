@@ -30,7 +30,8 @@ void SurfaceAtmosphereCoupler::exchangeHeat(SurfacePointState &surface,
                                             AtmosphericLayerState &lowestLayer,
                                             double roughnessLengthMeters,
                                             double dtSeconds,
-                                            double *surfaceAirFluxWPerM2) const {
+                                            double *surfaceAirFluxWPerM2,
+                                            double surfaceResistanceM2KPerW) const {
     if (dtSeconds <= 0.0) {
         if (surfaceAirFluxWPerM2) {
             *surfaceAirFluxWPerM2 = 0.0;
@@ -53,7 +54,8 @@ void SurfaceAtmosphereCoupler::exchangeHeat(SurfacePointState &surface,
                          lowestLayer.thicknessMeters(),
                          dtSeconds,
                          updatedAirTemperature,
-                         surfaceAirFluxWPerM2);
+                         surfaceAirFluxWPerM2,
+                         surfaceResistanceM2KPerW);
     lowestLayer.setTemperatureKelvin(updatedAirTemperature);
 }
 
@@ -128,7 +130,8 @@ void SurfaceAtmosphereCoupler::exchangeHeatInternal(SurfacePointState &surface,
                                                     double layerThicknessMeters,
                                                     double dtSeconds,
                                                     double &updatedAirTemperature,
-                                                    double *surfaceAirFluxWPerM2) const {
+                                                    double *surfaceAirFluxWPerM2,
+                                                    double surfaceResistanceM2KPerW) const {
     if (dtSeconds <= 0.0) {
         if (surfaceAirFluxWPerM2) {
             *surfaceAirFluxWPerM2 = 0.0;
@@ -149,7 +152,6 @@ void SurfaceAtmosphereCoupler::exchangeHeatInternal(SurfacePointState &surface,
                                                                      roughnessLengthMeters,
                                                                      airHeatCapacityJPerM2K,
                                                                      layerThicknessMeters);
-    const double sensibleFluxWPerM2 = sensibleTransfer * (surfaceTemperature - airTemperatureKelvin);
 
     // Длинноволновый обмен между поверхностью и атмосферой полностью рассчитывается
     // в LayeredRadiationSolver (двухпоточная модель Эддингтона). Каплер отвечает
@@ -157,7 +159,12 @@ void SurfaceAtmosphereCoupler::exchangeHeatInternal(SurfacePointState &surface,
     Q_UNUSED(longwaveEmissivity);
 
     // Коэффициент связи для устойчивого явного шага: только сенсибл.
-    const double effectiveTransfer = sensibleTransfer;
+    // При наличии дополнительного теплового сопротивления (например, снег)
+    // последовательное сопротивление: 1/h_eff = 1/h_atm + R_surface.
+    const double effectiveTransfer =
+        (surfaceResistanceM2KPerW > 0.0 && sensibleTransfer > 0.0)
+            ? 1.0 / (1.0 / sensibleTransfer + surfaceResistanceM2KPerW)
+            : sensibleTransfer;
 
     const double maxStableDt = (effectiveTransfer > 0.0)
         ? 0.5 * qMin(surfaceHeatCapacity / effectiveTransfer,
@@ -166,9 +173,9 @@ void SurfaceAtmosphereCoupler::exchangeHeatInternal(SurfacePointState &surface,
     const double stableDt = qMin(dtSeconds, maxStableDt);
 
     // Итоговый поток (W/м²) считаем положительным при переносе энергии
-    // от поверхности к воздуху. Только сенсибл — LW обрабатывается в
-    // радиационном солвере.
-    const double totalFluxWPerM2 = sensibleFluxWPerM2;
+    // от поверхности к воздуху. Используем effectiveTransfer (с учётом
+    // снежной изоляции) вместо чистого sensibleTransfer.
+    const double totalFluxWPerM2 = effectiveTransfer * (surfaceTemperature - airTemperatureKelvin);
     const double airDelta = totalFluxWPerM2 * stableDt / airHeatCapacityJPerM2K;
 
     surface.applySurfaceFlux(-totalFluxWPerM2, stableDt);
