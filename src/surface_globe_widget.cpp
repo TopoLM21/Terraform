@@ -212,6 +212,12 @@ void SurfaceGlobeWidget::setPrecipitationRange(double minKgPerM2, double maxKgPe
     update();
 }
 
+void SurfaceGlobeWidget::setBiomassRange(double minKgPerM2, double maxKgPerM2) {
+    minBiomassKgPerM2_ = minKgPerM2;
+    maxBiomassKgPerM2_ = maxKgPerM2;
+    update();
+}
+
 void SurfaceGlobeWidget::setMarkupVisible(bool visible) {
     if (markupVisible_ == visible) {
         return;
@@ -414,6 +420,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
             globePoint.color = pressureToColor(point.pressureAtm);
         } else if (mapMode_ == SurfaceMapMode::Precipitation) {
             globePoint.color = precipitationToColor(point.precipitationKgPerM2);
+        } else if (mapMode_ == SurfaceMapMode::Biomass) {
+            globePoint.color = biomassToColor(point.vegetationBiomass);
         } else if (mapMode_ == SurfaceMapMode::Realistic) {
             const QColor baseColor =
                 realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -486,6 +494,8 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
                 cellDraw.color = pressureToColor(cellPoint.pressureAtm);
             } else if (mapMode_ == SurfaceMapMode::Precipitation) {
                 cellDraw.color = precipitationToColor(cellPoint.precipitationKgPerM2);
+            } else if (mapMode_ == SurfaceMapMode::Biomass) {
+                cellDraw.color = biomassToColor(cellPoint.vegetationBiomass);
             } else if (mapMode_ == SurfaceMapMode::Realistic) {
                 const QColor baseColor =
                     realisticSurfaceColor(cellPoint, minHeightKm_, maxHeightKm_);
@@ -632,6 +642,17 @@ QColor SurfaceGlobeWidget::precipitationToColor(double precipitationKgPerM2) con
                                 (maxPrecipitationKgPerM2_ - minPrecipitationKgPerM2_),
                             1.0);
     return precipitationColorForRatio(t);
+}
+
+QColor SurfaceGlobeWidget::biomassToColor(double biomassKgPerM2) const {
+    const double range = maxBiomassKgPerM2_ - minBiomassKgPerM2_;
+    const double t = (range > 0.0)
+        ? qBound(0.0, (biomassKgPerM2 - minBiomassKgPerM2_) / range, 1.0)
+        : 0.0;
+    const int r = static_cast<int>(160 * (1.0 - t) + 20 * t);
+    const int g = static_cast<int>(120 * (1.0 - t) + 160 * t);
+    const int b = static_cast<int>(60 * (1.0 - t) + 30 * t);
+    return QColor(r, g, b);
 }
 
 QColor SurfaceGlobeWidget::applyLighting(const QColor &baseColor, double lightFactor) const {

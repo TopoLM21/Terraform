@@ -842,6 +842,9 @@ struct SurfaceGridComputationResult {
     bool hasPrecipitationRange = false;
     double minPrecipitationKgPerM2 = 0.0;
     double maxPrecipitationKgPerM2 = 0.0;
+    bool hasBiomassRange = false;
+    double minBiomassKgPerM2 = 0.0;
+    double maxBiomassKgPerM2 = 0.0;
     bool hasWindRange = false;
     double minWindSpeedMps = 0.0;
     double maxWindSpeedMps = 0.0;
@@ -1413,6 +1416,8 @@ public:
                                          static_cast<int>(SurfaceMapMode::Pressure));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Осадки"),
                                          static_cast<int>(SurfaceMapMode::Precipitation));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Биомасса"),
+                                         static_cast<int>(SurfaceMapMode::Biomass));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Реалистичный"),
                                          static_cast<int>(SurfaceMapMode::Realistic));
         subsurfaceLayersSpinBox_ = new QSpinBox(this);
@@ -2259,6 +2264,9 @@ private:
     double surfaceMinPrecipitationKgPerM2_ = 0.0;
     double surfaceMaxPrecipitationKgPerM2_ = 0.0;
     bool hasSurfacePrecipitationRange_ = false;
+    double surfaceMinBiomassKgPerM2_ = 0.0;
+    double surfaceMaxBiomassKgPerM2_ = 0.0;
+    bool hasSurfaceBiomassRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
@@ -5096,6 +5104,15 @@ private:
         }
     }
 
+    void applySurfaceBiomassRangeToViews(double minKgPerM2, double maxKgPerM2) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setBiomassRange(minKgPerM2, maxKgPerM2);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setBiomassRange(minKgPerM2, maxKgPerM2);
+        }
+    }
+
     void applySurfaceCloudOpacityBoost(double boost) {
         if (surfaceMapWidget_) {
             surfaceMapWidget_->setCloudOpacityBoost(boost);
@@ -5121,6 +5138,9 @@ private:
         } else if (mode == SurfaceMapMode::Precipitation && hasSurfacePrecipitationRange_) {
             applySurfacePrecipitationRangeToViews(surfaceMinPrecipitationKgPerM2_,
                                                   surfaceMaxPrecipitationKgPerM2_);
+        } else if (mode == SurfaceMapMode::Biomass && hasSurfaceBiomassRange_) {
+            applySurfaceBiomassRangeToViews(surfaceMinBiomassKgPerM2_,
+                                            surfaceMaxBiomassKgPerM2_);
         }
         refreshSurfaceLegend();
     }
@@ -5780,6 +5800,8 @@ private:
         double maxPressureAtm = std::numeric_limits<double>::lowest();
         double minPrecipitation = std::numeric_limits<double>::max();
         double maxPrecipitation = std::numeric_limits<double>::lowest();
+        double minBiomass = std::numeric_limits<double>::max();
+        double maxBiomass = std::numeric_limits<double>::lowest();
         const int logPointIndex = qBound(0, input.logPointIndex, result.grid.points().size() - 1);
         for (int i = 0; i < result.grid.points().size(); ++i) {
             if ((i % 64) == 0 && shouldCancel()) {
@@ -5852,6 +5874,8 @@ private:
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
             maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
+            minBiomass = qMin(minBiomass, point.vegetationBiomass);
+            maxBiomass = qMax(maxBiomass, point.vegetationBiomass);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const auto materialIt = input.materialsById.constFind(point.materialId);
@@ -5992,6 +6016,9 @@ private:
         result.hasPrecipitationRange = minPrecipitation <= maxPrecipitation;
         result.minPrecipitationKgPerM2 = minPrecipitation;
         result.maxPrecipitationKgPerM2 = maxPrecipitation;
+        result.hasBiomassRange = minBiomass <= maxBiomass;
+        result.minBiomassKgPerM2 = minBiomass;
+        result.maxBiomassKgPerM2 = maxBiomass;
 
         double meanSurfaceTemperatureKelvin = 0.0;
         int meanSurfaceSamples = 0;
@@ -6179,6 +6206,16 @@ private:
         } else {
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
         }
+        if (result.hasBiomassRange &&
+            result.minBiomassKgPerM2 <= result.maxBiomassKgPerM2) {
+            applySurfaceBiomassRangeToViews(result.minBiomassKgPerM2,
+                                             result.maxBiomassKgPerM2);
+            updateSurfaceBiomassLegend(true,
+                                        result.minBiomassKgPerM2,
+                                        result.maxBiomassKgPerM2);
+        } else {
+            updateSurfaceBiomassLegend(false, 0.0, 0.0);
+        }
         if (result.hasWindRange && result.minWindSpeedMps <= result.maxWindSpeedMps) {
             applySurfaceWindRangeToViews(result.minWindSpeedMps, result.maxWindSpeedMps);
             updateSurfaceWindLegend(true, result.minWindSpeedMps, result.maxWindSpeedMps);
@@ -6206,6 +6243,7 @@ private:
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
+            updateSurfaceBiomassLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
             resumeSurfaceSimulationAfterGridUpdate();
             return;
@@ -6219,6 +6257,7 @@ private:
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
+            updateSurfaceBiomassLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
             resumeSurfaceSimulationAfterGridUpdate();
             return;
@@ -6793,6 +6832,8 @@ private:
         double maxPressureAtm = std::numeric_limits<double>::lowest();
         double minPrecipitation = std::numeric_limits<double>::max();
         double maxPrecipitation = std::numeric_limits<double>::lowest();
+        double minBiomass = std::numeric_limits<double>::max();
+        double maxBiomass = std::numeric_limits<double>::lowest();
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             const double advectedAtm = advectedPressures.at(i);
@@ -6850,6 +6891,8 @@ private:
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
             maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
+            minBiomass = qMin(minBiomass, point.vegetationBiomass);
+            maxBiomass = qMax(maxBiomass, point.vegetationBiomass);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point);
@@ -7089,6 +7132,12 @@ private:
         } else {
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
         }
+        if (minBiomass <= maxBiomass) {
+            applySurfaceBiomassRangeToViews(minBiomass, maxBiomass);
+            updateSurfaceBiomassLegend(true, minBiomass, maxBiomass);
+        } else {
+            updateSurfaceBiomassLegend(false, 0.0, 0.0);
+        }
 
         const bool publishDaily = surfaceTime_.hourIndex + 1 >= solarStepsPerDay;
         updateSurfaceTemperatureAggregation(publishDaily, rotationMode, useAtmosphericModel);
@@ -7151,6 +7200,19 @@ private:
             surfaceMaxPrecipitationKgPerM2_ = maxPrecipitationKgPerM2;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Precipitation) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceBiomassLegend(bool hasRange,
+                                     double minBiomassKgPerM2,
+                                     double maxBiomassKgPerM2) {
+        hasSurfaceBiomassRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinBiomassKgPerM2_ = minBiomassKgPerM2;
+            surfaceMaxBiomassKgPerM2_ = maxBiomassKgPerM2;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::Biomass) {
             refreshSurfaceLegend();
         }
     }
@@ -7329,6 +7391,23 @@ private:
                     surfaceMinPrecipitationKgPerM2_,
                     surfaceMaxPrecipitationKgPerM2_);
             }
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::Biomass) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
+            }
+            if (!hasSurfaceBiomassRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 кг/м²").arg(locale.toString(surfaceMinBiomassKgPerM2_, 'f', 2)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 кг/м²").arg(locale.toString(surfaceMaxBiomassKgPerM2_, 'f', 2)));
             return;
         }
 

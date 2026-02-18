@@ -216,6 +216,12 @@ void SurfaceMapWidget::setPrecipitationRange(double minKgPerM2, double maxKgPerM
     rebuildImages();
 }
 
+void SurfaceMapWidget::setBiomassRange(double minKgPerM2, double maxKgPerM2) {
+    minBiomassKgPerM2_ = minKgPerM2;
+    maxBiomassKgPerM2_ = maxKgPerM2;
+    rebuildImages();
+}
+
 void SurfaceMapWidget::setInterpolationEnabled(bool enabled) {
     if (interpolationEnabled_ == enabled) {
         return;
@@ -428,6 +434,8 @@ void SurfaceMapWidget::rebuildImages() {
                             sample = points[pointIndex].pressureAtm;
                         } else if (mapMode_ == SurfaceMapMode::Precipitation) {
                             sample = points[pointIndex].precipitationKgPerM2;
+                        } else if (mapMode_ == SurfaceMapMode::Biomass) {
+                            sample = points[pointIndex].vegetationBiomass;
                         } else {
                             sample = points[pointIndex].windSpeedMps;
                         }
@@ -443,6 +451,8 @@ void SurfaceMapWidget::rebuildImages() {
                         scanLine[x] = pressureToColor(value);
                     } else if (mapMode_ == SurfaceMapMode::Precipitation) {
                         scanLine[x] = precipitationToColor(value);
+                    } else if (mapMode_ == SurfaceMapMode::Biomass) {
+                        scanLine[x] = biomassToColor(value);
                     } else {
                         scanLine[x] = windToColor(value);
                     }
@@ -479,6 +489,8 @@ void SurfaceMapWidget::rebuildImages() {
                     color = pressureToColor(point.pressureAtm);
                 } else if (mapMode_ == SurfaceMapMode::Precipitation) {
                     color = precipitationToColor(point.precipitationKgPerM2);
+                } else if (mapMode_ == SurfaceMapMode::Biomass) {
+                    color = biomassToColor(point.vegetationBiomass);
                 } else if (mapMode_ == SurfaceMapMode::Realistic) {
                     const QColor baseColor =
                         realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -526,6 +538,8 @@ void SurfaceMapWidget::rebuildImages() {
                         color = pressureToColor(point.pressureAtm);
                     } else if (mapMode_ == SurfaceMapMode::Precipitation) {
                         color = precipitationToColor(point.precipitationKgPerM2);
+                    } else if (mapMode_ == SurfaceMapMode::Biomass) {
+                        color = biomassToColor(point.vegetationBiomass);
                     } else if (mapMode_ == SurfaceMapMode::Realistic) {
                         const QColor baseColor =
                             realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -628,6 +642,18 @@ QRgb SurfaceMapWidget::precipitationToColor(double precipitationKgPerM2) const {
                                 (maxPrecipitationKgPerM2_ - minPrecipitationKgPerM2_),
                             1.0);
     return precipitationColorForRatio(t).rgb();
+}
+
+QRgb SurfaceMapWidget::biomassToColor(double biomassKgPerM2) const {
+    const double range = maxBiomassKgPerM2_ - minBiomassKgPerM2_;
+    const double t = (range > 0.0)
+        ? qBound(0.0, (biomassKgPerM2 - minBiomassKgPerM2_) / range, 1.0)
+        : 0.0;
+    // Градиент: коричневый (пустыня) → зелёный (густая растительность).
+    const int r = static_cast<int>(160 * (1.0 - t) + 20 * t);
+    const int g = static_cast<int>(120 * (1.0 - t) + 160 * t);
+    const int b = static_cast<int>(60 * (1.0 - t) + 30 * t);
+    return qRgba(r, g, b, 255);
 }
 
 int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
