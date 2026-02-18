@@ -117,6 +117,10 @@ const SubsurfaceTemperatureSolver &SurfacePointState::solver() const {
     return solver_;
 }
 
+SubsurfaceTemperatureSolver &SurfacePointState::mutableSolver() {
+    return solver_;
+}
+
 double SurfacePointState::absorbedFlux(double solarIrradiance) const {
     return solarIrradiance * (1.0 - albedo_);
 }

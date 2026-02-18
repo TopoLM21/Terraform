@@ -25,6 +25,7 @@ public:
     void setGreenhouseOpacity(double greenhouseOpacity);
     void setAlbedo(double albedo);
     const SubsurfaceTemperatureSolver &solver() const;
+    SubsurfaceTemperatureSolver &mutableSolver();
 
     double absorbedFlux(double solarIrradiance) const;
     double surfaceEmittedFlux() const;

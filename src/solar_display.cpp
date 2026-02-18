@@ -848,6 +848,9 @@ struct SurfaceGridComputationResult {
     bool hasWindRange = false;
     double minWindSpeedMps = 0.0;
     double maxWindSpeedMps = 0.0;
+    bool hasOceanCurrentRange = false;
+    double minOceanCurrentMps = 0.0;
+    double maxOceanCurrentMps = 0.0;
     double declinationDegrees = 0.0;
     double orbitalPhaseRadians = 0.0;
     int stepsPerDay = 1;
@@ -1418,6 +1421,8 @@ public:
                                          static_cast<int>(SurfaceMapMode::Precipitation));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Биомасса"),
                                          static_cast<int>(SurfaceMapMode::Biomass));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Океанские течения"),
+                                         static_cast<int>(SurfaceMapMode::OceanCurrents));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Реалистичный"),
                                          static_cast<int>(SurfaceMapMode::Realistic));
         subsurfaceLayersSpinBox_ = new QSpinBox(this);
@@ -2267,6 +2272,9 @@ private:
     double surfaceMinBiomassKgPerM2_ = 0.0;
     double surfaceMaxBiomassKgPerM2_ = 0.0;
     bool hasSurfaceBiomassRange_ = false;
+    double surfaceMinOceanCurrentMps_ = 0.0;
+    double surfaceMaxOceanCurrentMps_ = 0.0;
+    bool hasSurfaceOceanCurrentRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
@@ -5113,6 +5121,15 @@ private:
         }
     }
 
+    void applySurfaceOceanCurrentRangeToViews(double minMps, double maxMps) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setOceanCurrentRange(minMps, maxMps);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setOceanCurrentRange(minMps, maxMps);
+        }
+    }
+
     void applySurfaceCloudOpacityBoost(double boost) {
         if (surfaceMapWidget_) {
             surfaceMapWidget_->setCloudOpacityBoost(boost);
@@ -5141,6 +5158,9 @@ private:
         } else if (mode == SurfaceMapMode::Biomass && hasSurfaceBiomassRange_) {
             applySurfaceBiomassRangeToViews(surfaceMinBiomassKgPerM2_,
                                             surfaceMaxBiomassKgPerM2_);
+        } else if (mode == SurfaceMapMode::OceanCurrents && hasSurfaceOceanCurrentRange_) {
+            applySurfaceOceanCurrentRangeToViews(surfaceMinOceanCurrentMps_,
+                                                  surfaceMaxOceanCurrentMps_);
         }
         refreshSurfaceLegend();
     }
@@ -5802,6 +5822,8 @@ private:
         double maxPrecipitation = std::numeric_limits<double>::lowest();
         double minBiomass = std::numeric_limits<double>::max();
         double maxBiomass = std::numeric_limits<double>::lowest();
+        double minOceanCurrent = std::numeric_limits<double>::max();
+        double maxOceanCurrent = std::numeric_limits<double>::lowest();
         const int logPointIndex = qBound(0, input.logPointIndex, result.grid.points().size() - 1);
         for (int i = 0; i < result.grid.points().size(); ++i) {
             if ((i % 64) == 0 && shouldCancel()) {
@@ -5876,6 +5898,8 @@ private:
             maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
             minBiomass = qMin(minBiomass, point.vegetationBiomass);
             maxBiomass = qMax(maxBiomass, point.vegetationBiomass);
+            minOceanCurrent = qMin(minOceanCurrent, point.oceanCurrentSpeedMps);
+            maxOceanCurrent = qMax(maxOceanCurrent, point.oceanCurrentSpeedMps);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const auto materialIt = input.materialsById.constFind(point.materialId);
@@ -6019,6 +6043,9 @@ private:
         result.hasBiomassRange = minBiomass <= maxBiomass;
         result.minBiomassKgPerM2 = minBiomass;
         result.maxBiomassKgPerM2 = maxBiomass;
+        result.hasOceanCurrentRange = minOceanCurrent <= maxOceanCurrent;
+        result.minOceanCurrentMps = minOceanCurrent;
+        result.maxOceanCurrentMps = maxOceanCurrent;
 
         double meanSurfaceTemperatureKelvin = 0.0;
         int meanSurfaceSamples = 0;
@@ -6216,6 +6243,16 @@ private:
         } else {
             updateSurfaceBiomassLegend(false, 0.0, 0.0);
         }
+        if (result.hasOceanCurrentRange &&
+            result.minOceanCurrentMps <= result.maxOceanCurrentMps) {
+            applySurfaceOceanCurrentRangeToViews(result.minOceanCurrentMps,
+                                                  result.maxOceanCurrentMps);
+            updateSurfaceOceanCurrentLegend(true,
+                                             result.minOceanCurrentMps,
+                                             result.maxOceanCurrentMps);
+        } else {
+            updateSurfaceOceanCurrentLegend(false, 0.0, 0.0);
+        }
         if (result.hasWindRange && result.minWindSpeedMps <= result.maxWindSpeedMps) {
             applySurfaceWindRangeToViews(result.minWindSpeedMps, result.maxWindSpeedMps);
             updateSurfaceWindLegend(true, result.minWindSpeedMps, result.maxWindSpeedMps);
@@ -6244,6 +6281,7 @@ private:
             updateSurfacePressureLegend(false, 0.0, 0.0);
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
             updateSurfaceBiomassLegend(false, 0.0, 0.0);
+            updateSurfaceOceanCurrentLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
             resumeSurfaceSimulationAfterGridUpdate();
             return;
@@ -6258,6 +6296,7 @@ private:
             updateSurfacePressureLegend(false, 0.0, 0.0);
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
             updateSurfaceBiomassLegend(false, 0.0, 0.0);
+            updateSurfaceOceanCurrentLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
             resumeSurfaceSimulationAfterGridUpdate();
             return;
@@ -6834,6 +6873,8 @@ private:
         double maxPrecipitation = std::numeric_limits<double>::lowest();
         double minBiomass = std::numeric_limits<double>::max();
         double maxBiomass = std::numeric_limits<double>::lowest();
+        double minOceanCurrent = std::numeric_limits<double>::max();
+        double maxOceanCurrent = std::numeric_limits<double>::lowest();
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             const double advectedAtm = advectedPressures.at(i);
@@ -6893,6 +6934,8 @@ private:
             maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
             minBiomass = qMin(minBiomass, point.vegetationBiomass);
             maxBiomass = qMax(maxBiomass, point.vegetationBiomass);
+            minOceanCurrent = qMin(minOceanCurrent, point.oceanCurrentSpeedMps);
+            maxOceanCurrent = qMax(maxOceanCurrent, point.oceanCurrentSpeedMps);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point);
@@ -7138,6 +7181,12 @@ private:
         } else {
             updateSurfaceBiomassLegend(false, 0.0, 0.0);
         }
+        if (minOceanCurrent <= maxOceanCurrent) {
+            applySurfaceOceanCurrentRangeToViews(minOceanCurrent, maxOceanCurrent);
+            updateSurfaceOceanCurrentLegend(true, minOceanCurrent, maxOceanCurrent);
+        } else {
+            updateSurfaceOceanCurrentLegend(false, 0.0, 0.0);
+        }
 
         const bool publishDaily = surfaceTime_.hourIndex + 1 >= solarStepsPerDay;
         updateSurfaceTemperatureAggregation(publishDaily, rotationMode, useAtmosphericModel);
@@ -7213,6 +7262,19 @@ private:
             surfaceMaxBiomassKgPerM2_ = maxBiomassKgPerM2;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Biomass) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceOceanCurrentLegend(bool hasRange,
+                                          double minMps,
+                                          double maxMps) {
+        hasSurfaceOceanCurrentRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinOceanCurrentMps_ = minMps;
+            surfaceMaxOceanCurrentMps_ = maxMps;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::OceanCurrents) {
             refreshSurfaceLegend();
         }
     }
@@ -7408,6 +7470,23 @@ private:
                 QStringLiteral("Мин: %1 кг/м²").arg(locale.toString(surfaceMinBiomassKgPerM2_, 'f', 2)));
             surfaceMaxTemperatureLabel_->setText(
                 QStringLiteral("Макс: %1 кг/м²").arg(locale.toString(surfaceMaxBiomassKgPerM2_, 'f', 2)));
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::OceanCurrents) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
+            }
+            if (!hasSurfaceOceanCurrentRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 м/с").arg(locale.toString(surfaceMinOceanCurrentMps_, 'f', 3)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 м/с").arg(locale.toString(surfaceMaxOceanCurrentMps_, 'f', 3)));
             return;
         }
 

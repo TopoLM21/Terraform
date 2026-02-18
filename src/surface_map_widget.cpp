@@ -222,6 +222,12 @@ void SurfaceMapWidget::setBiomassRange(double minKgPerM2, double maxKgPerM2) {
     rebuildImages();
 }
 
+void SurfaceMapWidget::setOceanCurrentRange(double minMps, double maxMps) {
+    minOceanCurrentMps_ = minMps;
+    maxOceanCurrentMps_ = maxMps;
+    rebuildImages();
+}
+
 void SurfaceMapWidget::setInterpolationEnabled(bool enabled) {
     if (interpolationEnabled_ == enabled) {
         return;
@@ -436,6 +442,8 @@ void SurfaceMapWidget::rebuildImages() {
                             sample = points[pointIndex].precipitationKgPerM2;
                         } else if (mapMode_ == SurfaceMapMode::Biomass) {
                             sample = points[pointIndex].vegetationBiomass;
+                        } else if (mapMode_ == SurfaceMapMode::OceanCurrents) {
+                            sample = points[pointIndex].oceanCurrentSpeedMps;
                         } else {
                             sample = points[pointIndex].windSpeedMps;
                         }
@@ -453,6 +461,23 @@ void SurfaceMapWidget::rebuildImages() {
                         scanLine[x] = precipitationToColor(value);
                     } else if (mapMode_ == SurfaceMapMode::Biomass) {
                         scanLine[x] = biomassToColor(value);
+                    } else if (mapMode_ == SurfaceMapMode::OceanCurrents) {
+                        // Определяем, океан ли это, по точке с наибольшим весом.
+                        bool isOcean = false;
+                        if (!pixelWeights.indices.isEmpty()) {
+                            int bestIdx = pixelWeights.indices.first();
+                            double bestW = 0.0;
+                            for (int i = 0; i < pixelWeights.indices.size(); ++i) {
+                                if (pixelWeights.weights[i] > bestW) {
+                                    bestW = pixelWeights.weights[i];
+                                    bestIdx = pixelWeights.indices[i];
+                                }
+                            }
+                            if (bestIdx >= 0 && bestIdx < points.size()) {
+                                isOcean = (points[bestIdx].materialId == QLatin1String("ocean"));
+                            }
+                        }
+                        scanLine[x] = oceanCurrentToColor(value, isOcean);
                     } else {
                         scanLine[x] = windToColor(value);
                     }
@@ -491,6 +516,9 @@ void SurfaceMapWidget::rebuildImages() {
                     color = precipitationToColor(point.precipitationKgPerM2);
                 } else if (mapMode_ == SurfaceMapMode::Biomass) {
                     color = biomassToColor(point.vegetationBiomass);
+                } else if (mapMode_ == SurfaceMapMode::OceanCurrents) {
+                    const bool isOcean = (point.materialId == QLatin1String("ocean"));
+                    color = oceanCurrentToColor(point.oceanCurrentSpeedMps, isOcean);
                 } else if (mapMode_ == SurfaceMapMode::Realistic) {
                     const QColor baseColor =
                         realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -540,6 +568,9 @@ void SurfaceMapWidget::rebuildImages() {
                         color = precipitationToColor(point.precipitationKgPerM2);
                     } else if (mapMode_ == SurfaceMapMode::Biomass) {
                         color = biomassToColor(point.vegetationBiomass);
+                    } else if (mapMode_ == SurfaceMapMode::OceanCurrents) {
+                        const bool isOcean = (point.materialId == QLatin1String("ocean"));
+                        color = oceanCurrentToColor(point.oceanCurrentSpeedMps, isOcean);
                     } else if (mapMode_ == SurfaceMapMode::Realistic) {
                         const QColor baseColor =
                             realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -557,6 +588,13 @@ void SurfaceMapWidget::rebuildImages() {
             idPainter.setBrush(QColor::fromRgb(encodeId(i)));
             idPainter.drawEllipse(idEllipse);
         }
+    }
+
+    // Стрелки океанских течений рисуем поверх цветового слоя.
+    if (mapMode_ == SurfaceMapMode::OceanCurrents) {
+        QPainter arrowPainter(&colorImage_);
+        arrowPainter.setRenderHint(QPainter::Antialiasing, true);
+        drawOceanCurrentArrows(arrowPainter, scaledSize);
     }
 
     update();
@@ -654,6 +692,68 @@ QRgb SurfaceMapWidget::biomassToColor(double biomassKgPerM2) const {
     const int g = static_cast<int>(120 * (1.0 - t) + 160 * t);
     const int b = static_cast<int>(60 * (1.0 - t) + 30 * t);
     return qRgba(r, g, b, 255);
+}
+
+QRgb SurfaceMapWidget::oceanCurrentToColor(double speedMps, bool isOcean) const {
+    if (!isOcean) {
+        return qRgba(80, 70, 60, 255); // Суша: тёмно-коричневый.
+    }
+    const double range = maxOceanCurrentMps_ - minOceanCurrentMps_;
+    const double t = (range > 0.0)
+        ? qBound(0.0, (speedMps - minOceanCurrentMps_) / range, 1.0)
+        : 0.0;
+    // Градиент: тёмно-синий (спокойный) → голубой → белый (быстрое течение).
+    const int r = static_cast<int>(10 * (1.0 - t) + 200 * t);
+    const int g = static_cast<int>(30 * (1.0 - t) + 230 * t);
+    const int b = static_cast<int>(100 * (1.0 - t) + 255 * t);
+    return qRgba(r, g, b, 255);
+}
+
+void SurfaceMapWidget::drawOceanCurrentArrows(QPainter &painter,
+                                               const QSize &imageSize) const {
+    if (!grid_ || grid_->points().isEmpty()) {
+        return;
+    }
+    const QLatin1String oceanId("ocean");
+    const double arrowMaxPx = qMax(4.0, qMin(imageSize.width(), imageSize.height()) / 60.0);
+    painter.setPen(QPen(QColor(255, 255, 255, 200), 1.2));
+
+    for (int i = 0; i < grid_->points().size(); ++i) {
+        const auto &point = grid_->points().at(i);
+        if (point.materialId != oceanId) continue;
+        if (point.oceanCurrentSpeedMps < 1e-6) continue;
+
+        const QPoint center = mapPointToPixel(point.latitudeDeg, point.longitudeDeg, imageSize);
+        if (!QRect(QPoint(0, 0), imageSize).contains(center)) continue;
+
+        // Длина стрелки пропорциональна скорости.
+        const double range = maxOceanCurrentMps_ - minOceanCurrentMps_;
+        const double normalizedSpeed = (range > 0.0)
+            ? qBound(0.0, (point.oceanCurrentSpeedMps - minOceanCurrentMps_) / range, 1.0)
+            : 0.0;
+        const double arrowLen = arrowMaxPx * (0.3 + 0.7 * normalizedSpeed);
+
+        // Угол: восток = +X, север = -Y на карте.
+        const double angle = std::atan2(-point.oceanCurrentNorthMps,
+                                         point.oceanCurrentEastMps);
+        const double dx = arrowLen * std::cos(angle);
+        const double dy = arrowLen * std::sin(angle);
+        const QPointF tip(center.x() + dx, center.y() + dy);
+        const QPointF base(center.x() - dx * 0.3, center.y() - dy * 0.3);
+
+        // Линия стрелки.
+        painter.drawLine(base, tip);
+
+        // Наконечник.
+        const double headLen = arrowLen * 0.35;
+        const double headAngle = 0.45;
+        const QPointF h1(tip.x() - headLen * std::cos(angle - headAngle),
+                         tip.y() - headLen * std::sin(angle - headAngle));
+        const QPointF h2(tip.x() - headLen * std::cos(angle + headAngle),
+                         tip.y() - headLen * std::sin(angle + headAngle));
+        painter.drawLine(tip, h1);
+        painter.drawLine(tip, h2);
+    }
 }
 
 int SurfaceMapWidget::pointIdAt(const QPoint &pixel) const {
