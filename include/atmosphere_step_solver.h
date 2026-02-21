@@ -57,6 +57,7 @@ private:
     VegetationModel vegetationModel_;
     OceanCurrentSolver oceanCurrentSolver_;
     double co2Share_ = 0.0;
+    double sf6Share_ = 0.0;
     double gravityMps2_ = 0.0;
     double rSpecific_ = 0.0;
     double specificHeatCp_ = 0.0;

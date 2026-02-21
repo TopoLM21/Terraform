@@ -1540,12 +1540,90 @@ public:
                     subsurfaceToggleButton->setArrowType(checked ? Qt::DownArrow
                                                                 : Qt::RightArrow);
                 });
+        // ── Терраформирование: простые инструменты ──────────────────────────
+        auto *terraformLayout = new QHBoxLayout();
+        auto *addWaterButton = new QPushButton(QStringLiteral("+ Вода"), this);
+        addWaterButton->setToolTip(QStringLiteral(
+            "Добавить воду на поверхность всех наземных тайлов (+50 кг/м²)"));
+        auto *addSF6Button = new QPushButton(QStringLiteral("+ SF₆"), this);
+        addSF6Button->setToolTip(QStringLiteral(
+            "Добавить гексафторид серы в атмосферу (супер-парниковый газ, GWP ≈ 23500)"));
+        auto *addCO2Button = new QPushButton(QStringLiteral("+ CO₂"), this);
+        addCO2Button->setToolTip(QStringLiteral(
+            "Добавить углекислый газ в атмосферу"));
+        auto *removeCO2Button = new QPushButton(QStringLiteral("− CO₂"), this);
+        removeCO2Button->setToolTip(QStringLiteral(
+            "Удалить углекислый газ из атмосферы"));
+        terraformLayout->addWidget(addWaterButton);
+        terraformLayout->addWidget(addSF6Button);
+        terraformLayout->addWidget(addCO2Button);
+        terraformLayout->addWidget(removeCO2Button);
+        terraformLayout->addStretch();
+        connect(addWaterButton, &QPushButton::clicked, this, [this]() {
+            if (surfaceGrid_.points().isEmpty()) return;
+            constexpr double kWaterAmountKgPerM2 = 50.0;
+            for (auto &point : surfaceGrid_.points()) {
+                if (point.materialId == QLatin1String("ocean") &&
+                    point.waterPhase == PhaseModel::Phase::Liquid) {
+                    continue;
+                }
+                point.surfaceMoisture.addPrecipitation(kWaterAmountKgPerM2);
+            }
+            if (surfaceViewStack_ && surfaceViewStack_->currentWidget()) {
+                surfaceViewStack_->currentWidget()->update();
+            }
+        });
+        connect(addSF6Button, &QPushButton::clicked, this, [this]() {
+            if (!atmosphereWidget_ || !planetComboBox_ ||
+                planetComboBox_->currentIndex() < 0) return;
+            auto composition = atmosphereWidget_->composition(true);
+            // Добавляем 10 Гт SF₆ — мощный парниковый газ.
+            const double currentSF6 = composition.massGigatons(QStringLiteral("sf6"));
+            composition.setMassGigatons(QStringLiteral("sf6"), currentSF6 + 10.0);
+            atmosphereWidget_->setComposition(composition);
+            const int index = planetComboBox_->currentIndex();
+            planetComboBox_->setItemData(
+                index, QVariant::fromValue(composition), kRoleAtmosphere);
+            updateSurfaceGridTemperatures();
+        });
+        connect(addCO2Button, &QPushButton::clicked, this, [this]() {
+            if (!atmosphereWidget_ || !planetComboBox_ ||
+                planetComboBox_->currentIndex() < 0) return;
+            auto composition = atmosphereWidget_->composition(true);
+            const double currentCO2 = composition.massGigatons(QStringLiteral("co2"));
+            // Добавляем 10% CO₂ или минимум 100 Гт.
+            const double addAmount = qMax(100.0, currentCO2 * 0.1);
+            composition.setMassGigatons(QStringLiteral("co2"), currentCO2 + addAmount);
+            atmosphereWidget_->setComposition(composition);
+            const int index = planetComboBox_->currentIndex();
+            planetComboBox_->setItemData(
+                index, QVariant::fromValue(composition), kRoleAtmosphere);
+            updateSurfaceGridTemperatures();
+        });
+        connect(removeCO2Button, &QPushButton::clicked, this, [this]() {
+            if (!atmosphereWidget_ || !planetComboBox_ ||
+                planetComboBox_->currentIndex() < 0) return;
+            auto composition = atmosphereWidget_->composition(true);
+            const double currentCO2 = composition.massGigatons(QStringLiteral("co2"));
+            if (currentCO2 <= 0.0) return;
+            // Убираем 10% CO₂.
+            const double removeAmount = currentCO2 * 0.1;
+            composition.setMassGigatons(QStringLiteral("co2"),
+                                         qMax(0.0, currentCO2 - removeAmount));
+            atmosphereWidget_->setComposition(composition);
+            const int index = planetComboBox_->currentIndex();
+            planetComboBox_->setItemData(
+                index, QVariant::fromValue(composition), kRoleAtmosphere);
+            updateSurfaceGridTemperatures();
+        });
+
         auto *surfaceMapLayout = new QVBoxLayout();
         surfaceMapLayout->addLayout(surfaceLegendTopLayout);
         surfaceMapLayout->addLayout(surfaceControlLayout);
         surfaceMapLayout->addLayout(surfaceCalculationLayout);
         surfaceMapLayout->addWidget(subsurfaceToggleButton);
         surfaceMapLayout->addWidget(subsurfaceGroupBox);
+        surfaceMapLayout->addLayout(terraformLayout);
         surfaceMapLayout->addWidget(surfaceViewStack_, 1);
         surfaceMapLayout->addLayout(surfaceLegendBottomLayout);
         surfaceMapContainer_ = new QWidget(this);

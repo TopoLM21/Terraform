@@ -47,6 +47,10 @@ constexpr double kIceSublimationFraction = 0.1;
 //   Марс  (0.006 атм, 95%): per-layer τ ≈ 0.3, суммарно ≈ 0.6
 constexpr double kCO2LogCoeff = 0.16;
 constexpr double kCO2LogScale = 10.0;
+// SF₆: GWP ≈ 23500 × CO₂. Масштаб поглощения намного выше CO₂.
+// Эффективный кратный коэффициент: ~20000× по шкале поглощения.
+constexpr double kSF6LogCoeff = 0.16;
+constexpr double kSF6LogScale = 200000.0;
 // Время сглаживания для интенсивности осадков (EMA) в секундах.
 constexpr double kPrecipitationEmaTimeSeconds = 3600.0;
 
@@ -204,7 +208,8 @@ AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composit
     , timeStepSeconds_(timeStepSeconds)
     , dayLengthSeconds_(dayLengthSeconds)
     , isRetrograde_(isRetrograde)
-    , co2Share_(gasShareById(composition, QStringLiteral("co2"))) {}
+    , co2Share_(gasShareById(composition, QStringLiteral("co2")))
+    , sf6Share_(gasShareById(composition, QStringLiteral("sf6"))) {}
 
 const SurfaceMaterial &AtmosphereStepSolver::materialForPoint(
     const QHash<QString, SurfaceMaterial> &materialsById,
@@ -426,17 +431,20 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         // при больших давлениях (Венера: ~92 атм) и высоких концентрациях.
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
+            const double layerDensity = qMax(0.0, layers.at(li).densityKgPerM3());
+            const double layerThickness = qMax(0.0, layers.at(li).thicknessMeters());
+            const double pressureBroadening = qMax(0.0, layers.at(li).pressureAtm());
             // CO₂ column mass in layer (kg/m²).
-            const double co2ColumnKg = co2Share_ *
-                qMax(0.0, layers.at(li).densityKgPerM3()) *
-                qMax(0.0, layers.at(li).thicknessMeters());
-            const double pressureBroadening =
-                qMax(0.0, layers.at(li).pressureAtm());
+            const double co2ColumnKg = co2Share_ * layerDensity * layerThickness;
             const double co2TauLw =
                 kCO2LogCoeff * std::log1p(kCO2LogScale * co2ColumnKg * pressureBroadening);
+            // SF₆: суперпарниковый газ (GWP ≈ 23500 × CO₂).
+            const double sf6ColumnKg = sf6Share_ * layerDensity * layerThickness;
+            const double sf6TauLw =
+                kSF6LogCoeff * std::log1p(kSF6LogScale * sf6ColumnKg * pressureBroadening);
             layers[li].setOpticalDepthLongwave(
                 layers.at(li).opticalDepthLongwave() +
-                kH2OMassAbsorptionLw * h2oKg + co2TauLw);
+                kH2OMassAbsorptionLw * h2oKg + co2TauLw + sf6TauLw);
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() + kH2OMassAbsorptionSw * h2oKg);
         }
@@ -458,20 +466,23 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             layers[layerIndex].setTemperatureKelvin(updatedTemperature);
         }
 
-        // Восстанавливаем базовую оптическую толщину (без H₂O и CO₂-поправки),
+        // Восстанавливаем базовую оптическую толщину (без H₂O, CO₂ и SF₆-поправки),
         // чтобы на следующем шаге не накапливать вклад повторно.
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
-            const double co2ColumnKg = co2Share_ *
-                qMax(0.0, layers.at(li).densityKgPerM3()) *
-                qMax(0.0, layers.at(li).thicknessMeters());
+            const double layerDensity = qMax(0.0, layers.at(li).densityKgPerM3());
+            const double layerThickness = qMax(0.0, layers.at(li).thicknessMeters());
             const double pressureBroadening =
                 qMax(0.0, layers.at(li).pressureAtm());
+            const double co2ColumnKg = co2Share_ * layerDensity * layerThickness;
             const double co2TauLw =
                 kCO2LogCoeff * std::log1p(kCO2LogScale * co2ColumnKg * pressureBroadening);
+            const double sf6ColumnKg = sf6Share_ * layerDensity * layerThickness;
+            const double sf6TauLw =
+                kSF6LogCoeff * std::log1p(kSF6LogScale * sf6ColumnKg * pressureBroadening);
             layers[li].setOpticalDepthLongwave(
                 layers.at(li).opticalDepthLongwave() -
-                kH2OMassAbsorptionLw * h2oKg - co2TauLw);
+                kH2OMassAbsorptionLw * h2oKg - co2TauLw - sf6TauLw);
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() - kH2OMassAbsorptionSw * h2oKg);
         }
