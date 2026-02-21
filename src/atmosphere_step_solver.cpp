@@ -38,10 +38,15 @@ constexpr double kH2OMassAbsorptionSw = 0.01;
 // Доля сублимации: ледяной океан обеспечивает ~10% влаги от жидкого.
 // В реальности сублимация льда при -10°C ≈ 10–15% от испарения воды при 0°C.
 constexpr double kIceSublimationFraction = 0.1;
-// Массовый коэффициент поглощения CO₂ в длинноволновом ИК (15-мкм полоса).
-// При 1 атм уширение линий давлением включено: k_eff = k_base × P.
-// Для Земли (1 атм): k × P × co2_column ≈ 0.35 × 1 × 3 ≈ 1.05 → реалистично.
-constexpr double kCO2MassAbsorptionLw = 0.35;
+// Коэффициенты логарифмической формулы оптической толщины CO₂.
+// τ_co2 = kCO2LogCoeff × log1p(kCO2LogScale × co2Column × pressure).
+// Логарифм даёт правильное насыщение: при высоких давлениях (Венера)
+// поглощение растёт сублинейно (перекрытие линий / континуум).
+//   Земля (1 атм, 0.04%): per-layer τ ≈ 0.2, суммарно ≈ 1.2
+//   Венера (92 атм, 96%): per-layer τ ≈ 2.5, суммарно ≈ 100
+//   Марс  (0.006 атм, 95%): per-layer τ ≈ 0.3, суммарно ≈ 0.6
+constexpr double kCO2LogCoeff = 0.16;
+constexpr double kCO2LogScale = 10.0;
 // Время сглаживания для интенсивности осадков (EMA) в секундах.
 constexpr double kPrecipitationEmaTimeSeconds = 3600.0;
 
@@ -416,19 +421,19 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         // → больше испарения → положительная обратная связь.
         //
         // CO₂ — фиксированный, но с уширением линий давлением (pressure broadening).
-        // Базовая τ при инициализации слишком мала для земных условий (0.06% CO₂
-        // при 1 атм → τ ≈ 0.05). Реальный CO₂ даёт τ ≈ 1.0 из-за уширения.
-        // Добавляем поправку: k_co2 × co2_fraction × density × thickness × P.
+        // Логарифмическая формула: τ = k_log × log1p(scale × column × P).
+        // Насыщение через log1p корректно моделирует перекрытие линий
+        // при больших давлениях (Венера: ~92 атм) и высоких концентрациях.
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
-            // CO₂ column mass in layer (kg/m²) × pressure broadening factor.
+            // CO₂ column mass in layer (kg/m²).
             const double co2ColumnKg = co2Share_ *
                 qMax(0.0, layers.at(li).densityKgPerM3()) *
                 qMax(0.0, layers.at(li).thicknessMeters());
             const double pressureBroadening =
                 qMax(0.0, layers.at(li).pressureAtm());
             const double co2TauLw =
-                kCO2MassAbsorptionLw * co2ColumnKg * pressureBroadening;
+                kCO2LogCoeff * std::log1p(kCO2LogScale * co2ColumnKg * pressureBroadening);
             layers[li].setOpticalDepthLongwave(
                 layers.at(li).opticalDepthLongwave() +
                 kH2OMassAbsorptionLw * h2oKg + co2TauLw);
@@ -463,7 +468,7 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             const double pressureBroadening =
                 qMax(0.0, layers.at(li).pressureAtm());
             const double co2TauLw =
-                kCO2MassAbsorptionLw * co2ColumnKg * pressureBroadening;
+                kCO2LogCoeff * std::log1p(kCO2LogScale * co2ColumnKg * pressureBroadening);
             layers[li].setOpticalDepthLongwave(
                 layers.at(li).opticalDepthLongwave() -
                 kH2OMassAbsorptionLw * h2oKg - co2TauLw);

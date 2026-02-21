@@ -1,4 +1,5 @@
 #include "ocean_current_solver.h"
+#include "fluids/PhaseModel.h"
 
 #include <QtCore/QtMath>
 #include <cmath>
@@ -94,7 +95,9 @@ void OceanCurrentSolver::step(PlanetSurfaceGrid &grid,
     // ── Фаза 1: вычисляем течения из ветра ──
     for (int i = 0; i < n; ++i) {
         auto &point = grid.points()[i];
-        if (point.materialId != oceanId) {
+        // Течения только для жидкого океана; замёрзший — нет течений.
+        if (point.materialId != oceanId ||
+            point.waterPhase == PhaseModel::Phase::Ice) {
             point.oceanCurrentEastMps = 0.0;
             point.oceanCurrentNorthMps = 0.0;
             point.oceanCurrentSpeedMps = 0.0;
@@ -119,11 +122,13 @@ void OceanCurrentSolver::step(PlanetSurfaceGrid &grid,
     // Коэффициент D уменьшается с глубиной.
     // Работаем через буфер, чтобы не зависеть от порядка обхода.
 
-    // Собираем индексы океанских точек.
+    // Собираем индексы жидких океанских точек (замёрзшие не участвуют).
     QVector<int> oceanIndices;
     oceanIndices.reserve(n);
     for (int i = 0; i < n; ++i) {
-        if (grid.points().at(i).materialId == oceanId) {
+        const auto &pt = grid.points().at(i);
+        if (pt.materialId == oceanId &&
+            pt.waterPhase != PhaseModel::Phase::Ice) {
             oceanIndices.push_back(i);
         }
     }
