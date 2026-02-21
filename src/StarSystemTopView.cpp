@@ -22,26 +22,21 @@ constexpr qreal kMaxStarRadius = 16.0;
 constexpr int kKeplerIterations = 8;
 
 QPointF orbitPointAu(double semiMajorAxis,
-                    double eccentricity,
-                    double perihelionArgumentRadians,
-                    double trueAnomalyRadians) {
-    // Полярное уравнение эллипса относительно фокуса (где находится звезда):
-    // r = a * (1 - e^2) / (1 + e * cos(ν)), ν — истинная аномалия.
+                     double eccentricity,
+                     double perihelionArgumentRadians,
+                     double trueAnomalyRadians) {
     const double radius =
         semiMajorAxis * (1.0 - eccentricity * eccentricity) /
         (1.0 + eccentricity * qCos(trueAnomalyRadians));
     const double x = radius * qCos(trueAnomalyRadians);
     const double y = radius * qSin(trueAnomalyRadians);
 
-    // Аргумент перицентра поворачивает орбиту в плоскости экрана.
     const double cosArg = qCos(perihelionArgumentRadians);
     const double sinArg = qSin(perihelionArgumentRadians);
     return QPointF(x * cosArg - y * sinArg, x * sinArg + y * cosArg);
 }
 
 QPointF toScreen(const QPointF &positionAu, const QPointF &center, double scale) {
-    // Переводим астрономические единицы в пиксели и инвертируем ось Y,
-    // чтобы орбита не выглядела отражённой из-за экранных координат.
     return QPointF(center.x() + positionAu.x() * scale,
                    center.y() - positionAu.y() * scale);
 }
@@ -55,8 +50,6 @@ double normalizeAngleRadians(double angle) {
 }
 
 double solveEccentricAnomalyRadians(double meanAnomaly, double eccentricity) {
-    // Решаем уравнение Кеплера: M = E - e * sin(E).
-    // Используем итерации Ньютона, что достаточно для малых/умеренных эксцентриситетов.
     const double normalizedM = normalizeAngleRadians(meanAnomaly);
     double eccentricAnomaly = (eccentricity < 0.8) ? normalizedM : M_PI;
     for (int i = 0; i < kKeplerIterations; ++i) {
@@ -72,8 +65,6 @@ double solveEccentricAnomalyRadians(double meanAnomaly, double eccentricity) {
 
 double trueAnomalyFromMeanAnomalyRadians(double meanAnomaly, double eccentricity) {
     const double eccentricAnomaly = solveEccentricAnomalyRadians(meanAnomaly, eccentricity);
-    // Преобразование эксцентрической аномалии в истинную:
-    // tan(ν/2) = sqrt((1+e)/(1-e)) * tan(E/2).
     const double factor = qSqrt((1.0 + eccentricity) / (1.0 - eccentricity));
     return 2.0 * std::atan2(factor * qSin(eccentricAnomaly / 2.0),
                             qCos(eccentricAnomaly / 2.0));
@@ -84,8 +75,6 @@ QPointF orbitPointAuInclined(double semiMajorAxis,
                              double perihelionArgumentRadians,
                              double inclinationRadians,
                              double trueAnomalyRadians) {
-    // Сначала строим положение в плоскости орбиты, затем поворачиваем на аргумент
-    // перицентра (ω) в плоскости и наклоняем орбиту относительно экрана.
     const double radius =
         semiMajorAxis * (1.0 - eccentricity * eccentricity) /
         (1.0 + eccentricity * qCos(trueAnomalyRadians));
@@ -96,21 +85,50 @@ QPointF orbitPointAuInclined(double semiMajorAxis,
     const double sinArg = qSin(perihelionArgumentRadians);
     const double xRotated = xOrbital * cosArg - yOrbital * sinArg;
     const double yRotated = xOrbital * sinArg + yOrbital * cosArg;
-
-    // Наклонение i задаёт поворот вокруг оси X. В проекции на экран мы видим
-    // сжатие координаты Y на cos(i), а координата Z уходит из плоскости.
     const double yInclined = yRotated * qCos(inclinationRadians);
     return QPointF(xRotated, yInclined);
 }
 
 QColor starColorForParameters(double temperatureKelvin, double radiusSolar) {
     QColor starColor = starColorFromTemperature(temperatureKelvin);
-    // Яркость диска слегка зависит от радиуса звезды (визуальный акцент, не фотометрия).
     const double brightnessFactor = qBound(0.75, 0.9 + 0.1 * qSqrt(radiusSolar), 1.25);
     starColor.setRedF(qMin(1.0, starColor.redF() * brightnessFactor));
     starColor.setGreenF(qMin(1.0, starColor.greenF() * brightnessFactor));
     starColor.setBlueF(qMin(1.0, starColor.blueF() * brightnessFactor));
     return starColor;
+}
+
+const StarSystemTopView::BinarySubsystem *findBinarySubsystem(
+    const QVector<StarSystemTopView::BinarySubsystem> &subsystems,
+    int hostPlanetIndex) {
+    for (const StarSystemTopView::BinarySubsystem &subsystem : subsystems) {
+        if (subsystem.hostPlanetIndex == hostPlanetIndex && subsystem.orbit.semiMajorAxisAu > 0.0 &&
+            subsystem.orbit.periodDays > 0.0) {
+            return &subsystem;
+        }
+    }
+    return nullptr;
+}
+
+QPair<QPointF, QPointF> binaryStarOffsets(const StarSystemTopView::BinarySubsystem &subsystem) {
+    const double meanAnomaly = 2.0 * M_PI * (subsystem.elapsedDays / subsystem.orbit.periodDays);
+    const double trueAnomaly =
+        trueAnomalyFromMeanAnomalyRadians(meanAnomaly, subsystem.orbit.eccentricity);
+    const double inclinationRadians = qDegreesToRadians(subsystem.orbit.inclinationDegrees);
+
+    const QPointF primaryOffset = orbitPointAuInclined(
+        subsystem.orbit.semiMajorAxisAu,
+        subsystem.orbit.eccentricity,
+        qDegreesToRadians(subsystem.orbit.argumentPericenterDegreesA),
+        inclinationRadians,
+        trueAnomaly);
+    const QPointF secondaryOffset = orbitPointAuInclined(
+        subsystem.orbit.semiMajorAxisAu,
+        subsystem.orbit.eccentricity,
+        qDegreesToRadians(subsystem.orbit.argumentPericenterDegreesB),
+        inclinationRadians,
+        trueAnomaly);
+    return qMakePair(primaryOffset, secondaryOffset);
 }
 }
 
@@ -141,57 +159,9 @@ void StarSystemTopView::setStarParameters(double temperatureKelvin, double radiu
     update();
 }
 
-void StarSystemTopView::setSecondaryStarParameters(double temperatureKelvin, double radiusSolar) {
-    if (temperatureKelvin <= 0.0 || radiusSolar <= 0.0) {
-        if (hasSecondaryStar_) {
-            hasSecondaryStar_ = false;
-            secondaryStarTemperatureKelvin_ = 0.0;
-            secondaryStarRadiusSolar_ = 0.0;
-            update();
-        }
-        return;
-    }
-    if (hasSecondaryStar_ &&
-        qFuzzyCompare(secondaryStarTemperatureKelvin_, temperatureKelvin) &&
-        qFuzzyCompare(secondaryStarRadiusSolar_, radiusSolar)) {
-        return;
-    }
-    hasSecondaryStar_ = true;
-    secondaryStarTemperatureKelvin_ = temperatureKelvin;
-    secondaryStarRadiusSolar_ = radiusSolar;
+void StarSystemTopView::setBinarySubsystems(const QVector<BinarySubsystem> &subsystems) {
+    binarySubsystems_ = subsystems;
     update();
-}
-
-void StarSystemTopView::setBinarySystemParameters(const BinaryOrbitParameters &parameters) {
-    const bool enabled = parameters.semiMajorAxisAu > 0.0 && parameters.periodDays > 0.0;
-    if (!enabled && !hasBinarySystem_) {
-        return;
-    }
-    if (enabled &&
-        qFuzzyCompare(binaryParameters_.semiMajorAxisAu, parameters.semiMajorAxisAu) &&
-        qFuzzyCompare(binaryParameters_.periodDays, parameters.periodDays) &&
-        qFuzzyCompare(binaryParameters_.eccentricity, parameters.eccentricity) &&
-        qFuzzyCompare(binaryParameters_.inclinationDegrees, parameters.inclinationDegrees) &&
-        qFuzzyCompare(binaryParameters_.argumentPericenterDegreesA,
-                      parameters.argumentPericenterDegreesA) &&
-        qFuzzyCompare(binaryParameters_.argumentPericenterDegreesB,
-                      parameters.argumentPericenterDegreesB) &&
-        hasBinarySystem_ == enabled) {
-        return;
-    }
-    binaryParameters_ = parameters;
-    hasBinarySystem_ = enabled;
-    update();
-}
-
-void StarSystemTopView::setBinarySystemElapsedDays(double elapsedDays) {
-    if (qFuzzyCompare(binaryElapsedDays_, elapsedDays)) {
-        return;
-    }
-    binaryElapsedDays_ = elapsedDays;
-    if (hasBinarySystem_) {
-        update();
-    }
 }
 
 void StarSystemTopView::setSelectedIndex(int index) {
@@ -219,48 +189,12 @@ void StarSystemTopView::paintEvent(QPaintEvent *event) {
 
     painter.fillRect(bounds, Qt::black);
     painter.setPen(Qt::NoPen);
-    if (hasBinarySystem_ && hasSecondaryStar_) {
-        // Для бинарной системы вычисляем истинную аномалию по сидерическому периоду,
-        // а затем строим положение каждой звезды относительно барицентра.
-        const double meanAnomaly =
-            2.0 * M_PI * (binaryElapsedDays_ / binaryParameters_.periodDays);
-        const double trueAnomaly =
-            trueAnomalyFromMeanAnomalyRadians(meanAnomaly, binaryParameters_.eccentricity);
-        const double inclinationRadians =
-            qDegreesToRadians(binaryParameters_.inclinationDegrees);
 
-        const QPointF primaryPositionAu = orbitPointAuInclined(
-            binaryParameters_.semiMajorAxisAu,
-            binaryParameters_.eccentricity,
-            qDegreesToRadians(binaryParameters_.argumentPericenterDegreesA),
-            inclinationRadians,
-            trueAnomaly);
-        const QPointF secondaryPositionAu = orbitPointAuInclined(
-            binaryParameters_.semiMajorAxisAu,
-            binaryParameters_.eccentricity,
-            qDegreesToRadians(binaryParameters_.argumentPericenterDegreesB),
-            inclinationRadians,
-            trueAnomaly);
-
-        const QPointF primaryScreen = toScreen(primaryPositionAu, center, scale);
-        const QPointF secondaryScreen = toScreen(secondaryPositionAu, center, scale);
-
-        painter.setBrush(starColorForParameters(starTemperatureKelvin_, starRadiusSolar_));
-        const qreal primaryRadiusPixels =
-            qBound(kMinStarRadius, kSunRadius * qSqrt(starRadiusSolar_), kMaxStarRadius);
-        painter.drawEllipse(primaryScreen, primaryRadiusPixels, primaryRadiusPixels);
-
-        painter.setBrush(
-            starColorForParameters(secondaryStarTemperatureKelvin_, secondaryStarRadiusSolar_));
-        const qreal secondaryRadiusPixels =
-            qBound(kMinStarRadius, kSunRadius * qSqrt(secondaryStarRadiusSolar_), kMaxStarRadius);
-        painter.drawEllipse(secondaryScreen, secondaryRadiusPixels, secondaryRadiusPixels);
-    } else {
-        painter.setBrush(starColorForParameters(starTemperatureKelvin_, starRadiusSolar_));
-        const qreal starRadiusPixels =
-            qBound(kMinStarRadius, kSunRadius * qSqrt(starRadiusSolar_), kMaxStarRadius);
-        painter.drawEllipse(center, starRadiusPixels, starRadiusPixels);
-    }
+    // Центральная звезда системы.
+    painter.setBrush(starColorForParameters(starTemperatureKelvin_, starRadiusSolar_));
+    const qreal starRadiusPixels =
+        qBound(kMinStarRadius, kSunRadius * qSqrt(starRadiusSolar_), kMaxStarRadius);
+    painter.drawEllipse(center, starRadiusPixels, starRadiusPixels);
 
     const QBrush baseBrush = painter.brush();
     QVector<QPointF> planetPositions = planetScreenPositions(bounds.size().toSize());
@@ -295,11 +229,41 @@ void StarSystemTopView::paintEvent(QPaintEvent *event) {
         painter.drawPath(orbitPath);
         painter.setBrush(baseBrush);
 
-        if (i < planetPositions.size()) {
+        if (i >= planetPositions.size()) {
+            continue;
+        }
+
+        const QPointF planetScreenPos = planetPositions[i];
+        const QPointF planetAuPos((planetScreenPos.x() - center.x()) / scale,
+                                  -(planetScreenPos.y() - center.y()) / scale);
+
+        const BinarySubsystem *subsystem = findBinarySubsystem(binarySubsystems_, i);
+        if (subsystem) {
+            const QPair<QPointF, QPointF> pairOffsets = binaryStarOffsets(*subsystem);
+            const QPointF primaryScreen = toScreen(planetAuPos + pairOffsets.first, center, scale);
+            const QPointF secondaryScreen = toScreen(planetAuPos + pairOffsets.second, center, scale);
+
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(starColorForParameters(subsystem->primaryTemperatureKelvin,
+                                                    qMax(0.05, subsystem->primaryRadiusSolar)));
+            const qreal primaryRadiusPixels =
+                qBound(kMinStarRadius - 1.0,
+                       kSunRadius * qSqrt(qMax(0.05, subsystem->primaryRadiusSolar)),
+                       kMaxStarRadius - 1.0);
+            painter.drawEllipse(primaryScreen, primaryRadiusPixels, primaryRadiusPixels);
+
+            painter.setBrush(starColorForParameters(subsystem->secondaryTemperatureKelvin,
+                                                    qMax(0.05, subsystem->secondaryRadiusSolar)));
+            const qreal secondaryRadiusPixels =
+                qBound(kMinStarRadius - 1.0,
+                       kSunRadius * qSqrt(qMax(0.05, subsystem->secondaryRadiusSolar)),
+                       kMaxStarRadius - 1.0);
+            painter.drawEllipse(secondaryScreen, secondaryRadiusPixels, secondaryRadiusPixels);
+        } else {
             painter.setPen(Qt::NoPen);
             painter.setBrush(selected ? QColor(90, 190, 255) : QColor(200, 200, 200));
             const qreal pointRadius = selected ? kPlanetRadiusSelected : kPlanetRadius;
-            painter.drawEllipse(planetPositions[i], pointRadius, pointRadius);
+            painter.drawEllipse(planetScreenPos, pointRadius, pointRadius);
         }
     }
 }
@@ -340,7 +304,6 @@ QVector<QPointF> StarSystemTopView::planetScreenPositions(const QSize &size) con
             positions.push_back(center);
             continue;
         }
-        // Положение на орбите определяется истинной аномалией.
         const QPointF orbitPoint = orbitPointAu(planet.semiMajorAxisAu,
                                                 planet.eccentricity,
                                                 qDegreesToRadians(planet.perihelionArgumentDegrees),
@@ -353,21 +316,23 @@ QVector<QPointF> StarSystemTopView::planetScreenPositions(const QSize &size) con
 
 double StarSystemTopView::maxOrbitDistanceAu() const {
     double maxDistance = 1.0;
-    if (hasBinarySystem_ && binaryParameters_.semiMajorAxisAu > 0.0) {
-        // Апогей орбит каждой звезды вокруг барицентра.
-        const double binaryFarthest =
-            binaryParameters_.semiMajorAxisAu *
-            (1.0 + qMax(0.0, binaryParameters_.eccentricity));
-        maxDistance = qMax(maxDistance, binaryFarthest);
-    }
     for (const PlanetOrbit &planet : planets_) {
         if (planet.semiMajorAxisAu <= 0.0) {
             continue;
         }
-        // Апогей (a * (1 + e)) задаёт максимальное расстояние от звезды,
-        // поэтому используем его для масштабирования.
         const double farthest = planet.semiMajorAxisAu * (1.0 + qMax(0.0, planet.eccentricity));
         maxDistance = qMax(maxDistance, farthest);
+    }
+    for (const BinarySubsystem &subsystem : binarySubsystems_) {
+        if (subsystem.hostPlanetIndex < 0 || subsystem.hostPlanetIndex >= planets_.size()) {
+            continue;
+        }
+        const PlanetOrbit &host = planets_[subsystem.hostPlanetIndex];
+        const double hostFarthest =
+            host.semiMajorAxisAu * (1.0 + qMax(0.0, host.eccentricity));
+        const double binaryFarthest =
+            subsystem.orbit.semiMajorAxisAu * (1.0 + qMax(0.0, subsystem.orbit.eccentricity));
+        maxDistance = qMax(maxDistance, hostFarthest + binaryFarthest);
     }
     return maxDistance;
 }

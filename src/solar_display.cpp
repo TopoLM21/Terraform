@@ -3046,16 +3046,26 @@ private:
             return;
         }
 
+        struct SystemNode {
+            enum class Type { Star, Planet, Barycenter };
+            int id = -1;
+            int parentId = -1;
+            int hostPlanetIndex = -1;
+            Type type = Type::Planet;
+            StarSystemTopView::BinaryOrbitParameters orbit;
+            double temperatureKelvin = 0.0;
+            double radiusSolar = 0.0;
+        };
+
         StellarParameters primary{};
         bool hasPrimary = readStellarParametersForRender(radiusInput_, temperatureInput_, primary);
-        if (!hasPrimary && planetComboBox_->currentIndex() >= 0) {
-            // Используем параметры пресета, если поля ввода звезды пустые или некорректны.
+        if (!hasPrimary && planetComboBox_->count() > 0) {
             bool radiusOk = false;
             bool temperatureOk = false;
             const double radius =
-                planetComboBox_->currentData(kRolePrimaryStarRadius).toDouble(&radiusOk);
+                planetComboBox_->itemData(0, kRolePrimaryStarRadius).toDouble(&radiusOk);
             const double temperature =
-                planetComboBox_->currentData(kRolePrimaryStarTemperature).toDouble(&temperatureOk);
+                planetComboBox_->itemData(0, kRolePrimaryStarTemperature).toDouble(&temperatureOk);
             if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
                 primary.radiusInSolarRadii = radius;
                 primary.temperatureKelvin = temperature;
@@ -3066,42 +3076,29 @@ private:
             starSystemTopView_->setStarParameters(primary.temperatureKelvin,
                                                   primary.radiusInSolarRadii);
         }
-        StellarParameters secondary{};
-        bool hasSecondary = false;
-        if (secondStarCheckBox_ && secondStarCheckBox_->isChecked()) {
-            hasSecondary = readStellarParametersForRender(secondaryRadiusInput_,
-                                                          secondaryTemperatureInput_,
-                                                          secondary);
-        }
-        if (!hasSecondary && planetComboBox_->currentIndex() >= 0) {
-            bool radiusOk = false;
-            bool temperatureOk = false;
-            const double radius =
-                planetComboBox_->currentData(kRoleSecondaryStarRadius).toDouble(&radiusOk);
-            const double temperature =
-                planetComboBox_->currentData(kRoleSecondaryStarTemperature).toDouble(&temperatureOk);
-            if (radiusOk && temperatureOk && radius > 0.0 && temperature > 0.0) {
-                secondary.radiusInSolarRadii = radius;
-                secondary.temperatureKelvin = temperature;
-                hasSecondary = true;
-            }
-        }
-        if (hasSecondary) {
-            starSystemTopView_->setSecondaryStarParameters(secondary.temperatureKelvin,
-                                                           secondary.radiusInSolarRadii);
-        } else {
-            starSystemTopView_->setSecondaryStarParameters(0.0, 0.0);
-        }
 
         const double elapsedDays = resolveStarSystemElapsedDays();
         if (surfaceSimRunning_ || surfaceTime_.orbitTotalHourIndex() > 0) {
-            // Держим локальный таймер синхронизированным с симуляцией,
-            // чтобы после остановки времени орбиты не перескакивали назад.
             starSystemElapsedDays_ = elapsedDays;
         }
 
         QVector<StarSystemTopView::PlanetOrbit> planets;
         planets.reserve(planetComboBox_->count());
+
+        QVector<SystemNode> nodes;
+        nodes.reserve(1 + planetComboBox_->count() * 3);
+        int nextNodeId = 0;
+
+        SystemNode rootStar;
+        rootStar.id = nextNodeId++;
+        rootStar.parentId = -1;
+        rootStar.type = SystemNode::Type::Star;
+        rootStar.temperatureKelvin = hasPrimary ? primary.temperatureKelvin : 5772.0;
+        rootStar.radiusSolar = hasPrimary ? primary.radiusInSolarRadii : 1.0;
+        nodes.push_back(rootStar);
+
+        QVector<StarSystemTopView::BinarySubsystem> binarySubsystems;
+
         for (int i = 0; i < planetComboBox_->count(); ++i) {
             StarSystemTopView::PlanetOrbit orbit;
             orbit.name = planetComboBox_->itemData(i, kRolePlanetName).toString();
@@ -3117,28 +3114,91 @@ private:
                                                                   orbit.eccentricity);
             orbit.trueAnomalyRadians = segment.trueAnomalyRadians;
             planets.push_back(orbit);
+
+            SystemNode planetNode;
+            planetNode.id = nextNodeId++;
+            planetNode.parentId = rootStar.id;
+            planetNode.hostPlanetIndex = i;
+            planetNode.type = SystemNode::Type::Planet;
+            nodes.push_back(planetNode);
+
+            if (!planetComboBox_->itemData(i, kRoleHasBinaryOrbit).toBool()) {
+                continue;
+            }
+
+            StarSystemTopView::BinaryOrbitParameters binaryOrbit;
+            binaryOrbit.semiMajorAxisAu =
+                planetComboBox_->itemData(i, kRoleBinarySemiMajorAxis).toDouble();
+            binaryOrbit.periodDays =
+                planetComboBox_->itemData(i, kRoleBinaryPeriodDays).toDouble();
+            binaryOrbit.eccentricity =
+                planetComboBox_->itemData(i, kRoleBinaryEccentricity).toDouble();
+            binaryOrbit.inclinationDegrees =
+                planetComboBox_->itemData(i, kRoleBinaryInclinationDegrees).toDouble();
+            binaryOrbit.argumentPericenterDegreesA =
+                planetComboBox_->itemData(i, kRoleBinaryArgumentPericenterA).toDouble();
+            binaryOrbit.argumentPericenterDegreesB =
+                planetComboBox_->itemData(i, kRoleBinaryArgumentPericenterB).toDouble();
+
+            if (binaryOrbit.semiMajorAxisAu <= 0.0 || binaryOrbit.periodDays <= 0.0) {
+                continue;
+            }
+
+            const int barycenterId = nextNodeId++;
+            SystemNode barycenterNode;
+            barycenterNode.id = barycenterId;
+            barycenterNode.parentId = planetNode.id;
+            barycenterNode.hostPlanetIndex = i;
+            barycenterNode.type = SystemNode::Type::Barycenter;
+            barycenterNode.orbit = binaryOrbit;
+            nodes.push_back(barycenterNode);
+
+            bool primaryRadiusOk = false;
+            bool primaryTemperatureOk = false;
+            bool secondaryRadiusOk = false;
+            bool secondaryTemperatureOk = false;
+            const double primaryRadius =
+                planetComboBox_->itemData(i, kRolePrimaryStarRadius).toDouble(&primaryRadiusOk);
+            const double primaryTemperature =
+                planetComboBox_->itemData(i, kRolePrimaryStarTemperature).toDouble(&primaryTemperatureOk);
+            const double secondaryRadius =
+                planetComboBox_->itemData(i, kRoleSecondaryStarRadius).toDouble(&secondaryRadiusOk);
+            const double secondaryTemperature =
+                planetComboBox_->itemData(i, kRoleSecondaryStarTemperature).toDouble(&secondaryTemperatureOk);
+
+            SystemNode primaryStarNode;
+            primaryStarNode.id = nextNodeId++;
+            primaryStarNode.parentId = barycenterId;
+            primaryStarNode.hostPlanetIndex = i;
+            primaryStarNode.type = SystemNode::Type::Star;
+            primaryStarNode.orbit = binaryOrbit;
+            primaryStarNode.temperatureKelvin = primaryTemperatureOk ? primaryTemperature : 5772.0;
+            primaryStarNode.radiusSolar = primaryRadiusOk ? primaryRadius : 1.0;
+            nodes.push_back(primaryStarNode);
+
+            SystemNode secondaryStarNode;
+            secondaryStarNode.id = nextNodeId++;
+            secondaryStarNode.parentId = barycenterId;
+            secondaryStarNode.hostPlanetIndex = i;
+            secondaryStarNode.type = SystemNode::Type::Star;
+            secondaryStarNode.orbit = binaryOrbit;
+            secondaryStarNode.temperatureKelvin = secondaryTemperatureOk ? secondaryTemperature : 4800.0;
+            secondaryStarNode.radiusSolar = secondaryRadiusOk ? secondaryRadius : 0.8;
+            nodes.push_back(secondaryStarNode);
+
+            StarSystemTopView::BinarySubsystem subsystem;
+            subsystem.hostPlanetIndex = i;
+            subsystem.orbit = binaryOrbit;
+            subsystem.elapsedDays = elapsedDays;
+            subsystem.primaryTemperatureKelvin = primaryStarNode.temperatureKelvin;
+            subsystem.primaryRadiusSolar = primaryStarNode.radiusSolar;
+            subsystem.secondaryTemperatureKelvin = secondaryStarNode.temperatureKelvin;
+            subsystem.secondaryRadiusSolar = secondaryStarNode.radiusSolar;
+            binarySubsystems.push_back(subsystem);
         }
 
         starSystemTopView_->setPlanets(planets);
-        StarSystemTopView::BinaryOrbitParameters binaryParameters;
-        const bool hasBinaryOrbit =
-            planetComboBox_->currentData(kRoleHasBinaryOrbit).toBool();
-        if (hasBinaryOrbit) {
-            binaryParameters.semiMajorAxisAu =
-                planetComboBox_->currentData(kRoleBinarySemiMajorAxis).toDouble();
-            binaryParameters.periodDays =
-                planetComboBox_->currentData(kRoleBinaryPeriodDays).toDouble();
-            binaryParameters.eccentricity =
-                planetComboBox_->currentData(kRoleBinaryEccentricity).toDouble();
-            binaryParameters.inclinationDegrees =
-                planetComboBox_->currentData(kRoleBinaryInclinationDegrees).toDouble();
-            binaryParameters.argumentPericenterDegreesA =
-                planetComboBox_->currentData(kRoleBinaryArgumentPericenterA).toDouble();
-            binaryParameters.argumentPericenterDegreesB =
-                planetComboBox_->currentData(kRoleBinaryArgumentPericenterB).toDouble();
-        }
-        starSystemTopView_->setBinarySystemParameters(binaryParameters);
-        starSystemTopView_->setBinarySystemElapsedDays(elapsedDays);
+        starSystemTopView_->setBinarySubsystems(binarySubsystems);
         updateStarSystemSelection();
         updateSurfaceOrbitLighting();
     }
