@@ -1541,23 +1541,49 @@ public:
                                                                 : Qt::RightArrow);
                 });
         // ── Терраформирование: простые инструменты ──────────────────────────
+        // Лямбда-хелпер для добавления газа в атмосферу.
+        auto addGasLambda = [this](const QString &gasId, double amountGt) {
+            if (!atmosphereWidget_ || !planetComboBox_ ||
+                planetComboBox_->currentIndex() < 0) return;
+            auto composition = atmosphereWidget_->composition(true);
+            const double current = composition.massGigatons(gasId);
+            composition.setMassGigatons(gasId, current + amountGt);
+            atmosphereWidget_->setComposition(composition);
+            const int index = planetComboBox_->currentIndex();
+            planetComboBox_->setItemData(
+                index, QVariant::fromValue(composition), kRoleAtmosphere);
+            updateSurfaceGridTemperatures();
+        };
+
         auto *terraformLayout = new QHBoxLayout();
-        auto *addWaterButton = new QPushButton(QStringLiteral("+ Вода"), this);
+        auto *addWaterButton = new QPushButton(QStringLiteral("+Вода"), this);
         addWaterButton->setToolTip(QStringLiteral(
             "Добавить воду на поверхность всех наземных тайлов (+50 кг/м²)"));
-        auto *addSF6Button = new QPushButton(QStringLiteral("+ SF₆"), this);
+        auto *addSF6Button = new QPushButton(QStringLiteral("+SF₆"), this);
         addSF6Button->setToolTip(QStringLiteral(
-            "Добавить гексафторид серы в атмосферу (супер-парниковый газ, GWP ≈ 23500)"));
-        auto *addCO2Button = new QPushButton(QStringLiteral("+ CO₂"), this);
+            "Добавить гексафторид серы (+10 Гт, GWP ≈ 23500, τ ≈ 3200 лет)"));
+        auto *addNF3Button = new QPushButton(QStringLiteral("+NF₃"), this);
+        addNF3Button->setToolTip(QStringLiteral(
+            "Добавить трифторид азота (+10 Гт, GWP ≈ 17200, τ ≈ 550 лет)"));
+        auto *addCH4Button = new QPushButton(QStringLiteral("+CH₄"), this);
+        addCH4Button->setToolTip(QStringLiteral(
+            "Добавить метан (+100 Гт, GWP ≈ 30, τ ≈ 12 лет, разлагается → CO₂)"));
+        auto *addNH3Button = new QPushButton(QStringLiteral("+NH₃"), this);
+        addNH3Button->setToolTip(QStringLiteral(
+            "Добавить аммиак (+100 Гт, τ ≈ 14 дней, быстро разлагается)"));
+        auto *addCO2Button = new QPushButton(QStringLiteral("+CO₂"), this);
         addCO2Button->setToolTip(QStringLiteral(
-            "Добавить углекислый газ в атмосферу"));
-        auto *removeCO2Button = new QPushButton(QStringLiteral("− CO₂"), this);
+            "Добавить углекислый газ (+10% или мин. 100 Гт)"));
+        auto *removeCO2Button = new QPushButton(QStringLiteral("−CO₂"), this);
         removeCO2Button->setToolTip(QStringLiteral(
-            "Удалить углекислый газ из атмосферы"));
+            "Удалить 10% углекислого газа из атмосферы"));
         terraformLayout->addWidget(addWaterButton);
-        terraformLayout->addWidget(addSF6Button);
         terraformLayout->addWidget(addCO2Button);
         terraformLayout->addWidget(removeCO2Button);
+        terraformLayout->addWidget(addCH4Button);
+        terraformLayout->addWidget(addNH3Button);
+        terraformLayout->addWidget(addSF6Button);
+        terraformLayout->addWidget(addNF3Button);
         terraformLayout->addStretch();
         connect(addWaterButton, &QPushButton::clicked, this, [this]() {
             if (surfaceGrid_.points().isEmpty()) return;
@@ -1573,25 +1599,19 @@ public:
                 surfaceViewStack_->currentWidget()->update();
             }
         });
-        connect(addSF6Button, &QPushButton::clicked, this, [this]() {
-            if (!atmosphereWidget_ || !planetComboBox_ ||
-                planetComboBox_->currentIndex() < 0) return;
-            auto composition = atmosphereWidget_->composition(true);
-            // Добавляем 10 Гт SF₆ — мощный парниковый газ.
-            const double currentSF6 = composition.massGigatons(QStringLiteral("sf6"));
-            composition.setMassGigatons(QStringLiteral("sf6"), currentSF6 + 10.0);
-            atmosphereWidget_->setComposition(composition);
-            const int index = planetComboBox_->currentIndex();
-            planetComboBox_->setItemData(
-                index, QVariant::fromValue(composition), kRoleAtmosphere);
-            updateSurfaceGridTemperatures();
-        });
+        connect(addSF6Button, &QPushButton::clicked, this,
+                [this, addGasLambda]() { addGasLambda(QStringLiteral("sf6"), 10.0); });
+        connect(addNF3Button, &QPushButton::clicked, this,
+                [this, addGasLambda]() { addGasLambda(QStringLiteral("nf3"), 10.0); });
+        connect(addCH4Button, &QPushButton::clicked, this,
+                [this, addGasLambda]() { addGasLambda(QStringLiteral("ch4"), 100.0); });
+        connect(addNH3Button, &QPushButton::clicked, this,
+                [this, addGasLambda]() { addGasLambda(QStringLiteral("nh3"), 100.0); });
         connect(addCO2Button, &QPushButton::clicked, this, [this]() {
             if (!atmosphereWidget_ || !planetComboBox_ ||
                 planetComboBox_->currentIndex() < 0) return;
             auto composition = atmosphereWidget_->composition(true);
             const double currentCO2 = composition.massGigatons(QStringLiteral("co2"));
-            // Добавляем 10% CO₂ или минимум 100 Гт.
             const double addAmount = qMax(100.0, currentCO2 * 0.1);
             composition.setMassGigatons(QStringLiteral("co2"), currentCO2 + addAmount);
             atmosphereWidget_->setComposition(composition);
@@ -1606,10 +1626,8 @@ public:
             auto composition = atmosphereWidget_->composition(true);
             const double currentCO2 = composition.massGigatons(QStringLiteral("co2"));
             if (currentCO2 <= 0.0) return;
-            // Убираем 10% CO₂.
-            const double removeAmount = currentCO2 * 0.1;
             composition.setMassGigatons(QStringLiteral("co2"),
-                                         qMax(0.0, currentCO2 - removeAmount));
+                                         qMax(0.0, currentCO2 * 0.9));
             atmosphereWidget_->setComposition(composition);
             const int index = planetComboBox_->currentIndex();
             planetComboBox_->setItemData(
@@ -7094,7 +7112,9 @@ private:
                                             gravity,
                                             timeStepSeconds,
                                             dayLengthSeconds,
-                                            isRetrograde);
+                                            isRetrograde,
+                                            massEarths,
+                                            radiusKm);
             AtmosphereStepSolver::LayeredStepInput stepInput{surfaceGrid_,
                                                             atmosphereGrid,
                                                             localInsolations,
@@ -7108,6 +7128,20 @@ private:
                 currentVerticalWindMixingCoefficientKz();
             stepInput.logPointIndex = selectedSurfacePointIndex_;
             stepSolver.runLayeredStep(stepInput);
+
+            // Разложение газов и атмосферное убегание.
+            // Экзосферная температура ≈ 1.5× эффективной (грубая оценка).
+            const double exoTemp = qMax(150.0, effectiveTemperatureKelvin * 1.5);
+            auto updatedAtmosphere = currentAtmosphereForCalculations();
+            if (AtmosphereStepSolver::applyGasChemistryAndEscape(
+                    updatedAtmosphere, timeStepSeconds, massEarths, radiusKm, exoTemp)) {
+                const int idx = planetComboBox_->currentIndex();
+                if (idx >= 0) {
+                    planetComboBox_->setItemData(
+                        idx, QVariant::fromValue(updatedAtmosphere), kRoleAtmosphere);
+                    atmosphereWidget_->setComposition(updatedAtmosphere);
+                }
+            }
         }
 
         // Поверхностный шаг: таяние/сток снега выполняем после атмосферного блока,
