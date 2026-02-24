@@ -1541,42 +1541,56 @@ public:
                                                                 : Qt::RightArrow);
                 });
         // ── Терраформирование: простые инструменты ──────────────────────────
-        // Лямбда-хелпер для добавления газа в атмосферу.
+        // Лямбда-хелпер: обновляет состав атмосферы БЕЗ сброса симуляции.
+        // Новый состав подхватывается на следующем шаге (solver пересоздаётся каждый шаг).
         auto addGasLambda = [this](const QString &gasId, double amountGt) {
             if (!atmosphereWidget_ || !planetComboBox_ ||
                 planetComboBox_->currentIndex() < 0) return;
             auto composition = atmosphereWidget_->composition(true);
             const double current = composition.massGigatons(gasId);
-            composition.setMassGigatons(gasId, current + amountGt);
+            composition.setMassGigatons(gasId, qMax(0.0, current + amountGt));
             atmosphereWidget_->setComposition(composition);
             const int index = planetComboBox_->currentIndex();
             planetComboBox_->setItemData(
                 index, QVariant::fromValue(composition), kRoleAtmosphere);
-            updateSurfaceGridTemperatures();
+            // НЕ вызываем updateSurfaceGridTemperatures(): это сбрасывает модель.
         };
+
+        // Множитель количества для терраформирования.
+        auto *terraformMultiplierCombo = new QComboBox(this);
+        terraformMultiplierCombo->addItem(QStringLiteral("×0.1"), 0.1);
+        terraformMultiplierCombo->addItem(QStringLiteral("×1"), 1.0);
+        terraformMultiplierCombo->addItem(QStringLiteral("×10"), 10.0);
+        terraformMultiplierCombo->addItem(QStringLiteral("×100"), 100.0);
+        terraformMultiplierCombo->addItem(QStringLiteral("×1000"), 1000.0);
+        terraformMultiplierCombo->setCurrentIndex(1); // ×1 по умолчанию
+        terraformMultiplierCombo->setToolTip(QStringLiteral(
+            "Множитель количества для кнопок терраформирования"));
+        terraformMultiplierCombo->setMaximumWidth(70);
 
         auto *terraformLayout = new QHBoxLayout();
         auto *addWaterButton = new QPushButton(QStringLiteral("+Вода"), this);
         addWaterButton->setToolTip(QStringLiteral(
-            "Добавить воду на поверхность всех наземных тайлов (+50 кг/м²)"));
+            "Добавить воду на поверхность (базово 50 кг/м²)"));
         auto *addSF6Button = new QPushButton(QStringLiteral("+SF₆"), this);
         addSF6Button->setToolTip(QStringLiteral(
-            "Добавить гексафторид серы (+10 Гт, GWP ≈ 23500, τ ≈ 3200 лет)"));
+            "Гексафторид серы (базово 10 Гт, GWP ≈ 23500, τ ≈ 3200 лет)"));
         auto *addNF3Button = new QPushButton(QStringLiteral("+NF₃"), this);
         addNF3Button->setToolTip(QStringLiteral(
-            "Добавить трифторид азота (+10 Гт, GWP ≈ 17200, τ ≈ 550 лет)"));
+            "Трифторид азота (базово 10 Гт, GWP ≈ 17200, τ ≈ 550 лет)"));
         auto *addCH4Button = new QPushButton(QStringLiteral("+CH₄"), this);
         addCH4Button->setToolTip(QStringLiteral(
-            "Добавить метан (+100 Гт, GWP ≈ 30, τ ≈ 12 лет, разлагается → CO₂)"));
+            "Метан (базово 100 Гт, GWP ≈ 30, τ ≈ 12 лет, → CO₂)"));
         auto *addNH3Button = new QPushButton(QStringLiteral("+NH₃"), this);
         addNH3Button->setToolTip(QStringLiteral(
-            "Добавить аммиак (+100 Гт, τ ≈ 14 дней, быстро разлагается)"));
+            "Аммиак (базово 100 Гт, τ ≈ 14 дней)"));
         auto *addCO2Button = new QPushButton(QStringLiteral("+CO₂"), this);
         addCO2Button->setToolTip(QStringLiteral(
-            "Добавить углекислый газ (+10% или мин. 100 Гт)"));
+            "Углекислый газ (базово +10% или мин. 100 Гт)"));
         auto *removeCO2Button = new QPushButton(QStringLiteral("−CO₂"), this);
         removeCO2Button->setToolTip(QStringLiteral(
-            "Удалить 10% углекислого газа из атмосферы"));
+            "Удалить 10% CO₂ (с учётом множителя)"));
+        terraformLayout->addWidget(terraformMultiplierCombo);
         terraformLayout->addWidget(addWaterButton);
         terraformLayout->addWidget(addCO2Button);
         terraformLayout->addWidget(removeCO2Button);
@@ -1585,54 +1599,68 @@ public:
         terraformLayout->addWidget(addSF6Button);
         terraformLayout->addWidget(addNF3Button);
         terraformLayout->addStretch();
-        connect(addWaterButton, &QPushButton::clicked, this, [this]() {
+        connect(addWaterButton, &QPushButton::clicked, this,
+                [this, terraformMultiplierCombo]() {
             if (surfaceGrid_.points().isEmpty()) return;
-            constexpr double kWaterAmountKgPerM2 = 50.0;
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            const double amount = 50.0 * mult;
             for (auto &point : surfaceGrid_.points()) {
                 if (point.materialId == QLatin1String("ocean") &&
                     point.waterPhase == PhaseModel::Phase::Liquid) {
                     continue;
                 }
-                point.surfaceMoisture.addPrecipitation(kWaterAmountKgPerM2);
+                point.surfaceMoisture.addPrecipitation(amount);
             }
             if (surfaceViewStack_ && surfaceViewStack_->currentWidget()) {
                 surfaceViewStack_->currentWidget()->update();
             }
         });
         connect(addSF6Button, &QPushButton::clicked, this,
-                [this, addGasLambda]() { addGasLambda(QStringLiteral("sf6"), 10.0); });
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            addGasLambda(QStringLiteral("sf6"), 10.0 * mult);
+        });
         connect(addNF3Button, &QPushButton::clicked, this,
-                [this, addGasLambda]() { addGasLambda(QStringLiteral("nf3"), 10.0); });
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            addGasLambda(QStringLiteral("nf3"), 10.0 * mult);
+        });
         connect(addCH4Button, &QPushButton::clicked, this,
-                [this, addGasLambda]() { addGasLambda(QStringLiteral("ch4"), 100.0); });
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            addGasLambda(QStringLiteral("ch4"), 100.0 * mult);
+        });
         connect(addNH3Button, &QPushButton::clicked, this,
-                [this, addGasLambda]() { addGasLambda(QStringLiteral("nh3"), 100.0); });
-        connect(addCO2Button, &QPushButton::clicked, this, [this]() {
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            addGasLambda(QStringLiteral("nh3"), 100.0 * mult);
+        });
+        connect(addCO2Button, &QPushButton::clicked, this,
+                [this, addGasLambda, terraformMultiplierCombo]() {
             if (!atmosphereWidget_ || !planetComboBox_ ||
                 planetComboBox_->currentIndex() < 0) return;
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
             auto composition = atmosphereWidget_->composition(true);
             const double currentCO2 = composition.massGigatons(QStringLiteral("co2"));
-            const double addAmount = qMax(100.0, currentCO2 * 0.1);
-            composition.setMassGigatons(QStringLiteral("co2"), currentCO2 + addAmount);
-            atmosphereWidget_->setComposition(composition);
-            const int index = planetComboBox_->currentIndex();
-            planetComboBox_->setItemData(
-                index, QVariant::fromValue(composition), kRoleAtmosphere);
-            updateSurfaceGridTemperatures();
+            const double addAmount = qMax(100.0, currentCO2 * 0.1) * mult;
+            addGasLambda(QStringLiteral("co2"), addAmount);
         });
-        connect(removeCO2Button, &QPushButton::clicked, this, [this]() {
+        connect(removeCO2Button, &QPushButton::clicked, this,
+                [this, terraformMultiplierCombo]() {
             if (!atmosphereWidget_ || !planetComboBox_ ||
                 planetComboBox_->currentIndex() < 0) return;
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
             auto composition = atmosphereWidget_->composition(true);
             const double currentCO2 = composition.massGigatons(QStringLiteral("co2"));
             if (currentCO2 <= 0.0) return;
+            // Удаляем fraction = 1 - (1-0.1)^mult ≈ 10%×mult для малых mult.
+            const double keepFraction = std::pow(0.9, mult);
             composition.setMassGigatons(QStringLiteral("co2"),
-                                         qMax(0.0, currentCO2 * 0.9));
+                                         qMax(0.0, currentCO2 * keepFraction));
             atmosphereWidget_->setComposition(composition);
             const int index = planetComboBox_->currentIndex();
             planetComboBox_->setItemData(
                 index, QVariant::fromValue(composition), kRoleAtmosphere);
-            updateSurfaceGridTemperatures();
         });
 
         auto *surfaceMapLayout = new QVBoxLayout();
