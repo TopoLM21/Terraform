@@ -29,19 +29,113 @@ constexpr double kEvaporationTempRangeK = 20.0;
 constexpr double kWaterMassTolerance = 1.0e-6;
 // Удельная теплота парообразования воды, Дж/кг.
 constexpr double kLatentHeatVaporization = 2.501e6;
-// Массовый коэффициент поглощения водяного пара в длинноволновом (ИК) диапазоне.
-// Типичные значения для полосно-осреднённого H₂O: 0.08–0.3 м²/кг.
-// При 25 кг/м² (средний столбик) даёт τ ≈ 2.5 — реалистичный парниковый эффект.
-constexpr double kH2OMassAbsorptionLw = 0.1;
 // Поглощение H₂O в коротковолновом ближнем ИК (слабее, чем длинноволновое).
 constexpr double kH2OMassAbsorptionSw = 0.01;
 // Доля сублимации: ледяной океан обеспечивает ~10% влаги от жидкого.
 // В реальности сублимация льда при -10°C ≈ 10–15% от испарения воды при 0°C.
 constexpr double kIceSublimationFraction = 0.1;
-// Массовый коэффициент поглощения CO₂ в длинноволновом ИК (15-мкм полоса).
-// При 1 атм уширение линий давлением включено: k_eff = k_base × P.
-// Для Земли (1 атм): k × P × co2_column ≈ 0.35 × 1 × 3 ≈ 1.05 → реалистично.
-constexpr double kCO2MassAbsorptionLw = 0.35;
+
+// ── Многополосная спектральная модель парникового эффекта ──────────────
+//
+// 4 ИК-полосы с долями Планка при ~280K:
+//   Band 0  Far-IR   (>17 мкм)  — вращательная полоса H₂O
+//   Band 1  Window   (8–13 мкм) — «окно прозрачности»: SF₆, NF₃, NH₃
+//   Band 2  CO₂      (13–17 мкм) — основная полоса CO₂
+//   Band 3  H₂O+CH₄  (5–8 мкм) — колебательная полоса H₂O, метан
+//
+// Каждый газ имеет собственные коэффициенты поглощения в каждой полосе.
+// Эффективная однополосная оптическая толщина вычисляется через
+// взвешенную эмиссивность Эддингтона: ε_eff = Σ f_b × ε_b(τ_b).
+// Это позволяет корректно моделировать независимое насыщение полос:
+// SF₆ эффективен даже когда CO₂+H₂O полностью насыщены (поглощает в окне).
+constexpr int kNumBands = 4;
+constexpr double kPlanckFraction[kNumBands] = {0.30, 0.38, 0.18, 0.14};
+// Фактор Эддингтона (из layered_radiation_solver.cpp).
+constexpr double kEddingtonFactor = 0.75;
+
+// H₂O: линейное массовое поглощение по полосам (м²/кг).
+// Взвешенное среднее ≈ 0.1 м²/кг (совместимо со старой однополосной моделью).
+constexpr double kH2OBandLw[kNumBands] = {0.17, 0.01, 0.08, 0.22};
+
+// Логарифмическая формула для газов: τ = coeff × log1p(scale × column × pressure).
+// Массив logScale по полосам; коэффициент logCoeff одинаковый (0.16).
+constexpr double kLogCoeff = 0.16;
+
+// CO₂: основное поглощение в полосе 15 мкм (band 2), слабое в остальных.
+constexpr double kCO2BandScale[kNumBands] = {0.0, 0.5, 10.0, 0.5};
+// SF₆: поглощение 10.5 мкм — почти целиком в окне (band 1). GWP ≈ 23500.
+constexpr double kSF6BandScale[kNumBands] = {0.0, 200000.0, 0.0, 0.0};
+// NF₃: поглощение ~10 мкм, аналогично SF₆. GWP ≈ 17200.
+constexpr double kNF3BandScale[kNumBands] = {0.0, 150000.0, 0.0, 0.0};
+// CH₄: 7.7 мкм и 3.3 мкм — в основном band 3, слабо в окне. GWP ≈ 30.
+constexpr double kCH4BandScale[kNumBands] = {0.0, 0.1, 0.0, 0.5};
+// NH₃: 10–11 мкм (окно) + широкие вращательные полосы. GWP не определён (короткоживущий).
+constexpr double kNH3BandScale[kNumBands] = {0.1, 500.0, 0.1, 0.1};
+// H₂: collision-induced absorption (CIA). Значим только для массивных H₂-атмосфер.
+constexpr double kH2BandScale[kNumBands] = {0.001, 0.001, 0.001, 0.001};
+
+// Эмиссивность Эддингтона: ε = 3/4·τ / (1 + 3/4·τ).
+inline double eddingtonEmissivity(double tau) {
+    if (tau <= 0.0) return 0.0;
+    const double et = kEddingtonFactor * tau;
+    return et / (1.0 + et);
+}
+
+// Обратная: τ = ε / (3/4 × (1 − ε)).
+inline double inverseEddingtonTau(double emissivity) {
+    if (emissivity <= 0.0) return 0.0;
+    if (emissivity >= 1.0) return 1.0e6; // насыщенный слой
+    return emissivity / (kEddingtonFactor * (1.0 - emissivity));
+}
+
+// Рассчитывает эффективную оптическую толщину слоя с учётом многополосного поглощения.
+// h2oKg — водяной пар в слое (кг/м²); gasColumns[6] — CO₂, SF₆, NF₃, CH₄, NH₃, H₂ (кг/м²);
+// pressure — давление для pressure broadening (атм).
+inline double computeMultibandTauLw(double h2oKg,
+                                    const double gasColumns[6],
+                                    double pressure) {
+    double effectiveEmissivity = 0.0;
+    for (int b = 0; b < kNumBands; ++b) {
+        // H₂O — линейный вклад.
+        double bandTau = kH2OBandLw[b] * h2oKg;
+        // Логарифмические газы: CO₂, SF₆, NF₃, CH₄, NH₃, H₂.
+        const double *bandScales[6] = {
+            kCO2BandScale, kSF6BandScale, kNF3BandScale,
+            kCH4BandScale, kNH3BandScale, kH2BandScale};
+        for (int g = 0; g < 6; ++g) {
+            const double scale = bandScales[g][b];
+            if (scale > 0.0 && gasColumns[g] > 0.0) {
+                bandTau += kLogCoeff *
+                    std::log1p(scale * gasColumns[g] * pressure);
+            }
+        }
+        effectiveEmissivity += kPlanckFraction[b] * eddingtonEmissivity(bandTau);
+    }
+    return inverseEddingtonTau(effectiveEmissivity);
+}
+
+// ── Время жизни газов (распад/фотолиз, в секундах) ────────────────────
+// CH₄: ~12 лет (реакция с OH-радикалом, УФ-фотолиз).
+constexpr double kCH4LifetimeSeconds = 12.0 * 365.25 * 86400.0;
+// NH₃: ~14 дней (быстрое осаждение, реакция с кислотами).
+constexpr double kNH3LifetimeSeconds = 14.0 * 86400.0;
+// SF₆: ~3200 лет (крайне стабильный).
+constexpr double kSF6LifetimeSeconds = 3200.0 * 365.25 * 86400.0;
+// NF₃: ~550 лет.
+constexpr double kNF3LifetimeSeconds = 550.0 * 365.25 * 86400.0;
+// H₂: ~2 года (реакция с OH, утечка в космос).
+constexpr double kH2LifetimeSeconds = 2.0 * 365.25 * 86400.0;
+
+// ── Атмосферное убегание (Jeans escape) ───────────────────────────────
+constexpr double kBoltzmannConstant = 1.380649e-23;   // Дж/К
+constexpr double kGravConst = 6.67430e-11;             // м³/(кг·с²)
+constexpr double kEarthMass = 5.9722e24;               // кг
+constexpr double kAmuToKg = 1.66054e-27;               // кг/а.е.м.
+// Молярные массы (г/моль ≈ а.е.м.).
+constexpr double kMolarMassH2 = 2.016;
+constexpr double kMolarMassHe = 4.003;
+constexpr double kMolarMassCH4 = 16.04;
+constexpr double kMolarMassNH3 = 17.03;
 // Время сглаживания для интенсивности осадков (EMA) в секундах.
 constexpr double kPrecipitationEmaTimeSeconds = 3600.0;
 
@@ -190,7 +284,9 @@ AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composit
                                            double gravityMps2,
                                            double timeStepSeconds,
                                            double dayLengthSeconds,
-                                           bool isRetrograde)
+                                           bool isRetrograde,
+                                           double planetMassEarths,
+                                           double planetRadiusKm)
     : radiationSolver_(timeStepSeconds)
     , convectiveSolver_(composition, gravityMps2)
     , gravityMps2_(gravityMps2)
@@ -199,7 +295,16 @@ AtmosphereStepSolver::AtmosphereStepSolver(const AtmosphereComposition &composit
     , timeStepSeconds_(timeStepSeconds)
     , dayLengthSeconds_(dayLengthSeconds)
     , isRetrograde_(isRetrograde)
-    , co2Share_(gasShareById(composition, QStringLiteral("co2"))) {}
+    , co2Share_(gasShareById(composition, QStringLiteral("co2")))
+    , sf6Share_(gasShareById(composition, QStringLiteral("sf6")))
+    , nf3Share_(gasShareById(composition, QStringLiteral("nf3")))
+    , ch4Share_(gasShareById(composition, QStringLiteral("ch4")))
+    , nh3Share_(gasShareById(composition, QStringLiteral("nh3")))
+    , h2Share_(gasShareById(composition, QStringLiteral("h2")))
+{
+    Q_UNUSED(planetMassEarths);
+    Q_UNUSED(planetRadiusKm);
+}
 
 const SurfaceMaterial &AtmosphereStepSolver::materialForPoint(
     const QHash<QString, SurfaceMaterial> &materialsById,
@@ -409,29 +514,27 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                    input.cloudShortwaveTransmission * (1.0 - condensationAlbedo),
                    1.0);
 
-        // Динамический парниковый эффект H₂O и CO₂: добавляем вклад обоих
-        // в оптическую толщину каждого слоя перед расчётом радиации.
-        //
-        // H₂O — переменный: больше влаги → сильнее парник → теплее поверхность
-        // → больше испарения → положительная обратная связь.
-        //
-        // CO₂ — фиксированный, но с уширением линий давлением (pressure broadening).
-        // Базовая τ при инициализации слишком мала для земных условий (0.06% CO₂
-        // при 1 атм → τ ≈ 0.05). Реальный CO₂ даёт τ ≈ 1.0 из-за уширения.
-        // Добавляем поправку: k_co2 × co2_fraction × density × thickness × P.
+        // Многополосный динамический парниковый эффект.
+        // Каждый газ поглощает в своих спектральных полосах: SF₆/NF₃ в окне 8–13 мкм,
+        // CO₂ в полосе 15 мкм, CH₄ при 7.7 мкм, H₂O — широко.
+        // Эффективная τ вычисляется через взвешенную эмиссивность Эддингтона,
+        // чтобы насыщение одной полосы не блокировало эффект газов в другой.
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
-            // CO₂ column mass in layer (kg/m²) × pressure broadening factor.
-            const double co2ColumnKg = co2Share_ *
-                qMax(0.0, layers.at(li).densityKgPerM3()) *
-                qMax(0.0, layers.at(li).thicknessMeters());
-            const double pressureBroadening =
-                qMax(0.0, layers.at(li).pressureAtm());
-            const double co2TauLw =
-                kCO2MassAbsorptionLw * co2ColumnKg * pressureBroadening;
+            const double layerDensity = qMax(0.0, layers.at(li).densityKgPerM3());
+            const double layerThickness = qMax(0.0, layers.at(li).thicknessMeters());
+            const double pressure = qMax(0.0, layers.at(li).pressureAtm());
+            const double gasColumns[6] = {
+                co2Share_ * layerDensity * layerThickness,
+                sf6Share_ * layerDensity * layerThickness,
+                nf3Share_ * layerDensity * layerThickness,
+                ch4Share_ * layerDensity * layerThickness,
+                nh3Share_ * layerDensity * layerThickness,
+                h2Share_  * layerDensity * layerThickness,
+            };
+            const double tauLw = computeMultibandTauLw(h2oKg, gasColumns, pressure);
             layers[li].setOpticalDepthLongwave(
-                layers.at(li).opticalDepthLongwave() +
-                kH2OMassAbsorptionLw * h2oKg + co2TauLw);
+                layers.at(li).opticalDepthLongwave() + tauLw);
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() + kH2OMassAbsorptionSw * h2oKg);
         }
@@ -453,20 +556,23 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             layers[layerIndex].setTemperatureKelvin(updatedTemperature);
         }
 
-        // Восстанавливаем базовую оптическую толщину (без H₂O и CO₂-поправки),
-        // чтобы на следующем шаге не накапливать вклад повторно.
+        // Восстанавливаем базовую оптическую толщину (вычитаем многополосную поправку).
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
-            const double co2ColumnKg = co2Share_ *
-                qMax(0.0, layers.at(li).densityKgPerM3()) *
-                qMax(0.0, layers.at(li).thicknessMeters());
-            const double pressureBroadening =
-                qMax(0.0, layers.at(li).pressureAtm());
-            const double co2TauLw =
-                kCO2MassAbsorptionLw * co2ColumnKg * pressureBroadening;
+            const double layerDensity = qMax(0.0, layers.at(li).densityKgPerM3());
+            const double layerThickness = qMax(0.0, layers.at(li).thicknessMeters());
+            const double pressure = qMax(0.0, layers.at(li).pressureAtm());
+            const double gasColumns[6] = {
+                co2Share_ * layerDensity * layerThickness,
+                sf6Share_ * layerDensity * layerThickness,
+                nf3Share_ * layerDensity * layerThickness,
+                ch4Share_ * layerDensity * layerThickness,
+                nh3Share_ * layerDensity * layerThickness,
+                h2Share_  * layerDensity * layerThickness,
+            };
+            const double tauLw = computeMultibandTauLw(h2oKg, gasColumns, pressure);
             layers[li].setOpticalDepthLongwave(
-                layers.at(li).opticalDepthLongwave() -
-                kH2OMassAbsorptionLw * h2oKg - co2TauLw);
+                layers.at(li).opticalDepthLongwave() - tauLw);
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() - kH2OMassAbsorptionSw * h2oKg);
         }
@@ -677,4 +783,122 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
     advectionSolver_.advectLayerMoisture(input.surfaceGrid,
                                          input.atmosphereGrid,
                                          timeStepSeconds_);
+}
+
+// ── Разложение газов и атмосферное убегание ────────────────────────────
+bool AtmosphereStepSolver::applyGasChemistryAndEscape(
+    AtmosphereComposition &composition,
+    double timeStepSeconds,
+    double planetMassEarths,
+    double planetRadiusKm,
+    double exosphericTemperatureK) {
+    if (timeStepSeconds <= 0.0) return false;
+
+    bool changed = false;
+
+    // ── 1. Химическое разложение (экспоненциальный распад) ─────────────
+    struct GasDecay {
+        const char *id;
+        double lifetimeSeconds;
+        const char *productId; // nullptr = удаляется, "co2" = конвертируется
+        double productMassRatio; // масса продукта / масса исходного
+    };
+    const GasDecay decays[] = {
+        // CH₄ + 2O₂ → CO₂ + 2H₂O: 16 г → 44 г CO₂ (коэффициент 44/16 ≈ 2.75).
+        {"ch4", kCH4LifetimeSeconds, "co2", 44.0 / 16.0},
+        // NH₃ → осаждение (удаляется из атмосферы). 4NH₃+3O₂ → 2N₂+6H₂O.
+        {"nh3", kNH3LifetimeSeconds, nullptr, 0.0},
+        // SF₆ → крайне медленный распад.
+        {"sf6", kSF6LifetimeSeconds, nullptr, 0.0},
+        // NF₃ → медленный распад.
+        {"nf3", kNF3LifetimeSeconds, nullptr, 0.0},
+        // H₂ → реакция с OH (без значимых продуктов в модели).
+        {"h2",  kH2LifetimeSeconds,  nullptr, 0.0},
+    };
+    for (const auto &decay : decays) {
+        const QString gasId = QLatin1String(decay.id);
+        const double currentMass = composition.massGigatons(gasId);
+        if (currentMass <= 1.0e-12) continue;
+
+        const double decayFactor = std::exp(-timeStepSeconds / decay.lifetimeSeconds);
+        const double newMass = currentMass * decayFactor;
+        const double decayedMass = currentMass - newMass;
+        if (decayedMass < 1.0e-15) continue;
+
+        composition.setMassGigatons(gasId, qMax(0.0, newMass));
+        changed = true;
+
+        // Продукт разложения (если есть).
+        if (decay.productId) {
+            const QString productId = QLatin1String(decay.productId);
+            const double productMass = decayedMass * decay.productMassRatio;
+            composition.setMassGigatons(
+                productId, composition.massGigatons(productId) + productMass);
+        }
+    }
+
+    // ── 2. Атмосферное убегание (Jeans escape) ────────────────────────
+    if (planetMassEarths <= 0.0 || planetRadiusKm <= 0.0 ||
+        exosphericTemperatureK <= 0.0) {
+        return changed;
+    }
+
+    const double radiusM = planetRadiusKm * 1000.0;
+    const double planetMassKg = planetMassEarths * kEarthMass;
+    // Экзобаза ≈ планетарный радиус + 500 км (упрощение).
+    const double exobaseRadiusM = radiusM + 500000.0;
+    const double surfaceAreaM2 = 4.0 * M_PI * exobaseRadiusM * exobaseRadiusM;
+    const double totalMassKg = composition.totalMassKg();
+    if (totalMassKg <= 0.0) return changed;
+
+    struct EscapeGas {
+        const char *id;
+        double molarMass; // г/моль ≈ а.е.м.
+    };
+    // Только лёгкие газы существенно убегают.
+    const EscapeGas escapeGases[] = {
+        {"h2",  kMolarMassH2},
+        {"he",  kMolarMassHe},
+        {"ch4", kMolarMassCH4},
+        {"nh3", kMolarMassNH3},
+    };
+    for (const auto &gas : escapeGases) {
+        const QString gasId = QLatin1String(gas.id);
+        const double massFractionGt = composition.massGigatons(gasId);
+        if (massFractionGt <= 1.0e-12) continue;
+
+        const double molecularMassKg = gas.molarMass * kAmuToKg;
+        // λ = G·M·m / (r_exo · k_B · T_exo) — параметр убегания.
+        const double lambda = kGravConst * planetMassKg * molecularMassKg /
+                              (exobaseRadiusM * kBoltzmannConstant * exosphericTemperatureK);
+        // Для λ > 40 убегание пренебрежимо мало (exp(-40) ≈ 4e-18).
+        if (lambda > 40.0) continue;
+
+        // Тепловая скорость: v_th = sqrt(2 k T / m).
+        const double vThermal = std::sqrt(
+            2.0 * kBoltzmannConstant * exosphericTemperatureK / molecularMassKg);
+        // Число плотность на экзобазе: n ≈ P / (k T) ≈ (m_gas·g)/(A·kT).
+        // Упрощение: используем долю газа в общей массе.
+        const double gasMassKg = massFractionGt * 1.0e12; // Гт → кг
+        // Средняя плотность на экзобазе (грубая оценка из баро-формулы
+        // с одной шкалой высот; точность не критична — важен порядок).
+        const double scaleHeight = kBoltzmannConstant * exosphericTemperatureK /
+                                   (molecularMassKg * kGravConst * planetMassKg /
+                                    (exobaseRadiusM * exobaseRadiusM));
+        const double nExobase = gasMassKg / (molecularMassKg * surfaceAreaM2 * scaleHeight);
+
+        // Поток Джинса: Φ = n · v_th/(2√π) · (1 + λ) · exp(−λ).
+        const double flux = nExobase * vThermal / (2.0 * std::sqrt(M_PI)) *
+                            (1.0 + lambda) * std::exp(-lambda);
+        // Потеря массы за шаг (кг).
+        const double massLossKg = flux * molecularMassKg * surfaceAreaM2 * timeStepSeconds;
+        const double massLossGt = massLossKg * 1.0e-12;
+        if (massLossGt < 1.0e-15) continue;
+
+        const double newMass = qMax(0.0, massFractionGt - massLossGt);
+        composition.setMassGigatons(gasId, newMass);
+        changed = true;
+    }
+
+    return changed;
 }

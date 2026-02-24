@@ -429,8 +429,9 @@ void SurfaceGlobeWidget::paintEvent(QPaintEvent *event) {
         } else if (mapMode_ == SurfaceMapMode::Biomass) {
             globePoint.color = biomassToColor(point.vegetationBiomass);
         } else if (mapMode_ == SurfaceMapMode::OceanCurrents) {
-            const bool isOcean = (point.materialId == QLatin1String("ocean"));
-            globePoint.color = oceanCurrentToColor(point.oceanCurrentSpeedMps, isOcean);
+            const bool isLiquidOcean = (point.materialId == QLatin1String("ocean") &&
+                                        point.waterPhase != PhaseModel::Phase::Ice);
+            globePoint.color = oceanCurrentToColor(point.oceanCurrentSpeedMps, isLiquidOcean);
         } else if (mapMode_ == SurfaceMapMode::Realistic) {
             const QColor baseColor =
                 realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);

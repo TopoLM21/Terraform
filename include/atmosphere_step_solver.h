@@ -36,9 +36,19 @@ public:
                          double gravityMps2,
                          double timeStepSeconds,
                          double dayLengthSeconds,
-                         bool isRetrograde);
+                         bool isRetrograde,
+                         double planetMassEarths = 1.0,
+                         double planetRadiusKm = 6371.0);
 
     void runLayeredStep(const LayeredStepInput &input);
+
+    // Разложение газов и атмосферное убегание за один временной шаг.
+    // Изменяет composition и возвращает true, если состав изменился.
+    static bool applyGasChemistryAndEscape(AtmosphereComposition &composition,
+                                           double timeStepSeconds,
+                                           double planetMassEarths,
+                                           double planetRadiusKm,
+                                           double exosphericTemperatureK);
 
 private:
     const SurfaceMaterial &materialForPoint(const QHash<QString, SurfaceMaterial> &materialsById,
@@ -57,6 +67,11 @@ private:
     VegetationModel vegetationModel_;
     OceanCurrentSolver oceanCurrentSolver_;
     double co2Share_ = 0.0;
+    double sf6Share_ = 0.0;
+    double nf3Share_ = 0.0;
+    double ch4Share_ = 0.0;
+    double nh3Share_ = 0.0;
+    double h2Share_ = 0.0;
     double gravityMps2_ = 0.0;
     double rSpecific_ = 0.0;
     double specificHeatCp_ = 0.0;

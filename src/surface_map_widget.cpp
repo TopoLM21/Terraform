@@ -474,7 +474,8 @@ void SurfaceMapWidget::rebuildImages() {
                                 }
                             }
                             if (bestIdx >= 0 && bestIdx < points.size()) {
-                                isOcean = (points[bestIdx].materialId == QLatin1String("ocean"));
+                                isOcean = (points[bestIdx].materialId == QLatin1String("ocean") &&
+                                           points[bestIdx].waterPhase != PhaseModel::Phase::Ice);
                             }
                         }
                         scanLine[x] = oceanCurrentToColor(value, isOcean);
@@ -517,8 +518,9 @@ void SurfaceMapWidget::rebuildImages() {
                 } else if (mapMode_ == SurfaceMapMode::Biomass) {
                     color = biomassToColor(point.vegetationBiomass);
                 } else if (mapMode_ == SurfaceMapMode::OceanCurrents) {
-                    const bool isOcean = (point.materialId == QLatin1String("ocean"));
-                    color = oceanCurrentToColor(point.oceanCurrentSpeedMps, isOcean);
+                    const bool isLiquidOcean = (point.materialId == QLatin1String("ocean") &&
+                                                point.waterPhase != PhaseModel::Phase::Ice);
+                    color = oceanCurrentToColor(point.oceanCurrentSpeedMps, isLiquidOcean);
                 } else if (mapMode_ == SurfaceMapMode::Realistic) {
                     const QColor baseColor =
                         realisticSurfaceColor(point, minHeightKm_, maxHeightKm_);
@@ -721,6 +723,7 @@ void SurfaceMapWidget::drawOceanCurrentArrows(QPainter &painter,
     for (int i = 0; i < grid_->points().size(); ++i) {
         const auto &point = grid_->points().at(i);
         if (point.materialId != oceanId) continue;
+        if (point.waterPhase == PhaseModel::Phase::Ice) continue;
         if (point.oceanCurrentSpeedMps < 1e-6) continue;
 
         const QPoint center = mapPointToPixel(point.latitudeDeg, point.longitudeDeg, imageSize);
