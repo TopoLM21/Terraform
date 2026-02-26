@@ -48,10 +48,7 @@ constexpr double kIceSublimationFraction = 0.1;
 // взвешенную эмиссивность Эддингтона: ε_eff = Σ f_b × ε_b(τ_b).
 // Это позволяет корректно моделировать независимое насыщение полос:
 // SF₆ эффективен даже когда CO₂+H₂O полностью насыщены (поглощает в окне).
-constexpr int kNumBands = 4;
-constexpr double kPlanckFraction[kNumBands] = {0.30, 0.38, 0.18, 0.14};
-// Фактор Эддингтона (из layered_radiation_solver.cpp).
-constexpr double kEddingtonFactor = 0.75;
+constexpr int kNumBands = kRadiationBandCount; // из layered_radiation_solver.h
 
 // H₂O: линейное массовое поглощение по полосам (м²/кг).
 // Взвешенное среднее ≈ 0.1 м²/кг (совместимо со старой однополосной моделью).
@@ -74,44 +71,29 @@ constexpr double kNH3BandScale[kNumBands] = {0.1, 500.0, 0.1, 0.1};
 // H₂: collision-induced absorption (CIA). Значим только для массивных H₂-атмосфер.
 constexpr double kH2BandScale[kNumBands] = {0.001, 0.001, 0.001, 0.001};
 
-// Эмиссивность Эддингтона: ε = 3/4·τ / (1 + 3/4·τ).
-inline double eddingtonEmissivity(double tau) {
-    if (tau <= 0.0) return 0.0;
-    const double et = kEddingtonFactor * tau;
-    return et / (1.0 + et);
-}
-
-// Обратная: τ = ε / (3/4 × (1 − ε)).
-inline double inverseEddingtonTau(double emissivity) {
-    if (emissivity <= 0.0) return 0.0;
-    if (emissivity >= 1.0) return 1.0e6; // насыщенный слой
-    return emissivity / (kEddingtonFactor * (1.0 - emissivity));
-}
-
-// Рассчитывает эффективную оптическую толщину слоя с учётом многополосного поглощения.
-// h2oKg — водяной пар в слое (кг/м²); gasColumns[6] — CO₂, SF₆, NF₃, CH₄, NH₃, H₂ (кг/м²);
-// pressure — давление для pressure broadening (атм).
-inline double computeMultibandTauLw(double h2oKg,
-                                    const double gasColumns[6],
-                                    double pressure) {
-    double effectiveEmissivity = 0.0;
+// Вычисляет оптические толщины по полосам для одного слоя.
+// baseTau — базовая τ из инициализации (серая, добавляется к каждой полосе).
+// h2oKg — водяной пар (кг/м²); gasColumns[6] — CO₂, SF₆, NF₃, CH₄, NH₃, H₂ (кг/м²);
+// pressure — давление (атм); outTau[kNumBands] — результат.
+inline void computeBandTaus(double baseTau,
+                            double h2oKg,
+                            const double gasColumns[6],
+                            double pressure,
+                            double outTau[kNumBands]) {
+    const double *bandScales[6] = {
+        kCO2BandScale, kSF6BandScale, kNF3BandScale,
+        kCH4BandScale, kNH3BandScale, kH2BandScale};
     for (int b = 0; b < kNumBands; ++b) {
-        // H₂O — линейный вклад.
-        double bandTau = kH2OBandLw[b] * h2oKg;
-        // Логарифмические газы: CO₂, SF₆, NF₃, CH₄, NH₃, H₂.
-        const double *bandScales[6] = {
-            kCO2BandScale, kSF6BandScale, kNF3BandScale,
-            kCH4BandScale, kNH3BandScale, kH2BandScale};
+        double tau = baseTau + kH2OBandLw[b] * h2oKg;
         for (int g = 0; g < 6; ++g) {
             const double scale = bandScales[g][b];
             if (scale > 0.0 && gasColumns[g] > 0.0) {
-                bandTau += kLogCoeff *
+                tau += kLogCoeff *
                     std::log1p(scale * gasColumns[g] * pressure);
             }
         }
-        effectiveEmissivity += kPlanckFraction[b] * eddingtonEmissivity(bandTau);
+        outTau[b] = tau;
     }
-    return inverseEddingtonTau(effectiveEmissivity);
 }
 
 // ── Время жизни газов (распад/фотолиз, в секундах) ────────────────────
@@ -514,11 +496,10 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                    input.cloudShortwaveTransmission * (1.0 - condensationAlbedo),
                    1.0);
 
-        // Многополосный динамический парниковый эффект.
-        // Каждый газ поглощает в своих спектральных полосах: SF₆/NF₃ в окне 8–13 мкм,
-        // CO₂ в полосе 15 мкм, CH₄ при 7.7 мкм, H₂O — широко.
-        // Эффективная τ вычисляется через взвешенную эмиссивность Эддингтона,
-        // чтобы насыщение одной полосы не блокировало эффект газов в другой.
+        // Многополосный парниковый эффект: вычисляем τ по полосам для каждого слоя,
+        // затем солвер делает независимый двухпоточный перенос для каждой полосы.
+        // Это корректно обрабатывает насыщение: SF₆ в окне работает независимо от CO₂/H₂O.
+        QVector<LayeredRadiationSolver::BandOpticalDepths> bandTaus(layers.size());
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
             const double layerDensity = qMax(0.0, layers.at(li).densityKgPerM3());
@@ -532,23 +513,25 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
                 nh3Share_ * layerDensity * layerThickness,
                 h2Share_  * layerDensity * layerThickness,
             };
-            const double tauLw = computeMultibandTauLw(h2oKg, gasColumns, pressure);
-            layers[li].setOpticalDepthLongwave(
-                layers.at(li).opticalDepthLongwave() + tauLw);
+            // Базовая τ (из инициализации) распределяется как серая (во все полосы).
+            const double baseTau = qMax(0.0, layers.at(li).opticalDepthLongwave());
+            computeBandTaus(baseTau, h2oKg, gasColumns, pressure,
+                            bandTaus[li].tauLw);
+            // Коротковолновая поправка H₂O (одна полоса).
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() + kH2OMassAbsorptionSw * h2oKg);
         }
 
-        // Поверхность и нижний слой — разные сущности: передаём температуру поверхности явно,
-        // чтобы не подменять её температурой слоя и не получать самоподогрев атмосферы.
+        // Радиационный расчёт: независимый двухпоточный перенос по ИК-полосам.
         LayeredRadiationSolver::SurfaceRadiativeFluxes surfaceRadFluxes;
         const QVector<double> layerDeltas =
-            radiationSolver_.solve(column,
-                                   localInsolation,
-                                   surfaceAlbedo,
-                                   cloudShortwaveTransmission,
-                                   point.state.temperatureKelvin(),
-                                   surfaceRadFluxes);
+            radiationSolver_.solveMultiband(column,
+                                            bandTaus,
+                                            localInsolation,
+                                            surfaceAlbedo,
+                                            cloudShortwaveTransmission,
+                                            point.state.temperatureKelvin(),
+                                            surfaceRadFluxes);
         const int layerCount = qMin(layers.size(), layerDeltas.size());
         for (int layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
             const double updatedTemperature =
@@ -556,23 +539,9 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             layers[layerIndex].setTemperatureKelvin(updatedTemperature);
         }
 
-        // Восстанавливаем базовую оптическую толщину (вычитаем многополосную поправку).
+        // Восстанавливаем коротковолновую τ (базовая LW не менялась).
         for (int li = 0; li < layers.size(); ++li) {
             const double h2oKg = qMax(0.0, layers.at(li).waterVaporKgPerM2());
-            const double layerDensity = qMax(0.0, layers.at(li).densityKgPerM3());
-            const double layerThickness = qMax(0.0, layers.at(li).thicknessMeters());
-            const double pressure = qMax(0.0, layers.at(li).pressureAtm());
-            const double gasColumns[6] = {
-                co2Share_ * layerDensity * layerThickness,
-                sf6Share_ * layerDensity * layerThickness,
-                nf3Share_ * layerDensity * layerThickness,
-                ch4Share_ * layerDensity * layerThickness,
-                nh3Share_ * layerDensity * layerThickness,
-                h2Share_  * layerDensity * layerThickness,
-            };
-            const double tauLw = computeMultibandTauLw(h2oKg, gasColumns, pressure);
-            layers[li].setOpticalDepthLongwave(
-                layers.at(li).opticalDepthLongwave() - tauLw);
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() - kH2OMassAbsorptionSw * h2oKg);
         }
