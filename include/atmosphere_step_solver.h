@@ -26,6 +26,9 @@ public:
         const QHash<QString, SurfaceMaterial> &materialsById;
         const SurfaceMaterial &defaultMaterial;
         double cloudShortwaveTransmission = 1.0;
+        // Доля инсоляции, поглощённая облаками (сернокислотными и т.п.).
+        // Эта энергия не отражается и не проходит — депозитируется в верхние слои атмосферы.
+        double cloudAbsorptionFraction = 0.0;
         double heatTransferCoefficientWPerM2K = 0.0;
         double verticalWindMixingCoefficientKz = 1.0;
         double verticalMoistureMixingCoefficientKz = 1.0;
