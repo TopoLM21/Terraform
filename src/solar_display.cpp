@@ -5873,6 +5873,27 @@ private:
                                              input.stateDefaults.material);
         result.resolvedSubsurfaceSettings = tileResult.resolvedSubsurfaceSettings;
 
+        // Для послойной модели плотных атмосфер поднимаем стартовую температуру
+        // поверхности до парникового уровня. Без этого поверхность начинает
+        // при T_eq ≈ 232 K (Венера), а атмосфера при ~388 K, что создаёт
+        // нефизичный начальный скачок и затягивает выход на равновесие.
+        if (input.radiationModelType == RadiationModelType::Layered &&
+            atmospherePressureAtm >= 0.1 && co2Share > 0.0) {
+            const double denseAtmosphereBase =
+                denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                    atmospherePressureAtm,
+                                                    input.stateDefaults.greenhouseOpacity,
+                                                    co2Share,
+                                                    input.minDenseAtmosphereTemperatureK);
+            for (auto &point : result.grid.points()) {
+                if (point.temperatureK < denseAtmosphereBase) {
+                    point.state.setProfileTemperatureKelvin(denseAtmosphereBase);
+                    point.temperatureK = point.state.temperatureKelvin();
+                    point.airTemperatureK = denseAtmosphereBase;
+                }
+            }
+        }
+
         // Инициализируем запас поверхностной влаги: распределяем общий объём воды
         // (surfaceWaterGigatons) по площадям ниже уровня моря. Формула:
         // water_kg_per_m2 = (M_water_gt * 1e12 кг/гт) / (A_wet_m2),
@@ -6211,6 +6232,19 @@ private:
             baseTemperatureKelvin =
                 (baselineMeanTemperature > 0.0) ? baselineMeanTemperature
                                                 : qMax(1.0, input.stateDefaults.minTemperatureKelvin);
+        }
+        // Для плотных атмосфер (Венера, 92 атм CO₂) профиль должен стартовать
+        // не от T_eff, а от нижней границы парникового прогрева. Без этого
+        // огромная теплоёмкость атмосферного столба (≈ P/g × Cp) делает
+        // радиативный прогрев незаметным: при 92 атм нужны миллионы шагов.
+        if (atmospherePressureAtm >= 0.1) {
+            const double denseAtmosphereBase =
+                denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                    atmospherePressureAtm,
+                                                    input.stateDefaults.greenhouseOpacity,
+                                                    co2Share,
+                                                    input.minDenseAtmosphereTemperatureK);
+            baseTemperatureKelvin = qMax(baseTemperatureKelvin, denseAtmosphereBase);
         }
         if (meanSurfaceTemperatureKelvin > 0.0) {
             // Безводные планеты (surfaceWaterGigatons == 0) не имеют источника
