@@ -5922,12 +5922,17 @@ private:
         QVector<double> baselineAirTemperatures = tileResult.baselineAirTemperatures;
         const double timeStepSeconds = 3600.0;
         // Коэффициент прохождения коротковолнового излучения через облака.
+        // Для плотных облаков (Венера) часть потока поглощается облаками —
+        // эта энергия не теряется, а депозитируется в верхние слои атмосферы.
         double cloudShortwaveTransmission = 1.0 - input.cloudAlbedo;
+        double cloudAbsorptionFraction = 0.0;
         if (input.cloudAlbedo > 0.7) {
-            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            // Плотные сернокислотные облака поглощают ~80% прошедшего потока.
+            cloudAbsorptionFraction = cloudShortwaveTransmission * 0.8;
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+        cloudAbsorptionFraction = qBound(0.0, cloudAbsorptionFraction, 1.0);
         if (localInsolations.size() != result.grid.points().size()) {
             localInsolations.clear();
             localInsolations.resize(result.grid.points().size());
@@ -6810,11 +6815,13 @@ private:
         const double timeStepSeconds = 3600.0;
         // Коэффициент прохождения коротковолнового излучения через облака.
         double cloudShortwaveTransmission = 1.0 - cloudAlbedo;
+        double cloudAbsorptionFraction = 0.0;
         if (cloudAlbedo > 0.7) {
-            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            cloudAbsorptionFraction = cloudShortwaveTransmission * 0.8;
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+        cloudAbsorptionFraction = qBound(0.0, cloudAbsorptionFraction, 1.0);
         auto &atmosphereGrid = surfaceGrid_.atmosphericGrid();
         const bool useLayeredAtmosphere =
             useAtmosphericModel && radiationModelType == RadiationModelType::Layered &&
@@ -7150,6 +7157,7 @@ private:
                                                             materialsById,
                                                             *defaultMaterial,
                                                             cloudShortwaveTransmission,
+                                                            cloudAbsorptionFraction,
                                                             kDefaultHeatTransferWPerM2K};
             stepInput.verticalWindMixingCoefficientKz = currentVerticalWindMixingCoefficientKz();
             stepInput.verticalMoistureMixingCoefficientKz =

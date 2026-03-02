@@ -38,15 +38,14 @@ constexpr double kIceSublimationFraction = 0.1;
 // ── Многополосная спектральная модель парникового эффекта ──────────────
 //
 // 4 ИК-полосы с долями Планка при ~280K:
-//   Band 0  Far-IR   (>17 мкм)  — вращательная полоса H₂O
+//   Band 0  Far-IR   (>17 мкм)  — вращательная полоса H₂O, CIA CO₂ при высоком P
 //   Band 1  Window   (8–13 мкм) — «окно прозрачности»: SF₆, NF₃, NH₃
 //   Band 2  CO₂      (13–17 мкм) — основная полоса CO₂
 //   Band 3  H₂O+CH₄  (5–8 мкм) — колебательная полоса H₂O, метан
 //
 // Каждый газ имеет собственные коэффициенты поглощения в каждой полосе.
-// Эффективная однополосная оптическая толщина вычисляется через
-// взвешенную эмиссивность Эддингтона: ε_eff = Σ f_b × ε_b(τ_b).
-// Это позволяет корректно моделировать независимое насыщение полос:
+// Солвер выполняет независимый двухпоточный перенос для каждой полосы,
+// корректно моделируя независимое насыщение:
 // SF₆ эффективен даже когда CO₂+H₂O полностью насыщены (поглощает в окне).
 constexpr int kNumBands = kRadiationBandCount; // из layered_radiation_solver.h
 
@@ -59,7 +58,10 @@ constexpr double kH2OBandLw[kNumBands] = {0.17, 0.01, 0.08, 0.22};
 constexpr double kLogCoeff = 0.16;
 
 // CO₂: основное поглощение в полосе 15 мкм (band 2), слабое в остальных.
-constexpr double kCO2BandScale[kNumBands] = {0.0, 0.5, 10.0, 0.5};
+// Band 0 (Far-IR): при высоком давлении (>10 атм) collision-induced absorption
+// и давленческое уширение крыльев 15-мкм полосы дают заметное поглощение.
+// Значение 0.3 обеспечивает ~τ=2 на слой для Венеры (92 атм, 96% CO₂).
+constexpr double kCO2BandScale[kNumBands] = {0.3, 0.5, 10.0, 0.5};
 // SF₆: поглощение 10.5 мкм — почти целиком в окне (band 1). GWP ≈ 23500.
 constexpr double kSF6BandScale[kNumBands] = {0.0, 200000.0, 0.0, 0.0};
 // NF₃: поглощение ~10 мкм, аналогично SF₆. GWP ≈ 17200.
@@ -537,6 +539,39 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             const double updatedTemperature =
                 qMax(0.0, layers.at(layerIndex).temperatureKelvin() + layerDeltas.at(layerIndex));
             layers[layerIndex].setTemperatureKelvin(updatedTemperature);
+        }
+
+        // Облачное поглощение: энергия, поглощённая плотными облаками (Венера и т.п.),
+        // депозитируется в верхнюю треть атмосферных слоёв.
+        // Без этого 20% инсоляции Венеры (~130 Вт/м²) просто исчезает.
+        if (input.cloudAbsorptionFraction > 0.0 && localInsolation > 0.0 &&
+            layerCount >= 2) {
+            const double cloudAbsorbedWPerM2 =
+                localInsolation * input.cloudAbsorptionFraction;
+            // Депозитируем в верхнюю треть слоёв (≥1 слой) с весами ∝ exp.
+            const int depositLayers = qMax(1, layerCount / 3);
+            const int startLayer = layerCount - depositLayers;
+            // Экспоненциальные веса: верхний слой получает больше всего.
+            double weightSum = 0.0;
+            QVector<double> weights(depositLayers);
+            for (int k = 0; k < depositLayers; ++k) {
+                weights[k] = std::exp(static_cast<double>(k));
+                weightSum += weights[k];
+            }
+            if (weightSum > 0.0) {
+                for (int k = 0; k < depositLayers; ++k) {
+                    const int li = startLayer + k;
+                    const double hc = layers.at(li).heatCapacityJPerM2K();
+                    if (hc > 0.0) {
+                        const double fraction = weights[k] / weightSum;
+                        const double dT = cloudAbsorbedWPerM2 * fraction *
+                                          timeStepSeconds_ / hc;
+                        layers[li].setTemperatureKelvin(
+                            qMax(0.0, layers.at(li).temperatureKelvin() +
+                                      qBound(-20.0, dT, 20.0)));
+                    }
+                }
+            }
         }
 
         // Восстанавливаем коротковолновую τ (базовая LW не менялась).
