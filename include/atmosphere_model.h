@@ -10,6 +10,9 @@ struct GasSpec {
     // Молярная масса в г/моль.
     double molarMass;
     bool isGreenhouse;
+    // Удельная теплоёмкость при постоянном давлении (Дж/(кг·К)).
+    // Вычисляется из γ и молярной массы: Cp = γ·R / ((γ-1)·M).
+    double specificHeatCpJPerKgK;
 };
 
 struct GasFraction {

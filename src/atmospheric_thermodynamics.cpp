@@ -10,7 +10,6 @@ constexpr double kKelvinOffset = 273.15;
 constexpr double kPascalPerAtm = 101325.0;
 constexpr double kUniversalGasConstant = 8.314462618;
 constexpr double kReferenceCpDry = 1004.0;
-constexpr double kReferenceCpWet = 1850.0;
 constexpr double kDryAirMolarMassKgPerMol = 0.02897;
 constexpr double kLatentHeatVaporization = 2.5e6;
 constexpr double kMinLapseRate = 0.0015;
@@ -62,7 +61,9 @@ double AtmosphericThermodynamics::specificHeatCp(const AtmosphereComposition &co
         return kReferenceCpDry;
     }
 
-    double greenhouseShare = 0.0;
+    // Средневзвешенная Cp по массовым долям газов: Cp_mix = Σ(w_i × Cp_i).
+    // Каждый газ имеет собственную Cp, вычисленную из γ и молярной массы.
+    double cpSum = 0.0;
     double totalShare = 0.0;
     const auto gases = availableGases();
     for (const auto &fraction : fractions) {
@@ -77,19 +78,14 @@ double AtmosphericThermodynamics::specificHeatCp(const AtmosphereComposition &co
             continue;
         }
         totalShare += fraction.share;
-        if (it->isGreenhouse) {
-            greenhouseShare += fraction.share;
-        }
+        cpSum += fraction.share * it->specificHeatCpJPerKgK;
     }
 
     if (totalShare <= 0.0) {
         return kReferenceCpDry;
     }
 
-    // Cp оцениваем как смесь сухого воздуха и легких паров: влажные/парниковые газы
-    // увеличивают теплоёмкость, поэтому сдвигаем Cp к верхней границе.
-    const double wetShare = qBound(0.0, greenhouseShare / totalShare, 1.0);
-    return kReferenceCpDry + wetShare * (kReferenceCpWet - kReferenceCpDry);
+    return cpSum / totalShare;
 }
 
 double AtmosphericThermodynamics::relativeHumidityEstimate(
