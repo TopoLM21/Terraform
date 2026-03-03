@@ -66,18 +66,20 @@ double AtmosphereComposition::totalPressureAtm(double planetMassEarths, double r
 }
 
 QVector<GasSpec> availableGases() {
+    // Cp = γ·R_universal / ((γ-1)·M), где R = 8.3145 Дж/(моль·К), M в кг/моль.
+    // Значения γ при STP из NIST/CRC Handbook.
     return {
-        {QStringLiteral("n2"), QStringLiteral("N₂"), 28.014, false},
-        {QStringLiteral("o2"), QStringLiteral("O₂"), 31.998, false},
-        {QStringLiteral("co2"), QStringLiteral("CO₂"), 44.009, true},
-        {QStringLiteral("ch4"), QStringLiteral("CH₄"), 16.043, true},
-        {QStringLiteral("h2o"), QStringLiteral("H₂O"), 18.015, true},
-        {QStringLiteral("nh3"), QStringLiteral("Аммиак (NH₃)"), 17.031, true},
-        {QStringLiteral("sf6"), QStringLiteral("SF₆"), 146.06, true},
-        {QStringLiteral("nf3"), QStringLiteral("NF₃"), 71.003, true},
-        {QStringLiteral("ar"), QStringLiteral("Ar"), 39.948, false},
-        {QStringLiteral("he"), QStringLiteral("He"), 4.0026, false},
-        {QStringLiteral("h2"), QStringLiteral("H₂"), 2.01588, false},
+        {QStringLiteral("n2"), QStringLiteral("N₂"), 28.014, false, 1040.0},   // γ=1.400
+        {QStringLiteral("o2"), QStringLiteral("O₂"), 31.998, false, 919.0},    // γ=1.395
+        {QStringLiteral("co2"), QStringLiteral("CO₂"), 44.009, true, 844.0},   // γ=1.289
+        {QStringLiteral("ch4"), QStringLiteral("CH₄"), 16.043, true, 2226.0},  // γ=1.320
+        {QStringLiteral("h2o"), QStringLiteral("H₂O"), 18.015, true, 1864.0},  // γ=1.330
+        {QStringLiteral("nh3"), QStringLiteral("Аммиак (NH₃)"), 17.031, true, 2060.0}, // γ=1.310
+        {QStringLiteral("sf6"), QStringLiteral("SF₆"), 146.06, true, 665.0},   // γ=1.098
+        {QStringLiteral("nf3"), QStringLiteral("NF₃"), 71.003, true, 664.0},   // γ=1.214
+        {QStringLiteral("ar"), QStringLiteral("Ar"), 39.948, false, 520.0},     // γ=1.667
+        {QStringLiteral("he"), QStringLiteral("He"), 4.0026, false, 5193.0},    // γ=1.667
+        {QStringLiteral("h2"), QStringLiteral("H₂"), 2.01588, false, 14300.0},  // γ=1.410
     };
 }
 
