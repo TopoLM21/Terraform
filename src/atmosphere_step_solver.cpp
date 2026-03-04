@@ -588,6 +588,12 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             const double surfaceNetRadiativeFlux =
                 surfaceRadFluxes.shortwaveAbsorbedWPerM2 +
                 surfaceRadFluxes.longwaveDownWPerM2;
+            // Сохраняем стабилизированный поток в грунт ДО updateTemperature,
+            // чтобы зафиксировать значение при текущей T_surface (аналогично
+            // нелойэрному пути в solar_display.cpp, где используется прямое
+            // присвоение, а не +=).
+            point.subsurfaceFluxWPerM2 =
+                point.state.stabilizedRadiativeFlux(surfaceNetRadiativeFlux, timeStepSeconds_);
             point.state.updateTemperature(surfaceNetRadiativeFlux, 0.0, timeStepSeconds_);
             point.temperatureK = point.state.temperatureKelvin();
         }
