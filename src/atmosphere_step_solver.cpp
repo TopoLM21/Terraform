@@ -98,6 +98,51 @@ inline void computeBandTaus(double baseTau,
     }
 }
 
+// Вертикальные веса для венерианских облаков.
+// Максимум поглощения/ИК-непрозрачности располагаем не у самой верхней границы,
+// а в среднем-верхнем слое колонны (примерно 5–65% от поверхностного давления),
+// что ближе к высотам облаков Венеры (~0.1–0.6 bar в терминах p/p_surface).
+QVector<double> buildCloudColumnWeights(const QVector<AtmosphericLayerState> &layers,
+                                        double surfacePressureAtm) {
+    QVector<double> weights(layers.size(), 0.0);
+    if (layers.isEmpty()) {
+        return weights;
+    }
+
+    const double safeSurfacePressure = qMax(1.0e-6, surfacePressureAtm);
+    double sum = 0.0;
+    for (int i = 0; i < layers.size(); ++i) {
+        const double pressureFraction =
+            qBound(0.0, layers.at(i).pressureAtm() / safeSurfacePressure, 1.0);
+        // Гауссов профиль по p/p_surf: пик ~0.22, ширина ~0.20.
+        // Даёт вклад в диапазоне 0.05..0.65 и подавляет самый верх.
+        if (pressureFraction < 0.05 || pressureFraction > 0.65) {
+            continue;
+        }
+        constexpr double kCenter = 0.22;
+        constexpr double kSigma = 0.20;
+        const double z = (pressureFraction - kCenter) / kSigma;
+        const double w = std::exp(-0.5 * z * z);
+        weights[i] = w;
+        sum += w;
+    }
+
+    if (sum <= 0.0) {
+        // Фолбэк: если давление в слоях невалидно, используем верхнюю треть.
+        const int depositLayers = qMax(1, layers.size() / 3);
+        const int startLayer = layers.size() - depositLayers;
+        for (int i = startLayer; i < layers.size(); ++i) {
+            weights[i] = 1.0 / static_cast<double>(depositLayers);
+        }
+        return weights;
+    }
+
+    for (double &weight : weights) {
+        weight /= sum;
+    }
+    return weights;
+}
+
 // ── Время жизни газов (распад/фотолиз, в секундах) ────────────────────
 // CH₄: ~12 лет (реакция с OH-радикалом, УФ-фотолиз).
 constexpr double kCH4LifetimeSeconds = 12.0 * 365.25 * 86400.0;
@@ -497,6 +542,8 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             qBound(0.0,
                    input.cloudShortwaveTransmission * (1.0 - condensationAlbedo),
                    1.0);
+        const QVector<double> cloudColumnWeights =
+            buildCloudColumnWeights(layers, qMax(point.surfacePressureAtm, 1.0e-6));
 
         // Многополосный парниковый эффект: вычисляем τ по полосам для каждого слоя,
         // затем солвер делает независимый двухпоточный перенос для каждой полосы.
@@ -519,6 +566,23 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             const double baseTau = qMax(0.0, layers.at(li).opticalDepthLongwave());
             computeBandTaus(baseTau, h2oKg, gasColumns, pressure,
                             bandTaus[li].tauLw);
+
+            // Плотные облака дополнительно закрывают ИК-окно и усиливают
+            // нисходящее LW-излучение к поверхности (back-radiation).
+            // На Венере это критично: энергия, поглощённая в SW облаками,
+            // должна эффективнее возвращаться вниз через ИК-эмиссию облачного слоя.
+            const double cloudWeight = (li < cloudColumnWeights.size())
+                                           ? cloudColumnWeights.at(li)
+                                           : 0.0;
+            const double cloudLwTauBoost =
+                qMax(0.0, 6.0 * input.cloudAbsorptionFraction + 2.0 * condensationAlbedo) *
+                cloudWeight;
+            if (cloudLwTauBoost > 0.0) {
+                bandTaus[li].tauLw[0] += 0.5 * cloudLwTauBoost;  // Far-IR
+                bandTaus[li].tauLw[1] += 1.4 * cloudLwTauBoost;  // LW window (главный вклад)
+                bandTaus[li].tauLw[2] += 0.8 * cloudLwTauBoost;  // CO₂ 15 мкм
+                bandTaus[li].tauLw[3] += 0.6 * cloudLwTauBoost;  // H₂O/CH₄
+            }
             // Коротковолновая поправка H₂O (одна полоса).
             layers[li].setOpticalDepthShortwave(
                 layers.at(li).opticalDepthShortwave() + kH2OMassAbsorptionSw * h2oKg);
@@ -542,34 +606,25 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         }
 
         // Облачное поглощение: энергия, поглощённая плотными облаками (Венера и т.п.),
-        // депозитируется в верхнюю треть атмосферных слоёв.
+        // депозитируется по облачному вертикальному профилю (средне-верхние слои).
         // Без этого 20% инсоляции Венеры (~130 Вт/м²) просто исчезает.
         if (input.cloudAbsorptionFraction > 0.0 && localInsolation > 0.0 &&
             layerCount >= 2) {
             const double cloudAbsorbedWPerM2 =
                 localInsolation * input.cloudAbsorptionFraction;
-            // Депозитируем в верхнюю треть слоёв (≥1 слой) с весами ∝ exp.
-            const int depositLayers = qMax(1, layerCount / 3);
-            const int startLayer = layerCount - depositLayers;
-            // Экспоненциальные веса: верхний слой получает больше всего.
-            double weightSum = 0.0;
-            QVector<double> weights(depositLayers);
-            for (int k = 0; k < depositLayers; ++k) {
-                weights[k] = std::exp(static_cast<double>(k));
-                weightSum += weights[k];
-            }
-            if (weightSum > 0.0) {
-                for (int k = 0; k < depositLayers; ++k) {
-                    const int li = startLayer + k;
-                    const double hc = layers.at(li).heatCapacityJPerM2K();
-                    if (hc > 0.0) {
-                        const double fraction = weights[k] / weightSum;
-                        const double dT = cloudAbsorbedWPerM2 * fraction *
-                                          timeStepSeconds_ / hc;
-                        layers[li].setTemperatureKelvin(
-                            qMax(0.0, layers.at(li).temperatureKelvin() +
-                                      qBound(-20.0, dT, 20.0)));
-                    }
+            for (int li = 0; li < layerCount; ++li) {
+                const double fraction =
+                    (li < cloudColumnWeights.size()) ? cloudColumnWeights.at(li) : 0.0;
+                if (fraction <= 0.0) {
+                    continue;
+                }
+                const double hc = layers.at(li).heatCapacityJPerM2K();
+                if (hc > 0.0) {
+                    const double dT = cloudAbsorbedWPerM2 * fraction *
+                                      timeStepSeconds_ / hc;
+                    layers[li].setTemperatureKelvin(
+                        qMax(0.0, layers.at(li).temperatureKelvin() +
+                                  qBound(-20.0, dT, 20.0)));
                 }
             }
         }
@@ -601,6 +656,20 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
         point.shortwaveSurfaceWPerM2 = surfaceRadFluxes.shortwaveAbsorbedWPerM2;
         point.longwaveDownWPerM2 = surfaceRadFluxes.longwaveDownWPerM2;
         point.longwaveUpWPerM2 = point.state.surfaceEmittedFlux();
+
+        if (i == logPointIndex) {
+            const double swAbsorbedInClouds =
+                qMax(0.0, localInsolation) * qMax(0.0, input.cloudAbsorptionFraction);
+            const double netSurfaceFlux =
+                point.shortwaveSurfaceWPerM2 + point.longwaveDownWPerM2 - point.longwaveUpWPerM2;
+            qCInfo(atmosphereProfileLog)
+                << "Column flux diagnostics:"
+                << "SW_to_surface=" << point.shortwaveSurfaceWPerM2
+                << "SW_absorbed_in_clouds=" << swAbsorbedInClouds
+                << "LW_down_surface=" << point.longwaveDownWPerM2
+                << "LW_up_surface=" << point.longwaveUpWPerM2
+                << "net_surface_flux=" << netSurfaceFlux;
+        }
 
         convectiveSolver_.adjust(column);
 
