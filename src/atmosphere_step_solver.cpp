@@ -542,8 +542,10 @@ void AtmosphereStepSolver::runLayeredStep(const LayeredStepInput &input) {
             qBound(0.0,
                    input.cloudShortwaveTransmission * (1.0 - condensationAlbedo),
                    1.0);
+        const double safeSurfacePressureAtm =
+            qMax(static_cast<double>(point.surfacePressureAtm), 1.0e-6);
         const QVector<double> cloudColumnWeights =
-            buildCloudColumnWeights(layers, qMax(point.surfacePressureAtm, 1.0e-6));
+            buildCloudColumnWeights(layers, safeSurfacePressureAtm);
 
         // Многополосный парниковый эффект: вычисляем τ по полосам для каждого слоя,
         // затем солвер делает независимый двухпоточный перенос для каждой полосы.
