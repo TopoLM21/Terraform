@@ -70,6 +70,7 @@ add_executable(solar_constant
     include/surface_pressure_transport_model.h
     include/surface_height_model.h
     include/surface_heightmap.h
+    include/ocean_current_solver.h
     include/surface_globe_widget.h
     include/surface_point_status_dialog.h
     include/surface_atmosphere_coupler.h
@@ -140,6 +141,7 @@ add_executable(solar_constant
     src/star_color.cpp
     src/StarBackgroundRenderer.cpp
     src/StarSystemTopView.cpp
+    src/ocean_current_solver.cpp
     src/surface_advection_model.cpp
     src/surface_pressure_transport_model.cpp
     src/surface_height_model.cpp

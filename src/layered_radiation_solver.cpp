@@ -10,6 +10,10 @@ constexpr double kTwoStreamEddingtonFactor = 0.75;
 constexpr double kMinHeatCapacityJPerM2K = 1.0e-3;
 constexpr double kMaxDeltaKPerStep = 20.0;
 
+// Доли Планка для каждой ИК-полосы при ~280 K.
+// Far-IR (>17мкм) 30%, Window (8-13мкм) 38%, CO₂ (13-17мкм) 18%, H₂O+CH₄ (5-8мкм) 14%.
+constexpr double kPlanckFraction[kRadiationBandCount] = {0.30, 0.38, 0.18, 0.14};
+
 // Эмиссивность слоя в LW диапазоне для двухпоточной модели Eddington.
 // T_lw ≈ 1 / (1 + 3/4 * τ), ε = 1 - T_lw.
 double layerEmissivity(double opticalDepthLongwave) {
@@ -18,6 +22,13 @@ double layerEmissivity(double opticalDepthLongwave) {
     }
     const double transmission = 1.0 / (1.0 + kTwoStreamEddingtonFactor * opticalDepthLongwave);
     return qBound(0.0, 1.0 - transmission, 1.0);
+}
+
+// Безопасное излучение чёрного тела (σT⁴).
+double safeBlackbodyEmission(double temperatureKelvin) {
+    if (!std::isfinite(temperatureKelvin) || temperatureKelvin <= 0.0) return 0.0;
+    const double e = kStefanBoltzmannConstant * std::pow(temperatureKelvin, 4.0);
+    return std::isfinite(e) ? e : 0.0;
 }
 } // namespace
 
@@ -150,6 +161,104 @@ QVector<double> LayeredRadiationSolver::solve(const AtmosphericColumn &column,
         // Ограничиваем шаг температуры для численной устойчивости в разрежённых слоях
         // (особенно у верхней границы атмосферы с малой теплоёмкостью), при этом
         // тонкие слои всё равно должны откликаться на радиационные потоки.
+        temperatureDeltas[i] = qBound(-kMaxDeltaKPerStep, rawDelta, kMaxDeltaKPerStep);
+    }
+
+    return temperatureDeltas;
+}
+
+QVector<double> LayeredRadiationSolver::solveMultiband(
+    const AtmosphericColumn &column,
+    const QVector<BandOpticalDepths> &bandTaus,
+    double insolationWPerM2,
+    double albedo,
+    double cloudShortwaveTransmission,
+    double surfaceTemperatureKelvin,
+    SurfaceRadiativeFluxes &surfaceFluxes) const {
+    const auto &layers = column.layers();
+    const int layerCount = layers.size();
+    QVector<double> temperatureDeltas;
+    temperatureDeltas.fill(0.0, layerCount);
+    surfaceFluxes = {};
+
+    if (layerCount == 0 || timeStepSeconds_ <= 0.0 ||
+        bandTaus.size() != layerCount) {
+        return temperatureDeltas;
+    }
+
+    const double surfaceAlbedo = qBound(0.0, albedo, 1.0);
+    const double cloudTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+
+    // ── Коротковолновое: один проход (солнечный спектр, без разбивки по ИК-полосам) ──
+    QVector<double> shortwaveAbsorbed;
+    shortwaveAbsorbed.fill(0.0, layerCount);
+    double shortwaveFlux = qMax(0.0, insolationWPerM2) * cloudTransmission;
+    for (int i = layerCount - 1; i >= 0; --i) {
+        const double tauSw = qMax(0.0, layers.at(i).opticalDepthShortwave());
+        const double transmitted = shortwaveFlux * std::exp(-tauSw);
+        shortwaveAbsorbed[i] = shortwaveFlux - transmitted;
+        shortwaveFlux = transmitted;
+    }
+    surfaceFluxes.shortwaveAbsorbedWPerM2 = shortwaveFlux * (1.0 - surfaceAlbedo);
+
+    // ── Длинноволновое: независимый двухпоточный перенос для каждой ИК-полосы ──
+    const double surfaceEmission = safeBlackbodyEmission(surfaceTemperatureKelvin);
+
+    // Предвычисляем σT⁴ каждого слоя один раз.
+    QVector<double> layerEmissions(layerCount);
+    for (int i = 0; i < layerCount; ++i) {
+        layerEmissions[i] = safeBlackbodyEmission(layers.at(i).temperatureKelvin());
+    }
+
+    // Суммарные потоки на границах (layerCount+1 граница).
+    QVector<double> totalUpward(layerCount + 1, 0.0);
+    QVector<double> totalDownward(layerCount + 1, 0.0);
+
+    for (int b = 0; b < kRadiationBandCount; ++b) {
+        const double frac = kPlanckFraction[b];
+
+        // Восходящий проход: от поверхности (граница 0) вверх.
+        QVector<double> bandUp(layerCount + 1);
+        bandUp[0] = frac * surfaceEmission;
+        for (int i = 0; i < layerCount; ++i) {
+            const double eps = layerEmissivity(bandTaus.at(i).tauLw[b]);
+            const double emission = frac * eps * layerEmissions.at(i);
+            double up = bandUp.at(i) * (1.0 - eps) + emission;
+            if (!std::isfinite(up)) up = 0.0;
+            bandUp[i + 1] = up;
+        }
+
+        // Нисходящий проход: от верхней границы вниз.
+        QVector<double> bandDown(layerCount + 1);
+        bandDown[layerCount] = 0.0;
+        for (int i = layerCount - 1; i >= 0; --i) {
+            const double eps = layerEmissivity(bandTaus.at(i).tauLw[b]);
+            const double emission = frac * eps * layerEmissions.at(i);
+            double down = bandDown.at(i + 1) * (1.0 - eps) + emission;
+            if (!std::isfinite(down)) down = 0.0;
+            bandDown[i] = down;
+        }
+
+        // Суммируем по полосам.
+        for (int j = 0; j <= layerCount; ++j) {
+            totalUpward[j] += bandUp.at(j);
+            totalDownward[j] += bandDown.at(j);
+        }
+    }
+
+    // Нисходящий LW к поверхности = backradiation (сумма по всем полосам).
+    surfaceFluxes.longwaveDownWPerM2 = totalDownward[0];
+
+    // ── Температурные дельты ─────────────────────────────────────────────
+    for (int i = 0; i < layerCount; ++i) {
+        const double heatCapacity = layers.at(i).heatCapacityJPerM2K();
+        if (heatCapacity <= 0.0) continue;
+        double netLongwaveFlux =
+            (totalUpward[i] + totalDownward[i + 1]) -
+            (totalUpward[i + 1] + totalDownward[i]);
+        if (!std::isfinite(netLongwaveFlux)) netLongwaveFlux = 0.0;
+        const double netFlux = shortwaveAbsorbed[i] + netLongwaveFlux;
+        const double rawDelta = netFlux * timeStepSeconds_ / heatCapacity;
         temperatureDeltas[i] = qBound(-kMaxDeltaKPerStep, rawDelta, kMaxDeltaKPerStep);
     }
 

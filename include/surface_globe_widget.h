@@ -22,6 +22,8 @@ public:
     void setWindRange(double minMps, double maxMps);
     void setPressureRange(double minAtm, double maxAtm);
     void setPrecipitationRange(double minKgPerM2, double maxKgPerM2);
+    void setBiomassRange(double minKgPerM2, double maxKgPerM2);
+    void setOceanCurrentRange(double minMps, double maxMps);
     void setMarkupVisible(bool visible);
     void setAxisTiltDegrees(double tiltDegrees);
     void setStarDirection(const QVector3D &direction);
@@ -56,6 +58,8 @@ private:
     QColor windToColor(double speedMps) const;
     QColor pressureToColor(double pressureAtm) const;
     QColor precipitationToColor(double precipitationKgPerM2) const;
+    QColor biomassToColor(double biomassKgPerM2) const;
+    QColor oceanCurrentToColor(double speedMps, bool isOcean) const;
     QColor applyLighting(const QColor &baseColor, double lightFactor) const;
     double pointRadiusPx(int pointCount, double sphereRadiusPx) const;
     QVector3D applyRotation(const QVector3D &v) const;
@@ -74,6 +78,10 @@ private:
     double maxPressureAtm_ = 2.0;
     double minPrecipitationKgPerM2_ = 0.0;
     double maxPrecipitationKgPerM2_ = 0.0;
+    double minBiomassKgPerM2_ = 0.0;
+    double maxBiomassKgPerM2_ = 15.0;
+    double minOceanCurrentMps_ = 0.0;
+    double maxOceanCurrentMps_ = 1.0;
     float yawDeg_ = 0.0f;
     float pitchDeg_ = 0.0f;
     QPoint lastMousePos_;

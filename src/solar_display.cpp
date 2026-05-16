@@ -114,8 +114,12 @@ void setSolarDebugLoggingEnabled(bool enabled) {
                                 "solar.radiation.debug=%1\n"
                                 "solar.atmosphere.profile.info=%1\n"
                                 "solar.atmosphere.profile.debug=%1\n"
+                                "solar.atmosphere.mass.info=%1\n"
+                                "solar.atmosphere.mass.debug=%1\n"
                                 "solar.atmosphere.vertical_mixing.info=%1\n"
-                                "solar.atmosphere.vertical_mixing.debug=%1")
+                                "solar.atmosphere.vertical_mixing.debug=%1\n"
+                                "solar.atmosphere.vertical_moisture_mixing.info=%1\n"
+                                "solar.atmosphere.vertical_moisture_mixing.debug=%1")
                      .arg(flagValue));
     QLoggingCategory::setFilterRules(rules);
 }
@@ -141,16 +145,22 @@ double denseAtmosphereMinTemperatureKelvin(double effectiveTemperatureKelvin,
                                            double greenhouseOpacity,
                                            double co2Share,
                                            double minDenseAtmosphereTemperatureK) {
-    Q_UNUSED(effectiveTemperatureKelvin)
-    Q_UNUSED(pressureAtm)
     Q_UNUSED(greenhouseOpacity)
-    Q_UNUSED(co2Share)
     Q_UNUSED(minDenseAtmosphereTemperatureK)
-    // Никаких искусственных минимумов: физика (радиация, парниковый эффект,
-    // адвекция) сама определяет равновесную температуру. Это позволяет
-    // свободно охлаждать/нагревать планеты при терраформинге.
-    // Единственный пол — 3 K (реликтовое излучение).
-    return 3.0;
+    // Оценка парникового прогрева: T_surface ≈ T_eff × (1 + 0.75 × τ)^0.25.
+    // τ ∝ P² × f_co2 (уширение линий давлением + логарифмическое насыщение).
+    // Никаких пресетных минимумов — физика сама определяет температуру.
+    //
+    // Для Венеры (92 атм, 96% CO₂): τ ≈ 9.1, фактор ≈ 2.9, T_init ≈ 660 K.
+    // Для Земли (1 атм, 0.06% CO₂): τ ≈ 1.0, фактор ≈ 1.2, T_init ≈ 306 K.
+    // Для Марса (0.006 атм, 95% CO₂): τ ≈ 0.15, фактор ≈ 1.03, T_init ≈ 215 K.
+    if (effectiveTemperatureKelvin > 0.0 && pressureAtm > 0.0 && co2Share > 0.0) {
+        const double tauEstimate =
+            0.5 * std::log1p(10000.0 * pressureAtm * pressureAtm * co2Share);
+        const double greenhouseFactor = std::pow(1.0 + 0.75 * tauEstimate, 0.25);
+        return effectiveTemperatureKelvin * greenhouseFactor;
+    }
+    return qMax(3.0, effectiveTemperatureKelvin);
 }
 
 constexpr int kRoleSemiMajorAxis = Qt::UserRole;
@@ -832,9 +842,15 @@ struct SurfaceGridComputationResult {
     bool hasPrecipitationRange = false;
     double minPrecipitationKgPerM2 = 0.0;
     double maxPrecipitationKgPerM2 = 0.0;
+    bool hasBiomassRange = false;
+    double minBiomassKgPerM2 = 0.0;
+    double maxBiomassKgPerM2 = 0.0;
     bool hasWindRange = false;
     double minWindSpeedMps = 0.0;
     double maxWindSpeedMps = 0.0;
+    bool hasOceanCurrentRange = false;
+    double minOceanCurrentMps = 0.0;
+    double maxOceanCurrentMps = 0.0;
     double declinationDegrees = 0.0;
     double orbitalPhaseRadians = 0.0;
     int stepsPerDay = 1;
@@ -1403,6 +1419,10 @@ public:
                                          static_cast<int>(SurfaceMapMode::Pressure));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Осадки"),
                                          static_cast<int>(SurfaceMapMode::Precipitation));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Биомасса"),
+                                         static_cast<int>(SurfaceMapMode::Biomass));
+        surfaceMapModeComboBox_->addItem(QStringLiteral("Океанские течения"),
+                                         static_cast<int>(SurfaceMapMode::OceanCurrents));
         surfaceMapModeComboBox_->addItem(QStringLiteral("Реалистичный"),
                                          static_cast<int>(SurfaceMapMode::Realistic));
         subsurfaceLayersSpinBox_ = new QSpinBox(this);
@@ -1520,12 +1540,136 @@ public:
                     subsurfaceToggleButton->setArrowType(checked ? Qt::DownArrow
                                                                 : Qt::RightArrow);
                 });
+        // ── Терраформирование: простые инструменты ──────────────────────────
+        // Лямбда-хелпер: обновляет состав атмосферы БЕЗ сброса симуляции.
+        // Новый состав подхватывается на следующем шаге (solver пересоздаётся каждый шаг).
+        auto addGasLambda = [this](const QString &gasId, double amountGt) {
+            if (!atmosphereWidget_ || !planetComboBox_ ||
+                planetComboBox_->currentIndex() < 0) return;
+            auto composition = atmosphereWidget_->composition(true);
+            const double current = composition.massGigatons(gasId);
+            composition.setMassGigatons(gasId, qMax(0.0, current + amountGt));
+            atmosphereWidget_->setComposition(composition);
+            const int index = planetComboBox_->currentIndex();
+            planetComboBox_->setItemData(
+                index, QVariant::fromValue(composition), kRoleAtmosphere);
+            // НЕ вызываем updateSurfaceGridTemperatures(): это сбрасывает модель.
+        };
+
+        // Множитель количества для терраформирования.
+        auto *terraformMultiplierCombo = new QComboBox(this);
+        terraformMultiplierCombo->addItem(QStringLiteral("×0.1"), 0.1);
+        terraformMultiplierCombo->addItem(QStringLiteral("×1"), 1.0);
+        terraformMultiplierCombo->addItem(QStringLiteral("×10"), 10.0);
+        terraformMultiplierCombo->addItem(QStringLiteral("×100"), 100.0);
+        terraformMultiplierCombo->addItem(QStringLiteral("×1000"), 1000.0);
+        terraformMultiplierCombo->setCurrentIndex(1); // ×1 по умолчанию
+        terraformMultiplierCombo->setToolTip(QStringLiteral(
+            "Множитель количества для кнопок терраформирования"));
+        terraformMultiplierCombo->setMaximumWidth(70);
+
+        auto *terraformLayout = new QHBoxLayout();
+        auto *addWaterButton = new QPushButton(QStringLiteral("+Вода"), this);
+        addWaterButton->setToolTip(QStringLiteral(
+            "Добавить воду на поверхность (базово 50 кг/м²)"));
+        auto *addSF6Button = new QPushButton(QStringLiteral("+SF₆"), this);
+        addSF6Button->setToolTip(QStringLiteral(
+            "Гексафторид серы (базово 10 Гт, GWP ≈ 23500, τ ≈ 3200 лет)"));
+        auto *addNF3Button = new QPushButton(QStringLiteral("+NF₃"), this);
+        addNF3Button->setToolTip(QStringLiteral(
+            "Трифторид азота (базово 10 Гт, GWP ≈ 17200, τ ≈ 550 лет)"));
+        auto *addCH4Button = new QPushButton(QStringLiteral("+CH₄"), this);
+        addCH4Button->setToolTip(QStringLiteral(
+            "Метан (базово 100 Гт, GWP ≈ 30, τ ≈ 12 лет, → CO₂)"));
+        auto *addNH3Button = new QPushButton(QStringLiteral("+NH₃"), this);
+        addNH3Button->setToolTip(QStringLiteral(
+            "Аммиак (базово 100 Гт, τ ≈ 14 дней)"));
+        auto *addCO2Button = new QPushButton(QStringLiteral("+CO₂"), this);
+        addCO2Button->setToolTip(QStringLiteral(
+            "Углекислый газ (базово +10% или мин. 100 Гт)"));
+        auto *removeCO2Button = new QPushButton(QStringLiteral("−CO₂"), this);
+        removeCO2Button->setToolTip(QStringLiteral(
+            "Удалить 10% CO₂ (с учётом множителя)"));
+        terraformLayout->addWidget(terraformMultiplierCombo);
+        terraformLayout->addWidget(addWaterButton);
+        terraformLayout->addWidget(addCO2Button);
+        terraformLayout->addWidget(removeCO2Button);
+        terraformLayout->addWidget(addCH4Button);
+        terraformLayout->addWidget(addNH3Button);
+        terraformLayout->addWidget(addSF6Button);
+        terraformLayout->addWidget(addNF3Button);
+        terraformLayout->addStretch();
+        connect(addWaterButton, &QPushButton::clicked, this,
+                [this, terraformMultiplierCombo]() {
+            if (surfaceGrid_.points().isEmpty()) return;
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            const double amount = 50.0 * mult;
+            for (auto &point : surfaceGrid_.points()) {
+                if (point.materialId == QLatin1String("ocean") &&
+                    point.waterPhase == PhaseModel::Phase::Liquid) {
+                    continue;
+                }
+                point.surfaceMoisture.addPrecipitation(amount);
+            }
+            if (surfaceViewStack_ && surfaceViewStack_->currentWidget()) {
+                surfaceViewStack_->currentWidget()->update();
+            }
+        });
+        connect(addSF6Button, &QPushButton::clicked, this,
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            addGasLambda(QStringLiteral("sf6"), 10.0 * mult);
+        });
+        connect(addNF3Button, &QPushButton::clicked, this,
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            addGasLambda(QStringLiteral("nf3"), 10.0 * mult);
+        });
+        connect(addCH4Button, &QPushButton::clicked, this,
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            addGasLambda(QStringLiteral("ch4"), 100.0 * mult);
+        });
+        connect(addNH3Button, &QPushButton::clicked, this,
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            addGasLambda(QStringLiteral("nh3"), 100.0 * mult);
+        });
+        connect(addCO2Button, &QPushButton::clicked, this,
+                [this, addGasLambda, terraformMultiplierCombo]() {
+            if (!atmosphereWidget_ || !planetComboBox_ ||
+                planetComboBox_->currentIndex() < 0) return;
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            auto composition = atmosphereWidget_->composition(true);
+            const double currentCO2 = composition.massGigatons(QStringLiteral("co2"));
+            const double addAmount = qMax(100.0, currentCO2 * 0.1) * mult;
+            addGasLambda(QStringLiteral("co2"), addAmount);
+        });
+        connect(removeCO2Button, &QPushButton::clicked, this,
+                [this, terraformMultiplierCombo]() {
+            if (!atmosphereWidget_ || !planetComboBox_ ||
+                planetComboBox_->currentIndex() < 0) return;
+            const double mult = terraformMultiplierCombo->currentData().toDouble();
+            auto composition = atmosphereWidget_->composition(true);
+            const double currentCO2 = composition.massGigatons(QStringLiteral("co2"));
+            if (currentCO2 <= 0.0) return;
+            // Удаляем fraction = 1 - (1-0.1)^mult ≈ 10%×mult для малых mult.
+            const double keepFraction = std::pow(0.9, mult);
+            composition.setMassGigatons(QStringLiteral("co2"),
+                                         qMax(0.0, currentCO2 * keepFraction));
+            atmosphereWidget_->setComposition(composition);
+            const int index = planetComboBox_->currentIndex();
+            planetComboBox_->setItemData(
+                index, QVariant::fromValue(composition), kRoleAtmosphere);
+        });
+
         auto *surfaceMapLayout = new QVBoxLayout();
         surfaceMapLayout->addLayout(surfaceLegendTopLayout);
         surfaceMapLayout->addLayout(surfaceControlLayout);
         surfaceMapLayout->addLayout(surfaceCalculationLayout);
         surfaceMapLayout->addWidget(subsurfaceToggleButton);
         surfaceMapLayout->addWidget(subsurfaceGroupBox);
+        surfaceMapLayout->addLayout(terraformLayout);
         surfaceMapLayout->addWidget(surfaceViewStack_, 1);
         surfaceMapLayout->addLayout(surfaceLegendBottomLayout);
         surfaceMapContainer_ = new QWidget(this);
@@ -2249,6 +2393,12 @@ private:
     double surfaceMinPrecipitationKgPerM2_ = 0.0;
     double surfaceMaxPrecipitationKgPerM2_ = 0.0;
     bool hasSurfacePrecipitationRange_ = false;
+    double surfaceMinBiomassKgPerM2_ = 0.0;
+    double surfaceMaxBiomassKgPerM2_ = 0.0;
+    bool hasSurfaceBiomassRange_ = false;
+    double surfaceMinOceanCurrentMps_ = 0.0;
+    double surfaceMaxOceanCurrentMps_ = 0.0;
+    bool hasSurfaceOceanCurrentRange_ = false;
     SurfaceMapMode surfaceMapMode_ = SurfaceMapMode::Temperature;
     bool autoCalculateEnabled_ = false;
     double surfaceSimSpeedMultiplier_ = 1.0;
@@ -5086,6 +5236,24 @@ private:
         }
     }
 
+    void applySurfaceBiomassRangeToViews(double minKgPerM2, double maxKgPerM2) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setBiomassRange(minKgPerM2, maxKgPerM2);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setBiomassRange(minKgPerM2, maxKgPerM2);
+        }
+    }
+
+    void applySurfaceOceanCurrentRangeToViews(double minMps, double maxMps) {
+        if (surfaceMapWidget_) {
+            surfaceMapWidget_->setOceanCurrentRange(minMps, maxMps);
+        }
+        if (surfaceGlobeWidget_) {
+            surfaceGlobeWidget_->setOceanCurrentRange(minMps, maxMps);
+        }
+    }
+
     void applySurfaceCloudOpacityBoost(double boost) {
         if (surfaceMapWidget_) {
             surfaceMapWidget_->setCloudOpacityBoost(boost);
@@ -5111,6 +5279,12 @@ private:
         } else if (mode == SurfaceMapMode::Precipitation && hasSurfacePrecipitationRange_) {
             applySurfacePrecipitationRangeToViews(surfaceMinPrecipitationKgPerM2_,
                                                   surfaceMaxPrecipitationKgPerM2_);
+        } else if (mode == SurfaceMapMode::Biomass && hasSurfaceBiomassRange_) {
+            applySurfaceBiomassRangeToViews(surfaceMinBiomassKgPerM2_,
+                                            surfaceMaxBiomassKgPerM2_);
+        } else if (mode == SurfaceMapMode::OceanCurrents && hasSurfaceOceanCurrentRange_) {
+            applySurfaceOceanCurrentRangeToViews(surfaceMinOceanCurrentMps_,
+                                                  surfaceMaxOceanCurrentMps_);
         }
         refreshSurfaceLegend();
     }
@@ -5699,6 +5873,27 @@ private:
                                              input.stateDefaults.material);
         result.resolvedSubsurfaceSettings = tileResult.resolvedSubsurfaceSettings;
 
+        // Для послойной модели плотных атмосфер поднимаем стартовую температуру
+        // поверхности до парникового уровня. Без этого поверхность начинает
+        // при T_eq ≈ 232 K (Венера), а атмосфера при ~388 K, что создаёт
+        // нефизичный начальный скачок и затягивает выход на равновесие.
+        if (input.radiationModelType == RadiationModelType::Layered &&
+            atmospherePressureAtm >= 0.1 && co2Share > 0.0) {
+            const double denseAtmosphereBase =
+                denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                    atmospherePressureAtm,
+                                                    input.stateDefaults.greenhouseOpacity,
+                                                    co2Share,
+                                                    input.minDenseAtmosphereTemperatureK);
+            for (auto &point : result.grid.points()) {
+                if (point.temperatureK < denseAtmosphereBase) {
+                    point.state.setProfileTemperatureKelvin(denseAtmosphereBase);
+                    point.temperatureK = point.state.temperatureKelvin();
+                    point.airTemperatureK = denseAtmosphereBase;
+                }
+            }
+        }
+
         // Инициализируем запас поверхностной влаги: распределяем общий объём воды
         // (surfaceWaterGigatons) по площадям ниже уровня моря. Формула:
         // water_kg_per_m2 = (M_water_gt * 1e12 кг/гт) / (A_wet_m2),
@@ -5748,12 +5943,17 @@ private:
         QVector<double> baselineAirTemperatures = tileResult.baselineAirTemperatures;
         const double timeStepSeconds = 3600.0;
         // Коэффициент прохождения коротковолнового излучения через облака.
+        // Для плотных облаков (Венера) часть потока поглощается облаками —
+        // эта энергия не теряется, а депозитируется в верхние слои атмосферы.
         double cloudShortwaveTransmission = 1.0 - input.cloudAlbedo;
+        double cloudAbsorptionFraction = 0.0;
         if (input.cloudAlbedo > 0.7) {
-            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            // Плотные сернокислотные облака поглощают ~80% прошедшего потока.
+            cloudAbsorptionFraction = cloudShortwaveTransmission * 0.8;
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+        cloudAbsorptionFraction = qBound(0.0, cloudAbsorptionFraction, 1.0);
         if (localInsolations.size() != result.grid.points().size()) {
             localInsolations.clear();
             localInsolations.resize(result.grid.points().size());
@@ -5770,6 +5970,10 @@ private:
         double maxPressureAtm = std::numeric_limits<double>::lowest();
         double minPrecipitation = std::numeric_limits<double>::max();
         double maxPrecipitation = std::numeric_limits<double>::lowest();
+        double minBiomass = std::numeric_limits<double>::max();
+        double maxBiomass = std::numeric_limits<double>::lowest();
+        double minOceanCurrent = std::numeric_limits<double>::max();
+        double maxOceanCurrent = std::numeric_limits<double>::lowest();
         const int logPointIndex = qBound(0, input.logPointIndex, result.grid.points().size() - 1);
         for (int i = 0; i < result.grid.points().size(); ++i) {
             if ((i % 64) == 0 && shouldCancel()) {
@@ -5842,6 +6046,10 @@ private:
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
             maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
+            minBiomass = qMin(minBiomass, point.vegetationBiomass);
+            maxBiomass = qMax(maxBiomass, point.vegetationBiomass);
+            minOceanCurrent = qMin(minOceanCurrent, point.oceanCurrentSpeedMps);
+            maxOceanCurrent = qMax(maxOceanCurrent, point.oceanCurrentSpeedMps);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const auto materialIt = input.materialsById.constFind(point.materialId);
@@ -5982,6 +6190,12 @@ private:
         result.hasPrecipitationRange = minPrecipitation <= maxPrecipitation;
         result.minPrecipitationKgPerM2 = minPrecipitation;
         result.maxPrecipitationKgPerM2 = maxPrecipitation;
+        result.hasBiomassRange = minBiomass <= maxBiomass;
+        result.minBiomassKgPerM2 = minBiomass;
+        result.maxBiomassKgPerM2 = maxBiomass;
+        result.hasOceanCurrentRange = minOceanCurrent <= maxOceanCurrent;
+        result.minOceanCurrentMps = minOceanCurrent;
+        result.maxOceanCurrentMps = maxOceanCurrent;
 
         double meanSurfaceTemperatureKelvin = 0.0;
         int meanSurfaceSamples = 0;
@@ -6018,6 +6232,19 @@ private:
             baseTemperatureKelvin =
                 (baselineMeanTemperature > 0.0) ? baselineMeanTemperature
                                                 : qMax(1.0, input.stateDefaults.minTemperatureKelvin);
+        }
+        // Для плотных атмосфер (Венера, 92 атм CO₂) профиль должен стартовать
+        // не от T_eff, а от нижней границы парникового прогрева. Без этого
+        // огромная теплоёмкость атмосферного столба (≈ P/g × Cp) делает
+        // радиативный прогрев незаметным: при 92 атм нужны миллионы шагов.
+        if (atmospherePressureAtm >= 0.1) {
+            const double denseAtmosphereBase =
+                denseAtmosphereMinTemperatureKelvin(effectiveTemperatureKelvin,
+                                                    atmospherePressureAtm,
+                                                    input.stateDefaults.greenhouseOpacity,
+                                                    co2Share,
+                                                    input.minDenseAtmosphereTemperatureK);
+            baseTemperatureKelvin = qMax(baseTemperatureKelvin, denseAtmosphereBase);
         }
         if (meanSurfaceTemperatureKelvin > 0.0) {
             // Безводные планеты (surfaceWaterGigatons == 0) не имеют источника
@@ -6169,6 +6396,26 @@ private:
         } else {
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
         }
+        if (result.hasBiomassRange &&
+            result.minBiomassKgPerM2 <= result.maxBiomassKgPerM2) {
+            applySurfaceBiomassRangeToViews(result.minBiomassKgPerM2,
+                                             result.maxBiomassKgPerM2);
+            updateSurfaceBiomassLegend(true,
+                                        result.minBiomassKgPerM2,
+                                        result.maxBiomassKgPerM2);
+        } else {
+            updateSurfaceBiomassLegend(false, 0.0, 0.0);
+        }
+        if (result.hasOceanCurrentRange &&
+            result.minOceanCurrentMps <= result.maxOceanCurrentMps) {
+            applySurfaceOceanCurrentRangeToViews(result.minOceanCurrentMps,
+                                                  result.maxOceanCurrentMps);
+            updateSurfaceOceanCurrentLegend(true,
+                                             result.minOceanCurrentMps,
+                                             result.maxOceanCurrentMps);
+        } else {
+            updateSurfaceOceanCurrentLegend(false, 0.0, 0.0);
+        }
         if (result.hasWindRange && result.minWindSpeedMps <= result.maxWindSpeedMps) {
             applySurfaceWindRangeToViews(result.minWindSpeedMps, result.maxWindSpeedMps);
             updateSurfaceWindLegend(true, result.minWindSpeedMps, result.maxWindSpeedMps);
@@ -6196,6 +6443,8 @@ private:
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
+            updateSurfaceBiomassLegend(false, 0.0, 0.0);
+            updateSurfaceOceanCurrentLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
             resumeSurfaceSimulationAfterGridUpdate();
             return;
@@ -6209,6 +6458,8 @@ private:
             updateSurfaceWindLegend(false, 0.0, 0.0);
             updateSurfacePressureLegend(false, 0.0, 0.0);
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
+            updateSurfaceBiomassLegend(false, 0.0, 0.0);
+            updateSurfaceOceanCurrentLegend(false, 0.0, 0.0);
             setSurfaceGridCalculationRunning(false);
             resumeSurfaceSimulationAfterGridUpdate();
             return;
@@ -6598,11 +6849,13 @@ private:
         const double timeStepSeconds = 3600.0;
         // Коэффициент прохождения коротковолнового излучения через облака.
         double cloudShortwaveTransmission = 1.0 - cloudAlbedo;
+        double cloudAbsorptionFraction = 0.0;
         if (cloudAlbedo > 0.7) {
-            // Для плотных сернокислотных облаков дополнительно ослабляем поток к поверхности.
+            cloudAbsorptionFraction = cloudShortwaveTransmission * 0.8;
             cloudShortwaveTransmission *= 0.2;
         }
         cloudShortwaveTransmission = qBound(0.0, cloudShortwaveTransmission, 1.0);
+        cloudAbsorptionFraction = qBound(0.0, cloudAbsorptionFraction, 1.0);
         auto &atmosphereGrid = surfaceGrid_.atmosphericGrid();
         const bool useLayeredAtmosphere =
             useAtmosphericModel && radiationModelType == RadiationModelType::Layered &&
@@ -6682,6 +6935,13 @@ private:
                 segmentSolarConstant * clampedCosZenith;
             localInsolations.push_back(localInsolation);
             localCosZeniths.push_back(clampedCosZenith);
+            // В послойном режиме радиационный баланс целиком рассчитывается
+            // в AtmosphereStepSolver::runLayeredStep (двухпоточная модель Эддингтона).
+            // Простая модель здесь НЕ должна обновлять температуру поверхности,
+            // иначе поверхность получает ДВОЙНОЕ радиационное воздействие за шаг:
+            // слабый парник простой модели добавляет лишнее охлаждение ночью →
+            // неразрушимый снежок даже при 4 кВт/м².
+            if (!useLayeredAtmosphere) {
             // Стабилизация для плотных атмосфер (см. computeLocalGreenhouseOpacity):
             // t_eff недостаточна для сверхплотных атмосфер (например, Венера),
             // поэтому минимальная база зависит от давления и состава.
@@ -6736,6 +6996,7 @@ private:
             point.state.updateTemperature(absorbedFlux, emittedFlux, timeStepSeconds);
             // Обновляем поверхностную температуру до переноса в соседние точки.
             point.temperatureK = point.state.temperatureKelvin();
+            } // !useLayeredAtmosphere
             updateOceanPhaseAndAlbedo(point, clampedCosZenith);
         }
 
@@ -6775,6 +7036,10 @@ private:
         double maxPressureAtm = std::numeric_limits<double>::lowest();
         double minPrecipitation = std::numeric_limits<double>::max();
         double maxPrecipitation = std::numeric_limits<double>::lowest();
+        double minBiomass = std::numeric_limits<double>::max();
+        double maxBiomass = std::numeric_limits<double>::lowest();
+        double minOceanCurrent = std::numeric_limits<double>::max();
+        double maxOceanCurrent = std::numeric_limits<double>::lowest();
         for (int i = 0; i < surfaceGrid_.points().size(); ++i) {
             auto &point = surfaceGrid_.points()[i];
             const double advectedAtm = advectedPressures.at(i);
@@ -6832,6 +7097,10 @@ private:
             maxPressureAtm = qMax(maxPressureAtm, point.pressureAtm);
             minPrecipitation = qMin(minPrecipitation, point.precipitationKgPerM2);
             maxPrecipitation = qMax(maxPrecipitation, point.precipitationKgPerM2);
+            minBiomass = qMin(minBiomass, point.vegetationBiomass);
+            maxBiomass = qMax(maxBiomass, point.vegetationBiomass);
+            minOceanCurrent = qMin(minOceanCurrent, point.oceanCurrentSpeedMps);
+            maxOceanCurrent = qMax(maxOceanCurrent, point.oceanCurrentSpeedMps);
             const double localInsolation =
                 (i < localInsolations.size()) ? localInsolations.at(i) : 0.0;
             const SurfaceMaterial material = materialForPoint(point);
@@ -6912,7 +7181,9 @@ private:
                                             gravity,
                                             timeStepSeconds,
                                             dayLengthSeconds,
-                                            isRetrograde);
+                                            isRetrograde,
+                                            massEarths,
+                                            radiusKm);
             AtmosphereStepSolver::LayeredStepInput stepInput{surfaceGrid_,
                                                             atmosphereGrid,
                                                             localInsolations,
@@ -6920,12 +7191,27 @@ private:
                                                             materialsById,
                                                             *defaultMaterial,
                                                             cloudShortwaveTransmission,
+                                                            cloudAbsorptionFraction,
                                                             kDefaultHeatTransferWPerM2K};
             stepInput.verticalWindMixingCoefficientKz = currentVerticalWindMixingCoefficientKz();
             stepInput.verticalMoistureMixingCoefficientKz =
                 currentVerticalWindMixingCoefficientKz();
             stepInput.logPointIndex = selectedSurfacePointIndex_;
             stepSolver.runLayeredStep(stepInput);
+
+            // Разложение газов и атмосферное убегание.
+            // Экзосферная температура ≈ 1.5× эффективной (грубая оценка).
+            const double exoTemp = qMax(150.0, effectiveTemperatureKelvin * 1.5);
+            auto updatedAtmosphere = currentAtmosphereForCalculations();
+            if (AtmosphereStepSolver::applyGasChemistryAndEscape(
+                    updatedAtmosphere, timeStepSeconds, massEarths, radiusKm, exoTemp)) {
+                const int idx = planetComboBox_->currentIndex();
+                if (idx >= 0) {
+                    planetComboBox_->setItemData(
+                        idx, QVariant::fromValue(updatedAtmosphere), kRoleAtmosphere);
+                    atmosphereWidget_->setComposition(updatedAtmosphere);
+                }
+            }
         }
 
         // Поверхностный шаг: таяние/сток снега выполняем после атмосферного блока,
@@ -7071,6 +7357,18 @@ private:
         } else {
             updateSurfacePrecipitationLegend(false, 0.0, 0.0);
         }
+        if (minBiomass <= maxBiomass) {
+            applySurfaceBiomassRangeToViews(minBiomass, maxBiomass);
+            updateSurfaceBiomassLegend(true, minBiomass, maxBiomass);
+        } else {
+            updateSurfaceBiomassLegend(false, 0.0, 0.0);
+        }
+        if (minOceanCurrent <= maxOceanCurrent) {
+            applySurfaceOceanCurrentRangeToViews(minOceanCurrent, maxOceanCurrent);
+            updateSurfaceOceanCurrentLegend(true, minOceanCurrent, maxOceanCurrent);
+        } else {
+            updateSurfaceOceanCurrentLegend(false, 0.0, 0.0);
+        }
 
         const bool publishDaily = surfaceTime_.hourIndex + 1 >= solarStepsPerDay;
         updateSurfaceTemperatureAggregation(publishDaily, rotationMode, useAtmosphericModel);
@@ -7133,6 +7431,32 @@ private:
             surfaceMaxPrecipitationKgPerM2_ = maxPrecipitationKgPerM2;
         }
         if (surfaceMapMode_ == SurfaceMapMode::Precipitation) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceBiomassLegend(bool hasRange,
+                                     double minBiomassKgPerM2,
+                                     double maxBiomassKgPerM2) {
+        hasSurfaceBiomassRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinBiomassKgPerM2_ = minBiomassKgPerM2;
+            surfaceMaxBiomassKgPerM2_ = maxBiomassKgPerM2;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::Biomass) {
+            refreshSurfaceLegend();
+        }
+    }
+
+    void updateSurfaceOceanCurrentLegend(bool hasRange,
+                                          double minMps,
+                                          double maxMps) {
+        hasSurfaceOceanCurrentRange_ = hasRange;
+        if (hasRange) {
+            surfaceMinOceanCurrentMps_ = minMps;
+            surfaceMaxOceanCurrentMps_ = maxMps;
+        }
+        if (surfaceMapMode_ == SurfaceMapMode::OceanCurrents) {
             refreshSurfaceLegend();
         }
     }
@@ -7311,6 +7635,40 @@ private:
                     surfaceMinPrecipitationKgPerM2_,
                     surfaceMaxPrecipitationKgPerM2_);
             }
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::Biomass) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
+            }
+            if (!hasSurfaceBiomassRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 кг/м²").arg(locale.toString(surfaceMinBiomassKgPerM2_, 'f', 2)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 кг/м²").arg(locale.toString(surfaceMaxBiomassKgPerM2_, 'f', 2)));
+            return;
+        }
+
+        if (surfaceMapMode_ == SurfaceMapMode::OceanCurrents) {
+            if (surfaceLegendScaleStack_) {
+                surfaceLegendScaleStack_->setCurrentWidget(temperatureScaleWidget_);
+            }
+            if (!hasSurfaceOceanCurrentRange_) {
+                surfaceMinTemperatureLabel_->setText(QStringLiteral("Мин: —"));
+                surfaceMaxTemperatureLabel_->setText(QStringLiteral("Макс: —"));
+                return;
+            }
+
+            surfaceMinTemperatureLabel_->setText(
+                QStringLiteral("Мин: %1 м/с").arg(locale.toString(surfaceMinOceanCurrentMps_, 'f', 3)));
+            surfaceMaxTemperatureLabel_->setText(
+                QStringLiteral("Макс: %1 м/с").arg(locale.toString(surfaceMaxOceanCurrentMps_, 'f', 3)));
             return;
         }
 

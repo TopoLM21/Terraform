@@ -3,7 +3,7 @@
 #include "rotation_mode.h"
 #include "surface_temperature_calculator.h"
 
-#include <qwt-qt5/qwt_plot_picker.h>
+#include <qwt/qwt_plot_picker.h>
 #include <QtCore/QString>
 
 class TemperaturePlotTracker : public QwtPlotPicker {

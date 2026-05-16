@@ -21,6 +21,8 @@ public:
     void setWindRange(double minMps, double maxMps);
     void setPressureRange(double minAtm, double maxAtm);
     void setPrecipitationRange(double minKgPerM2, double maxKgPerM2);
+    void setBiomassRange(double minKgPerM2, double maxKgPerM2);
+    void setOceanCurrentRange(double minMps, double maxMps);
     void setInterpolationEnabled(bool enabled);
     void setRenderScale(double scale);
     void setInterpolationNeighborCount(int neighborCount);
@@ -42,6 +44,9 @@ private:
     QRgb windToColor(double speedMps) const;
     QRgb pressureToColor(double pressureAtm) const;
     QRgb precipitationToColor(double precipitationKgPerM2) const;
+    QRgb biomassToColor(double biomassKgPerM2) const;
+    QRgb oceanCurrentToColor(double speedMps, bool isOcean) const;
+    void drawOceanCurrentArrows(QPainter &painter, const QSize &imageSize) const;
     int pointIdAt(const QPoint &pixel) const;
     QString formatPointTooltip(const SurfacePoint &point, int pointIndex) const;
     double tileAreaKm2(int pointIndex) const;
@@ -66,6 +71,10 @@ private:
     double maxPressureAtm_ = 2.0;
     double minPrecipitationKgPerM2_ = 0.0;
     double maxPrecipitationKgPerM2_ = 0.0;
+    double minBiomassKgPerM2_ = 0.0;
+    double maxBiomassKgPerM2_ = 15.0;
+    double minOceanCurrentMps_ = 0.0;
+    double maxOceanCurrentMps_ = 1.0;
     bool interpolationEnabled_ = false;
     double renderScale_ = 1.0;
     int neighborCount_ = 8;

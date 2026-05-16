@@ -86,10 +86,15 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
         (point.materialId == QLatin1String("ocean") && point.waterPhase == PhaseModel::Phase::Ice)
             ? QStringLiteral("ice")
             : point.materialId;
+    // Жидкий океан — без растительности и снега; замёрзший — как суша.
+    const bool isLiquidOcean =
+        (point.materialId == QLatin1String("ocean") &&
+         point.waterPhase == PhaseModel::Phase::Liquid);
+
     const QColor materialColor = baseColorForMaterialId(effectiveMaterialId);
     if (materialColor.isValid()) {
         const QColor heightTinted = applyHeightTint(materialColor, normalizedHeight);
-        if (point.materialId != QLatin1String("ocean")) {
+        if (!isLiquidOcean) {
             const double vegetationBlend =
                 qBound(0.0, point.vegetationFraction * point.vegetationBlendMask, 1.0);
             const QColor vegetated = applyVegetationTint(heightTinted, vegetationBlend);
@@ -103,7 +108,7 @@ QColor realisticSurfaceColor(const SurfacePoint &point,
     const QColor fallbackMaterial = baseColorForMaterialId(QStringLiteral("rocky"));
     const QColor fallbackBase = fallbackMaterial.isValid() ? fallbackMaterial : QColor(128, 128, 128);
     const QColor heightTinted = applyHeightTint(fallbackBase, normalizedHeight);
-    if (point.materialId != QLatin1String("ocean")) {
+    if (!isLiquidOcean) {
         const double vegetationBlend =
             qBound(0.0, point.vegetationFraction * point.vegetationBlendMask, 1.0);
         const QColor vegetated = applyVegetationTint(heightTinted, vegetationBlend);
